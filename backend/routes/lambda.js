@@ -80,13 +80,13 @@ router.get('/integrations', authenticateToken, async (req, res) => {
 // Create integration
 router.post('/integrations', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const { name, functionName, region, accessKeyId, secretAccessKey, clientId } = req.body;
 
   if (!name || !functionName || !region || !accessKeyId || !secretAccessKey) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
   }
 
   let resolvedClientId = clientId || null;
@@ -94,7 +94,7 @@ router.post('/integrations', authenticateToken, async (req, res) => {
   if (resolvedClientId) {
     const clientResult = await query('SELECT id FROM users WHERE id = $1 AND role = $2 AND company_id = $3 AND is_active = TRUE', [resolvedClientId, 'client', req.user.companyId]);
     if (clientResult.rowCount === 0) {
-      return res.status(400).json({ error: 'Client user not found' });
+      return res.status(400).json({ error: 'Cliente não encontrado' });
     }
   }
 
@@ -126,14 +126,14 @@ router.post('/integrations', authenticateToken, async (req, res) => {
 // Delete integration
 router.delete('/integrations/:integrationId', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const integrationId = parseInt(req.params.integrationId);
   const integration = await getIntegrationForUser(integrationId, req.user);
 
   if (!integration) {
-    return res.status(404).json({ error: 'Integration not found' });
+    return res.status(404).json({ error: 'Integração não encontrada' });
   }
 
   await query('DELETE FROM integrations WHERE id = $1 AND company_id = $2', [integrationId, req.user.companyId]);
@@ -156,7 +156,7 @@ router.get('/functions/:integrationId', authenticateToken, async (req, res) => {
   const integration = await getIntegrationForUser(integrationId, req.user);
 
   if (!integration) {
-    return res.status(404).json({ error: 'Integration not found' });
+    return res.status(404).json({ error: 'Integração não encontrada' });
   }
 
   try {
@@ -193,7 +193,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
   const integration = await getIntegrationForUser(integrationId, req.user);
 
   if (!integration) {
-    return res.status(404).json({ error: 'Integration not found' });
+    return res.status(404).json({ error: 'Integração não encontrada' });
   }
 
   try {
@@ -305,7 +305,7 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
   const integration = await getIntegrationForUser(integrationId, req.user);
 
   if (!integration) {
-    return res.status(404).json({ error: 'Integration not found' });
+    return res.status(404).json({ error: 'Integração não encontrada' });
   }
 
   try {

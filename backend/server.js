@@ -22,7 +22,7 @@ app.use('/audit', auditRouter);
 
 // Basic route
 app.get('/', (req, res) => {
-  res.json({ message: 'Lambda Client API' });
+  res.json({ message: 'API Lambda Pulse' });
 });
 
 app.listen(PORT, () => {

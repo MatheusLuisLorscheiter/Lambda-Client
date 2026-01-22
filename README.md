@@ -1,4 +1,4 @@
-# Lambda Client - AWS Lambda Monitoring Platform
+# Lambda Pulse - AWS Lambda Monitoring Platform
 
 A professional, real-time AWS Lambda monitoring platform for companies to track their clients' Lambda function performance, costs, and logs.
 

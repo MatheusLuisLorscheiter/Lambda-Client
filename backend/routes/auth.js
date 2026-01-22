@@ -38,7 +38,7 @@ router.post('/login', async (req, res) => {
   const { email, password, company } = req.body;
 
   if (!email || !password || !company) {
-    return res.status(400).json({ error: 'Email, password, and company are required' });
+    return res.status(400).json({ error: 'E-mail, senha e empresa são obrigatórios' });
   }
 
   const result = await query(
@@ -50,12 +50,12 @@ router.post('/login', async (req, res) => {
   );
   const user = result.rows[0];
   if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Credenciais inválidas' });
   }
 
   const validPassword = await bcrypt.compare(password, user.password_hash);
   if (!validPassword) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Credenciais inválidas' });
   }
 
   const token = createAccessToken(user);
@@ -83,7 +83,7 @@ const authenticateToken = async (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
+    return res.status(401).json({ error: 'Token de acesso obrigatório' });
   }
 
   try {
@@ -92,13 +92,13 @@ const authenticateToken = async (req, res, next) => {
     const storedUser = userResult.rows[0];
 
     if (!storedUser || !storedUser.is_active) {
-      return res.status(403).json({ error: 'User inactive' });
+      return res.status(403).json({ error: 'Usuário inativo' });
     }
 
     req.user = user;
     next();
   } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
+    return res.status(403).json({ error: 'Token inválido' });
   }
 };
 
@@ -106,7 +106,7 @@ const authenticateToken = async (req, res, next) => {
 router.post('/refresh', async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) {
-    return res.status(400).json({ error: 'Refresh token required' });
+    return res.status(400).json({ error: 'Token de atualização obrigatório' });
   }
 
   const tokenHash = hashToken(refreshToken);
@@ -121,7 +121,7 @@ router.post('/refresh', async (req, res) => {
 
   const stored = result.rows[0];
   if (!stored || stored.revoked_at || new Date(stored.expires_at) < new Date()) {
-    return res.status(403).json({ error: 'Invalid refresh token' });
+    return res.status(403).json({ error: 'Token de atualização inválido' });
   }
 
   await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1', [stored.id]);
@@ -144,7 +144,7 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) {
-    return res.status(400).json({ error: 'Refresh token required' });
+    return res.status(400).json({ error: 'Token de atualização obrigatório' });
   }
 
   const tokenHash = hashToken(refreshToken);
@@ -171,10 +171,31 @@ router.post('/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+// List companies by email (public)
+router.post('/companies/by-email', async (req, res) => {
+  const { email } = req.body;
+  const normalizedEmail = (email || '').toString().trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return res.status(400).json({ error: 'E-mail é obrigatório' });
+  }
+
+  const result = await query(
+    `SELECT DISTINCT companies.name
+     FROM users
+     JOIN companies ON companies.id = users.company_id
+     WHERE LOWER(users.email) = $1
+     ORDER BY companies.name ASC`,
+    [normalizedEmail]
+  );
+
+  res.json({ companies: result.rows.map(row => row.name) });
+});
+
 // List companies (admin only)
 router.get('/companies', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const result = await query(
@@ -187,14 +208,14 @@ router.get('/companies', authenticateToken, async (req, res) => {
 // Create company (admin only)
 router.post('/companies', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const { name } = req.body;
   const normalizedName = (name || '').toString().trim();
 
   if (!normalizedName) {
-    return res.status(400).json({ error: 'Company name is required' });
+    return res.status(400).json({ error: 'Nome da empresa é obrigatório' });
   }
 
   try {
@@ -223,7 +244,7 @@ router.post('/companies', authenticateToken, async (req, res) => {
 // List client users (admin only)
 router.get('/clients', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const scope = (req.query.scope || '').toString().toLowerCase();
@@ -262,12 +283,12 @@ router.get('/clients', authenticateToken, async (req, res) => {
 // Create client user (admin only)
 router.post('/clients', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const { email, password, companyId, companyName } = req.body;
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
   }
 
   let resolvedCompanyId = companyId ? Number(companyId) : null;
@@ -275,7 +296,7 @@ router.post('/clients', authenticateToken, async (req, res) => {
   if (!resolvedCompanyId && companyName) {
     const normalizedCompanyName = companyName.toString().trim();
     if (!normalizedCompanyName) {
-      return res.status(400).json({ error: 'Company name is required' });
+      return res.status(400).json({ error: 'Nome da empresa é obrigatório' });
     }
 
     const companyResult = await query(
@@ -334,7 +355,7 @@ router.post('/clients', authenticateToken, async (req, res) => {
     res.json({ client: result.rows[0], inviteSent });
   } catch (error) {
     if (error.code === '23505') {
-      return res.status(409).json({ error: 'Email already exists' });
+      return res.status(409).json({ error: 'E-mail já existe' });
     }
     res.status(500).json({ error: error.message });
   }
@@ -343,14 +364,14 @@ router.post('/clients', authenticateToken, async (req, res) => {
 // Update client status (admin only)
 router.patch('/clients/:clientId/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const clientId = Number(req.params.clientId);
   const { isActive } = req.body;
 
   if (typeof isActive !== 'boolean') {
-    return res.status(400).json({ error: 'isActive must be boolean' });
+    return res.status(400).json({ error: 'isActive deve ser booleano' });
   }
 
   const userResult = await query(
@@ -360,7 +381,7 @@ router.patch('/clients/:clientId/status', authenticateToken, async (req, res) =>
 
   const client = userResult.rows[0];
   if (!client) {
-    return res.status(404).json({ error: 'Client user not found' });
+    return res.status(404).json({ error: 'Cliente não encontrado' });
   }
 
   const result = await query(
@@ -385,7 +406,7 @@ router.patch('/clients/:clientId/status', authenticateToken, async (req, res) =>
 // Resend client invite (admin only)
 router.post('/clients/:clientId/invite', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const clientId = Number(req.params.clientId);
@@ -400,7 +421,7 @@ router.post('/clients/:clientId/invite', authenticateToken, async (req, res) => 
 
   const client = clientResult.rows[0];
   if (!client) {
-    return res.status(404).json({ error: 'Client user not found' });
+    return res.status(404).json({ error: 'Cliente não encontrado' });
   }
 
   const frontendBaseUrl = process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
@@ -426,21 +447,21 @@ router.post('/clients/:clientId/invite', authenticateToken, async (req, res) => 
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to send invite email' });
+    res.status(500).json({ error: 'Falha ao enviar e-mail de convite' });
   }
 });
 
 // Transfer client to another company (admin only)
 router.patch('/clients/:clientId/company', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const clientId = Number(req.params.clientId);
   const { companyId } = req.body;
 
   if (!companyId) {
-    return res.status(400).json({ error: 'companyId is required' });
+    return res.status(400).json({ error: 'companyId é obrigatório' });
   }
 
   const targetCompanyId = Number(companyId);
@@ -452,16 +473,16 @@ router.patch('/clients/:clientId/company', authenticateToken, async (req, res) =
 
   const client = clientResult.rows[0];
   if (!client) {
-    return res.status(404).json({ error: 'Client user not found' });
+    return res.status(404).json({ error: 'Cliente não encontrado' });
   }
 
   if (client.company_id === targetCompanyId) {
-    return res.status(400).json({ error: 'Client already belongs to this company' });
+    return res.status(400).json({ error: 'Cliente já pertence a esta empresa' });
   }
 
   const companyResult = await query('SELECT id FROM companies WHERE id = $1', [targetCompanyId]);
   if (companyResult.rowCount === 0) {
-    return res.status(404).json({ error: 'Target company not found' });
+    return res.status(404).json({ error: 'Empresa de destino não encontrada' });
   }
 
   const existingEmail = await query(
@@ -470,7 +491,7 @@ router.patch('/clients/:clientId/company', authenticateToken, async (req, res) =
   );
 
   if (existingEmail.rowCount > 0) {
-    return res.status(409).json({ error: 'Email already exists in target company' });
+    return res.status(409).json({ error: 'E-mail já existe na empresa de destino' });
   }
 
   const updated = await query(
@@ -501,7 +522,7 @@ router.patch('/clients/:clientId/company', authenticateToken, async (req, res) =
 // Delete client (admin only)
 router.delete('/clients/:clientId', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const clientId = Number(req.params.clientId);
@@ -513,7 +534,7 @@ router.delete('/clients/:clientId', authenticateToken, async (req, res) => {
 
   const client = userResult.rows[0];
   if (!client) {
-    return res.status(404).json({ error: 'Client user not found' });
+    return res.status(404).json({ error: 'Cliente não encontrado' });
   }
 
   await query('DELETE FROM users WHERE id = $1', [clientId]);
@@ -536,7 +557,7 @@ router.delete('/clients/:clientId', authenticateToken, async (req, res) => {
 router.post('/password/forgot', async (req, res) => {
   const { email, company } = req.body;
   if (!email || !company) {
-    return res.status(400).json({ error: 'Email and company are required' });
+    return res.status(400).json({ error: 'E-mail e empresa são obrigatórios' });
   }
 
   const userResult = await query(
@@ -567,7 +588,7 @@ router.post('/password/forgot', async (req, res) => {
   try {
     await sendPasswordResetEmail({ to: email, resetLink });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to send reset email' });
+    return res.status(500).json({ error: 'Falha ao enviar e-mail de redefinição' });
   }
 
   await logAudit({
@@ -585,7 +606,7 @@ router.post('/password/forgot', async (req, res) => {
 router.post('/password/reset', async (req, res) => {
   const { token, password } = req.body;
   if (!token || !password) {
-    return res.status(400).json({ error: 'Token and new password are required' });
+    return res.status(400).json({ error: 'Token e nova senha são obrigatórios' });
   }
 
   const tokenHash = hashToken(token);
@@ -600,7 +621,7 @@ router.post('/password/reset', async (req, res) => {
 
   const resetRow = result.rows[0];
   if (!resetRow || resetRow.used_at || new Date(resetRow.expires_at) < new Date()) {
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    return res.status(403).json({ error: 'Token inválido ou expirado' });
   }
 
   const passwordHash = await bcrypt.hash(password, 10);

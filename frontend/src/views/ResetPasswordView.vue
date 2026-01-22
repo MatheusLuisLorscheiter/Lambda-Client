@@ -3,7 +3,7 @@
     <div class="flex-1 flex items-center justify-center">
       <div class="max-w-md w-full space-y-8 bg-white shadow-2xl rounded-2xl px-8 py-10 mx-4">
       <div class="flex flex-col items-center">
-        <img :src="logoDark" alt="Company logo" class="h-14 w-auto" />
+        <img :src="logoDark" alt="Logo da empresa" class="h-14 w-auto" />
         <h2 class="mt-6 text-center text-2xl font-bold text-slate-900">
           Defina uma nova senha
         </h2>
@@ -84,7 +84,7 @@
       </div>
     </div>
     <footer class="py-6 text-center text-xs text-slate-300">
-      Desenvolvido pela
+      Desenvolvido por
       <a
         href="https://chavemestragestao.com.br/"
         target="_blank"

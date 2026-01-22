@@ -13,3 +13,16 @@ body {
 #app {
   min-height: 100vh;
 }
+
+button,
+a,
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}

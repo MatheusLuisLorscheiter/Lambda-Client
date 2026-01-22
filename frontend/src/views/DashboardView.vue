@@ -5,7 +5,7 @@
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-16">
           <div class="flex items-center space-x-3">
-            <img :src="logoDark" alt="Company logo" class="h-8 w-auto" />
+            <img :src="logoDark" alt="Logo da empresa" class="h-8 w-auto" />
             <div>
               <h1 class="text-lg font-semibold text-slate-900">Lambda Pulse</h1>
               <p class="text-xs text-slate-500">{{ auth.user?.companyName }}</p>
@@ -311,7 +311,7 @@
     </main>
 
     <footer class="py-6 text-center text-xs text-slate-500">
-      Desenvolvido pela
+      Desenvolvido por
       <a
         href="https://chavemestragestao.com.br/"
         target="_blank"
@@ -525,7 +525,7 @@ const fetchIntegrations = async () => {
     const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations')
     integrations.value = data.integrations
   } catch (error) {
-    console.error('Failed to fetch integrations:', error)
+    console.error('Falha ao buscar integrações:', error)
   }
 }
 
@@ -576,7 +576,7 @@ const loadMetrics = async () => {
     // Calculate cost estimate
     calculateCostEstimate(totalInvocations, avgDuration)
   } catch (error) {
-    console.error('Failed to load metrics:', error)
+    console.error('Falha ao carregar métricas:', error)
   }
 }
 
@@ -591,7 +591,7 @@ const loadLogs = async () => {
     logs.value = data.logs
     logSummary.value = data.summary
   } catch (error) {
-    console.error('Failed to load logs:', error)
+    console.error('Falha ao carregar logs:', error)
   }
 }
 

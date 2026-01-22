@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.get('/logs', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Admin access required' });
+        return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
     }
 
     const limit = Math.min(Number(req.query.limit) || 100, 500);
