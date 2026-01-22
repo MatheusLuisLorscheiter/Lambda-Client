@@ -4,7 +4,6 @@ import { ref, computed } from 'vue'
 export const useAuthStore = defineStore('auth', () => {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
   const token = ref(localStorage.getItem('token') || '')
-  const refreshToken = ref(localStorage.getItem('refreshToken') || '')
   const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
 
   const isAuthenticated = computed(() => !!token.value)
@@ -26,63 +25,27 @@ export const useAuthStore = defineStore('auth', () => {
 
     const data = await response.json()
     token.value = data.token
-    refreshToken.value = data.refreshToken
     user.value = data.user
 
     localStorage.setItem('token', data.token)
-    localStorage.setItem('refreshToken', data.refreshToken)
     localStorage.setItem('user', JSON.stringify(data.user))
   }
 
   const logout = async () => {
-    if (refreshToken.value) {
-      try {
-        await fetch(`${apiBaseUrl}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ refreshToken: refreshToken.value })
-        })
-      } catch {
-        // ignore
-      }
-    }
-    token.value = ''
-    refreshToken.value = ''
-    user.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('refreshToken')
-    localStorage.removeItem('user')
-  }
-
-  const refreshAccessToken = async () => {
-    if (!refreshToken.value) return false
-
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/refresh`, {
+      await fetch(`${apiBaseUrl}/auth/logout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ refreshToken: refreshToken.value })
+        }
       })
-
-      if (!response.ok) {
-        await logout()
-        return false
-      }
-
-      const data = await response.json()
-      token.value = data.token
-      refreshToken.value = data.refreshToken
-      localStorage.setItem('token', data.token)
-      localStorage.setItem('refreshToken', data.refreshToken)
-      return true
     } catch {
-      await logout()
-      return false
+      // ignore
     }
+    token.value = ''
+    user.value = null
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
   }
 
   const checkAuth = async () => {
@@ -101,23 +64,6 @@ export const useAuthStore = defineStore('auth', () => {
         return true
       }
 
-      const refreshed = await refreshAccessToken()
-      if (!refreshed) {
-        return false
-      }
-
-      const retry = await fetch(`${apiBaseUrl}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token.value}`
-        }
-      })
-
-      if (retry.ok) {
-        const data = await retry.json()
-        user.value = data.user
-        return true
-      }
-
       await logout()
       return false
     } catch {
@@ -128,7 +74,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token,
-    refreshToken,
     user,
     isAuthenticated,
     isAdmin,

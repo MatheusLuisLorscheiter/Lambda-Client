@@ -14,7 +14,6 @@
           <div class="flex items-center space-x-4">
             <div class="text-right">
               <p class="text-sm font-medium text-slate-900">{{ auth.user?.email }}</p>
-              <p class="text-xs text-slate-500">Cliente</p>
             </div>
             <button
               @click="handleLogout"
@@ -367,6 +366,10 @@ const timePeriod = ref('7')
 const logFilter = ref('relevant')
 const isLoading = ref(false)
 
+const selectedIntegration = computed(() =>
+  integrations.value.find(integration => String(integration.id) === String(selectedIntegrationId.value))
+)
+
 const metrics = ref<Metrics>({
   invocations: 0,
   errors: 0,
@@ -574,7 +577,7 @@ const loadMetrics = async () => {
     }
 
     // Calculate cost estimate
-    calculateCostEstimate(totalInvocations, avgDuration)
+    calculateCostEstimate(totalInvocations, avgDuration, selectedIntegration.value?.memoryMb ?? 128)
   } catch (error) {
     console.error('Falha ao carregar métricas:', error)
   }
@@ -595,11 +598,11 @@ const loadLogs = async () => {
   }
 }
 
-const calculateCostEstimate = (invocations: number, avgDurationMs: number) => {
-  // AWS Lambda pricing (us-east-1, assuming 128MB memory)
+const calculateCostEstimate = (invocations: number, avgDurationMs: number, memoryMb: number) => {
+  // AWS Lambda pricing (us-east-1)
   const requestPrice = 0.20 / 1000000 // $0.20 per 1M requests
   const gbSecondPrice = 0.0000166667 // per GB-second
-  const memoryMB = 128 // Assume 128MB, could be fetched from logs
+  const memoryMB = memoryMb || 128
 
   const avgDurationSeconds = avgDurationMs / 1000
   const memoryGB = memoryMB / 1024

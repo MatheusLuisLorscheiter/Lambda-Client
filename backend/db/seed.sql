@@ -1,2 +1,0 @@
--- Initial seed (optional). Change emails/passwords before running.
--- Passwords must be hashed; see backend/scripts/create-user.js

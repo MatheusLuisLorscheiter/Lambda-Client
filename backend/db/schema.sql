@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS integrations (
   name TEXT NOT NULL,
   function_name TEXT NOT NULL,
   region TEXT NOT NULL,
+  memory_mb INTEGER NOT NULL DEFAULT 128,
   access_key_encrypted TEXT NOT NULL,
   secret_key_encrypted TEXT NOT NULL,
   owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -30,14 +31,6 @@ CREATE TABLE IF NOT EXISTS integrations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS refresh_tokens (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_hash TEXT NOT NULL UNIQUE,
-  expires_at TIMESTAMPTZ NOT NULL,
-  revoked_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
 
 CREATE TABLE IF NOT EXISTS password_resets (
   id SERIAL PRIMARY KEY,
@@ -65,6 +58,5 @@ CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integrations(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_client ON integrations(client_user_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_company ON integrations(company_id);
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_company ON audit_logs(company_id);

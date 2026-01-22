@@ -12,7 +12,7 @@ const router = express.Router();
 
 const getIntegrationForUser = async (integrationId, user) => {
   const result = await query(
-    'SELECT id, name, function_name, region, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id, company_id FROM integrations WHERE id = $1',
+    'SELECT id, name, function_name, region, memory_mb, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id, company_id FROM integrations WHERE id = $1',
     [integrationId]
   );
 
@@ -21,15 +21,11 @@ const getIntegrationForUser = async (integrationId, user) => {
     return null;
   }
 
-  if (integration.company_id !== user.companyId) {
-    return null;
-  }
-
-  if (user.role === 'admin' && integration.owner_user_id === user.id) {
+  if (user.role === 'admin') {
     return integration;
   }
 
-  if (user.role === 'client' && integration.client_user_id === user.id) {
+  if (user.role === 'client' && integration.company_id === user.companyId) {
     return integration;
   }
 
@@ -60,16 +56,38 @@ const parseReportLine = (message) => {
 router.get('/integrations', authenticateToken, async (req, res) => {
   if (req.user.role === 'admin') {
     const result = await query(
-      'SELECT id, name, function_name AS "functionName", region, owner_user_id AS "userId", client_user_id AS "clientId" FROM integrations WHERE owner_user_id = $1 AND company_id = $2 ORDER BY id DESC',
-      [req.user.id, req.user.companyId]
+      `SELECT integrations.id,
+              integrations.name,
+              integrations.function_name AS "functionName",
+              integrations.region,
+              integrations.memory_mb AS "memoryMb",
+              integrations.company_id AS "companyId",
+              companies.name AS "companyName",
+              integrations.owner_user_id AS "userId",
+              integrations.client_user_id AS "clientId"
+       FROM integrations
+       JOIN companies ON companies.id = integrations.company_id
+       ORDER BY integrations.id DESC`
     );
     return res.json({ integrations: result.rows });
   }
 
   if (req.user.role === 'client') {
     const result = await query(
-      'SELECT id, name, function_name AS "functionName", region, owner_user_id AS "userId", client_user_id AS "clientId" FROM integrations WHERE client_user_id = $1 AND company_id = $2 ORDER BY id DESC',
-      [req.user.id, req.user.companyId]
+      `SELECT integrations.id,
+              integrations.name,
+              integrations.function_name AS "functionName",
+              integrations.region,
+              integrations.memory_mb AS "memoryMb",
+              integrations.company_id AS "companyId",
+              companies.name AS "companyName",
+              integrations.owner_user_id AS "userId",
+              integrations.client_user_id AS "clientId"
+       FROM integrations
+       JOIN companies ON companies.id = integrations.company_id
+       WHERE integrations.company_id = $1
+       ORDER BY integrations.id DESC`,
+      [req.user.companyId]
     );
     return res.json({ integrations: result.rows });
   }
@@ -83,19 +101,30 @@ router.post('/integrations', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
-  const { name, functionName, region, accessKeyId, secretAccessKey, clientId } = req.body;
+  const { name, functionName, region, accessKeyId, secretAccessKey, memoryMb, companyId } = req.body;
 
   if (!name || !functionName || !region || !accessKeyId || !secretAccessKey) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
   }
 
-  let resolvedClientId = clientId || null;
-
-  if (resolvedClientId) {
-    const clientResult = await query('SELECT id FROM users WHERE id = $1 AND role = $2 AND company_id = $3 AND is_active = TRUE', [resolvedClientId, 'client', req.user.companyId]);
-    if (clientResult.rowCount === 0) {
-      return res.status(400).json({ error: 'Cliente não encontrado' });
+  let resolvedMemoryMb = 128;
+  if (memoryMb !== undefined && memoryMb !== null && memoryMb !== '') {
+    const parsedMemory = Number(memoryMb);
+    if (!Number.isFinite(parsedMemory) || parsedMemory <= 0) {
+      return res.status(400).json({ error: 'Memória inválida' });
     }
+    resolvedMemoryMb = Math.round(parsedMemory);
+  }
+
+  const resolvedClientId = null;
+
+  let resolvedCompanyId = req.user.companyId;
+  if (companyId) {
+    const companyResult = await query('SELECT id FROM companies WHERE id = $1', [Number(companyId)]);
+    if (companyResult.rowCount === 0) {
+      return res.status(400).json({ error: 'Empresa não encontrada' });
+    }
+    resolvedCompanyId = Number(companyId);
   }
 
   const encryptedAccessKey = encrypt(accessKeyId);
@@ -103,11 +132,14 @@ router.post('/integrations', authenticateToken, async (req, res) => {
 
   const result = await query(
     `INSERT INTO integrations
-      (company_id, name, function_name, region, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, name, function_name AS "functionName", region, owner_user_id AS "userId", client_user_id AS "clientId"`,
-    [req.user.companyId, name, functionName, region, encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
+      (company_id, name, function_name, region, memory_mb, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
+    [resolvedCompanyId, name, functionName, region, resolvedMemoryMb, encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
   );
+
+  const companyNameResult = await query('SELECT name FROM companies WHERE id = $1', [resolvedCompanyId]);
+  const companyName = companyNameResult.rows[0]?.name || null;
 
   await logAudit({
     companyId: req.user.companyId,
@@ -115,12 +147,12 @@ router.post('/integrations', authenticateToken, async (req, res) => {
     action: 'integration.create',
     resourceType: 'integration',
     resourceId: String(result.rows[0].id),
-    metadata: { name, functionName, region, clientId: resolvedClientId },
+    metadata: { name, functionName, region, memoryMb: resolvedMemoryMb, companyId: resolvedCompanyId },
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
   });
 
-  res.json({ integration: result.rows[0] });
+  res.json({ integration: { ...result.rows[0], companyName } });
 });
 
 // Delete integration
@@ -233,7 +265,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
 
     const type = (req.query.type || 'relevant').toString().toLowerCase();
 
-    const normalizedLogs = response.events.map(event => {
+    const normalizedLogs = (response.events || []).map(event => {
       const parsedReport = parseReportLine(event.message);
       return {
         timestamp: event.timestamp,
@@ -243,14 +275,15 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     });
 
     const relevantLogs = normalizedLogs.filter(event => {
-      const message = event.message.toLowerCase();
+      const message = (event.message || '').toLowerCase();
+      const isReportLine = /^report\b/i.test(event.message || '');
 
       if (type === 'error') {
         return message.includes('error') || message.includes('fail') || message.includes('exception');
       }
 
       if (type === 'report') {
-        return message.includes('report') || event.parsedReport;
+        return isReportLine;
       }
 
       if (type === 'all') {
@@ -264,17 +297,19 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
         Boolean(event.parsedReport);
     });
 
-    const reportEvents = relevantLogs.filter(log => log.parsedReport);
+    const sortedLogs = relevantLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    const reportEvents = sortedLogs.filter(log => log.parsedReport);
     const durationSamples = reportEvents
       .map(log => log.parsedReport.durationMs)
       .filter(value => typeof value === 'number');
 
     const payload = {
-      logs: relevantLogs,
+      logs: sortedLogs,
       summary: {
-        total: relevantLogs.length,
+        total: sortedLogs.length,
         reports: reportEvents.length,
-        errors: relevantLogs.filter(log => log.message.toLowerCase().includes('error')).length,
+        errors: sortedLogs.filter(log => (log.message || '').toLowerCase().includes('error')).length,
         avgDurationMs: durationSamples.length
           ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
           : null

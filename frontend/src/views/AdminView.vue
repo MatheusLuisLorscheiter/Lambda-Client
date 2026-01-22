@@ -14,7 +14,7 @@
           <div class="flex items-center space-x-4">
             <div class="text-right">
               <p class="text-sm font-medium text-slate-900">{{ auth.user?.email }}</p>
-              <p class="text-xs text-slate-500">Administrador</p>
+              <p class="text-xs text-slate-500">Acesso Administrativo</p>
             </div>
             <button
               @click="handleLogout"
@@ -62,8 +62,8 @@
               </svg>
             </div>
             <div class="ml-4">
-              <p class="text-sm font-medium text-slate-500">Clientes</p>
-              <p class="text-2xl font-bold text-slate-900">{{ clients.length }}</p>
+              <p class="text-sm font-medium text-slate-500">Empresas</p>
+              <p class="text-2xl font-bold text-slate-900">{{ companies.length }}</p>
             </div>
           </div>
         </div>
@@ -135,7 +135,16 @@
         <div v-if="activeTab === 'integrations'" class="p-6">
           <!-- Add Integration Form -->
           <div class="bg-slate-50 rounded-xl p-6 mb-8">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Adicionar nova integração</h3>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-semibold text-slate-900">Adicionar nova integração</h3>
+              <button
+                type="button"
+                @click="showIntegrationHelp = true"
+                class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+              >
+                Ajuda
+              </button>
+            </div>
             <form @submit.prevent="addIntegration" class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
@@ -192,6 +201,31 @@
                   </select>
                 </div>
                 <div>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Memória (MB)</label>
+                  <input
+                    v-model.number="newIntegration.memoryMb"
+                    type="number"
+                    min="128"
+                    step="64"
+                    required
+                    placeholder="128"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
+                  <select
+                    v-model="newIntegration.companyId"
+                    required
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
+                  >
+                    <option value="">Selecione uma empresa</option>
+                    <option v-for="company in companies" :key="company.id" :value="company.id">
+                      {{ company.name }}
+                    </option>
+                  </select>
+                </div>
+                <div>
                   <label class="block text-sm font-medium text-slate-700 mb-1">Access Key ID da AWS</label>
                   <input
                     v-model="newIntegration.accessKeyId"
@@ -210,18 +244,6 @@
                     placeholder="••••••••"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
                   />
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Atribuir ao cliente</label>
-                  <select
-                    v-model="newIntegration.clientId"
-                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
-                  >
-                    <option value="">Nenhum cliente atribuído</option>
-                    <option v-for="client in integrationClients" :key="client.id" :value="client.id">
-                      {{ client.email }}
-                    </option>
-                  </select>
                 </div>
               </div>
               <div class="flex justify-end pt-2">
@@ -265,9 +287,17 @@
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">
                         {{ integration.region }}
                       </span>
-                    </p>
-                    <p v-if="getClientEmail(integration.clientId)" class="text-xs text-slate-400 mt-1">
-                      Atribuído a: {{ getClientEmail(integration.clientId) }}
+                      <span class="mx-2">•</span>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">
+                        {{ integration.memoryMb || 128 }} MB
+                      </span>
+                      <span v-if="integration.companyName" class="mx-2">•</span>
+                      <span
+                        v-if="integration.companyName"
+                        class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600"
+                      >
+                        {{ integration.companyName }}
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -441,7 +471,7 @@
                         {{ client.isActive ? 'Ativo' : 'Inativo' }}
                       </span>
                       <span class="mx-2">•</span>
-                      <span>{{ getClientIntegrationCount(client.id) }} integração(ões)</span>
+                      <span>{{ getCompanyIntegrationCount(client.companyId) }} integração(ões)</span>
                     </p>
                     <p class="text-xs text-slate-400 mt-1">Empresa: {{ client.companyName }}</p>
                   </div>
@@ -583,7 +613,7 @@
     </footer>
 
     <!-- Toast Notifications -->
-    <div class="fixed bottom-4 right-4 z-50 space-y-2">
+    <div class="fixed bottom-4 right-4 z-[60] space-y-2">
       <transition-group name="toast">
         <div
           v-for="toast in toasts"
@@ -628,6 +658,76 @@
         </div>
       </div>
     </transition>
+
+    <!-- Integration Help Modal -->
+    <transition name="fade">
+      <div v-if="showIntegrationHelp" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="showIntegrationHelp = false"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl mx-4 p-6 max-h-[90vh] flex flex-col">
+          <div class="flex items-start justify-between">
+            <h3 class="text-lg font-semibold text-slate-900">Passo a passo da integração</h3>
+            <button
+              type="button"
+              @click="showIntegrationHelp = false"
+              class="text-slate-400 hover:text-slate-600"
+              aria-label="Fechar"
+            >
+              ✕
+            </button>
+          </div>
+          <div class="mt-4 space-y-4 text-sm text-slate-600 overflow-y-auto pr-1">
+            <ol class="space-y-3 list-decimal list-inside">
+              <li>
+                No console da AWS, vá em <strong>IAM → Users → Create user</strong> e crie um usuário para integração.
+              </li>
+              <li>
+                Na etapa <strong>Permissions</strong>, escolha <strong>Attach policies directly</strong> e clique em <strong>Create policy</strong>. No editor <strong>JSON</strong>, adicione ações necessárias: <strong>lambda:ListFunctions</strong>, <strong>cloudwatch:GetMetricData</strong> e <strong>logs:FilterLogEvents</strong>. Salve a policy e associe ao usuário.
+              </li>
+              <li>
+                Ao clicar em <strong>Create policy</strong>, a AWS abre uma nova aba. Salve a policy nessa aba, volte para a aba do usuário e clique no <strong>ícone de refresh</strong> na lista de policies para ela aparecer e ser selecionada.
+              </li>
+              <li>
+                Após criar o usuário, selecione o usuário criado, vá em <strong>Security credentials → Create access key</strong>, selecione <strong>Application running on an AWS compute service</strong>, marque o checkbox e avance, opcionalmente crie uma descrição e clique em <strong>Create access key</strong> para gerar o <strong>Access key ID</strong> e <strong>Secret access key</strong> copie e faça o download (o secret é exibido apenas uma vez).
+              </li>
+              <li>
+                No console do <strong>AWS Lambda</strong>, copie o <strong>Function name</strong>, a <strong>Region</strong> e a <strong>Memory size</strong> configurada da função.
+              </li>
+              <li>
+                Preencha o formulário da integração no sistema e clique em <strong>Adicionar integração</strong>.
+              </li>
+              <li>
+                Por fim, clique em <strong>Testar</strong> para validar a conexão com a função e as permissões.
+              </li>
+            </ol>
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <h4 class="text-sm font-semibold text-slate-900">JSON da Policy (copiar e colar)</h4>
+                <button
+                  type="button"
+                  @click="copyIntegrationPolicyJson"
+                  class="inline-flex items-center px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+                >
+                  Copiar JSON
+                </button>
+              </div>
+              <pre class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 overflow-auto">{{ integrationPolicyJson }}</pre>
+              <p class="mt-2 text-xs text-slate-500">
+                Dica: você pode restringir <strong>Resource</strong> por conta/região depois, mas para começar use “*”.
+              </p>
+            </div>
+          </div>
+          <div class="mt-6 flex justify-end">
+            <button
+              type="button"
+              @click="showIntegrationHelp = false"
+              class="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -658,9 +758,10 @@ const newIntegration = ref({
   name: '',
   functionName: '',
   region: 'us-east-1',
+  memoryMb: 128,
+  companyId: null as number | null,
   accessKeyId: '',
-  secretAccessKey: '',
-  clientId: ''
+  secretAccessKey: ''
 })
 
 const newClient = ref({
@@ -674,10 +775,7 @@ const createNewCompany = ref(false)
 const transferSelection = ref<Record<number, string>>({})
 const newCompanyName = ref('')
 
-const integrationClients = computed(() => {
-  if (!auth.user?.companyId) return []
-  return clients.value.filter(client => client.companyId === auth.user?.companyId)
-})
+const defaultCompanyId = computed(() => auth.user?.companyId ?? null)
 
 interface Toast {
   id: number
@@ -704,6 +802,24 @@ const confirmModal = ref<ConfirmModalState>({
   cancelLabel: 'Cancelar'
 })
 
+const showIntegrationHelp = ref(false)
+
+const integrationPolicyJson = `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LambdaMonitoringReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:ListFunctions",
+        "cloudwatch:GetMetricData",
+        "logs:FilterLogEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
+}`
+
 let confirmResolver: ((value: boolean) => void) | null = null
 
 const showToast = (type: 'success' | 'error', message: string) => {
@@ -712,6 +828,15 @@ const showToast = (type: 'success' | 'error', message: string) => {
   setTimeout(() => {
     toasts.value = toasts.value.filter(t => t.id !== id)
   }, 4000)
+}
+
+const copyIntegrationPolicyJson = async () => {
+  try {
+    await navigator.clipboard.writeText(integrationPolicyJson)
+    showToast('success', 'JSON copiado para a área de transferência')
+  } catch {
+    showToast('error', 'Não foi possível copiar o JSON')
+  }
 }
 
 const requestConfirm = (options: { title?: string; message: string; confirmLabel?: string; cancelLabel?: string }) => {
@@ -776,6 +901,10 @@ const fetchCompanies = async () => {
     const data = await api.get<{ companies: Company[] }>('/auth/companies')
     companies.value = data.companies
 
+    if (!newIntegration.value.companyId && defaultCompanyId.value) {
+      newIntegration.value.companyId = defaultCompanyId.value
+    }
+
     if (!createNewCompany.value && !newClient.value.companyId && auth.user?.companyId) {
       newClient.value.companyId = String(auth.user.companyId)
     }
@@ -798,7 +927,8 @@ const addIntegration = async () => {
   try {
     await api.post('/lambda/integrations', {
       ...newIntegration.value,
-      clientId: newIntegration.value.clientId ? Number(newIntegration.value.clientId) : null
+      companyId: newIntegration.value.companyId ? Number(newIntegration.value.companyId) : defaultCompanyId.value,
+      memoryMb: Number(newIntegration.value.memoryMb) || 128
     })
 
     showToast('success', 'Integração adicionada com sucesso')
@@ -806,9 +936,10 @@ const addIntegration = async () => {
       name: '',
       functionName: '',
       region: 'us-east-1',
+      memoryMb: 128,
+      companyId: defaultCompanyId.value,
       accessKeyId: '',
-      secretAccessKey: '',
-      clientId: ''
+      secretAccessKey: ''
     }
     await fetchIntegrations()
   } catch (error) {
@@ -994,14 +1125,8 @@ const resendInvite = async (client: ClientUser) => {
   }
 }
 
-const getClientEmail = (clientId: number | null | undefined): string => {
-  if (!clientId) return ''
-  const client = integrationClients.value.find(c => c.id === clientId)
-  return client?.email || ''
-}
-
-const getClientIntegrationCount = (clientId: number): number => {
-  return integrations.value.filter(i => i.clientId === clientId).length
+const getCompanyIntegrationCount = (companyId: number): number => {
+  return integrations.value.filter(i => i.companyId === companyId).length
 }
 
 const getActionClass = (action: string): string => {

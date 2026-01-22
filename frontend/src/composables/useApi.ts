@@ -32,26 +32,9 @@ export function useApi() {
         })
 
         if (response.status === 401 || response.status === 403) {
-            const refreshed = await auth.checkAuth()
-            if (!refreshed) {
-                router.push('/login')
-                throw new Error('Session expired')
-            }
-
-            // Retry with new token
-            requestHeaders['Authorization'] = `Bearer ${auth.token}`
-            const retryResponse = await fetch(`${apiBaseUrl}${endpoint}`, {
-                method,
-                headers: requestHeaders,
-                body: body ? JSON.stringify(body) : undefined
-            })
-
-            if (!retryResponse.ok) {
-                const error = await retryResponse.json()
-                throw new Error(error.error || 'Request failed')
-            }
-
-            return retryResponse.json()
+            await auth.logout()
+            router.push('/login')
+            throw new Error('Session expired')
         }
 
         if (!response.ok) {

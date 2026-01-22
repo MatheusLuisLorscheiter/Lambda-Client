@@ -8,7 +8,6 @@ const { logAudit } = require('../audit/logger');
 const { sendPasswordResetEmail, sendClientInviteEmail } = require('../email/resend');
 
 const accessTokenTtl = process.env.ACCESS_TOKEN_TTL || '15m';
-const refreshTokenTtlDays = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 7);
 const resetTokenTtlMinutes = Number(process.env.RESET_TOKEN_TTL_MINUTES || 30);
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
@@ -18,20 +17,6 @@ const createAccessToken = (user) => jwt.sign(
   process.env.JWT_SECRET,
   { expiresIn: accessTokenTtl }
 );
-
-const createRefreshToken = async (user) => {
-  const userId = user.id || user.user_id;
-  const rawToken = crypto.randomBytes(64).toString('hex');
-  const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + refreshTokenTtlDays * 24 * 60 * 60 * 1000);
-
-  await query(
-    'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-    [userId, tokenHash, expiresAt]
-  );
-
-  return rawToken;
-};
 
 // Login
 router.post('/login', async (req, res) => {
@@ -59,7 +44,6 @@ router.post('/login', async (req, res) => {
   }
 
   const token = createAccessToken(user);
-  const refreshToken = await createRefreshToken(user);
 
   await logAudit({
     companyId: user.company_id,
@@ -72,7 +56,6 @@ router.post('/login', async (req, res) => {
 
   res.json({
     token,
-    refreshToken,
     user: { id: user.id, email: user.email, role: user.role, companyId: user.company_id, companyName: user.company_name }
   });
 });
@@ -102,72 +85,8 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// Refresh access token
-router.post('/refresh', async (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken) {
-    return res.status(400).json({ error: 'Token de atualização obrigatório' });
-  }
-
-  const tokenHash = hashToken(refreshToken);
-  const result = await query(
-    `SELECT refresh_tokens.id, refresh_tokens.user_id, refresh_tokens.expires_at, refresh_tokens.revoked_at,
-            users.email, users.role, users.company_id
-     FROM refresh_tokens
-     JOIN users ON users.id = refresh_tokens.user_id
-     WHERE refresh_tokens.token_hash = $1 AND users.is_active = TRUE`,
-    [tokenHash]
-  );
-
-  const stored = result.rows[0];
-  if (!stored || stored.revoked_at || new Date(stored.expires_at) < new Date()) {
-    return res.status(403).json({ error: 'Token de atualização inválido' });
-  }
-
-  await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1', [stored.id]);
-
-  const newAccessToken = createAccessToken(stored);
-  const newRefreshToken = await createRefreshToken(stored);
-
-  await logAudit({
-    companyId: stored.company_id,
-    userId: stored.user_id,
-    action: 'auth.refresh',
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent')
-  });
-
-  res.json({ token: newAccessToken, refreshToken: newRefreshToken });
-});
-
-// Logout and revoke refresh token
-router.post('/logout', async (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken) {
-    return res.status(400).json({ error: 'Token de atualização obrigatório' });
-  }
-
-  const tokenHash = hashToken(refreshToken);
-  const result = await query(
-    `UPDATE refresh_tokens SET revoked_at = NOW()
-     WHERE token_hash = $1 AND revoked_at IS NULL
-     RETURNING user_id`,
-    [tokenHash]
-  );
-
-  const userId = result.rows[0]?.user_id;
-
-  if (userId) {
-    const userResult = await query('SELECT company_id FROM users WHERE id = $1', [userId]);
-    await logAudit({
-      companyId: userResult.rows[0]?.company_id,
-      userId,
-      action: 'auth.logout',
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-  }
-
+// Logout (stateless)
+router.post('/logout', (req, res) => {
   res.json({ success: true });
 });
 
@@ -627,7 +546,6 @@ router.post('/password/reset', async (req, res) => {
   const passwordHash = await bcrypt.hash(password, 10);
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, resetRow.user_id]);
   await query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [resetRow.id]);
-  await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [resetRow.user_id]);
 
   await logAudit({
     companyId: resetRow.company_id,

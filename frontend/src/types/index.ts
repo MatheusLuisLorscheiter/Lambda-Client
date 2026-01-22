@@ -3,6 +3,9 @@ export interface Integration {
   name: string
   functionName: string
   region: string
+  memoryMb?: number
+  companyId?: number
+  companyName?: string
   accessKeyId?: string
   secretAccessKey?: string
   userId: number
