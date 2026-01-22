@@ -31,6 +31,27 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(data.user))
   }
 
+  const adminLogin = async (email: string, password: string) => {
+    const response = await fetch(`${apiBaseUrl}/auth/admin/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email, password })
+    })
+
+    if (!response.ok) {
+      throw new Error('Login failed')
+    }
+
+    const data = await response.json()
+    token.value = data.token
+    user.value = data.user
+
+    localStorage.setItem('token', data.token)
+    localStorage.setItem('user', JSON.stringify(data.user))
+  }
+
   const logout = async () => {
     try {
       await fetch(`${apiBaseUrl}/auth/logout`, {
@@ -79,6 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAdmin,
     isClient,
     login,
+    adminLogin,
     logout,
     checkAuth
   }

@@ -213,6 +213,17 @@
                   />
                 </div>
                 <div>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Exibir custos no painel</label>
+                  <label class="flex items-center justify-between px-4 py-2.5 border border-slate-300 rounded-lg bg-white">
+                    <span class="text-sm text-slate-600">Mostrar custo estimado</span>
+                    <input
+                      v-model="newIntegration.showCostEstimate"
+                      type="checkbox"
+                      class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                    />
+                  </label>
+                </div>
+                <div>
                   <label class="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
                   <select
                     v-model="newIntegration.companyId"
@@ -224,6 +235,75 @@
                       {{ company.name }}
                     </option>
                   </select>
+                </div>
+                <div class="md:col-span-2 lg:col-span-3">
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="block text-sm font-medium text-slate-700">Documentações (links)</label>
+                    <label class="inline-flex items-center text-xs text-slate-600 space-x-2">
+                      <input
+                        v-model="showDocsPreview"
+                        type="checkbox"
+                        class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      />
+                      <span>Embed</span>
+                    </label>
+                  </div>
+                  <div class="flex flex-col md:flex-row gap-2">
+                    <input
+                      v-model="newDocumentationLink"
+                      type="url"
+                      placeholder="https://sua-doc.com/guia"
+                      class="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                    />
+                    <button
+                      type="button"
+                      @click="addDocumentationLink"
+                      class="inline-flex items-center px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50"
+                    >
+                      Adicionar link
+                    </button>
+                  </div>
+                  <div v-if="newIntegration.documentationLinks.length" class="mt-3 space-y-2">
+                    <div
+                      v-for="(link, index) in newIntegration.documentationLinks"
+                      :key="`${link}-${index}`"
+                      class="flex items-center justify-between px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    >
+                      <span class="truncate">{{ link }}</span>
+                      <button
+                        type="button"
+                        @click="removeDocumentationLink(index)"
+                        class="text-xs text-red-600 hover:text-red-700"
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="showDocsPreview && newIntegration.documentationLinks.length" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Embed</p>
+                    <div class="mt-3 space-y-4">
+                      <div v-for="(link, index) in newIntegration.documentationLinks" :key="`preview-${index}`" class="space-y-2">
+                        <div class="w-full h-40 rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
+                          <iframe
+                            :src="link"
+                            class="w-full h-full"
+                            loading="lazy"
+                            referrerpolicy="no-referrer"
+                            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                            title="Documentação"
+                          ></iframe>
+                        </div>
+                        <a
+                          :href="link"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+                        >
+                          Abrir em nova aba
+                        </a>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-slate-700 mb-1">Access Key ID da AWS</label>
@@ -291,6 +371,13 @@
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">
                         {{ integration.memoryMb || 128 }} MB
                       </span>
+                      <span v-if="integration.showCostEstimate === false" class="mx-2">•</span>
+                      <span
+                        v-if="integration.showCostEstimate === false"
+                        class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700"
+                      >
+                        Custos ocultos
+                      </span>
                       <span v-if="integration.companyName" class="mx-2">•</span>
                       <span
                         v-if="integration.companyName"
@@ -302,6 +389,15 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
+                  <button
+                    @click="openEditIntegration(integration)"
+                    class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                  >
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m2 0h2a2 2 0 012 2v2m0 2v2a2 2 0 01-2 2h-2m-2 0h-2m-2 0H7a2 2 0 01-2-2v-2m0-2V7a2 2 0 012-2h2" />
+                    </svg>
+                    Editar
+                  </button>
                   <button
                     @click="testIntegration(integration)"
                     :disabled="testingId === integration.id"
@@ -601,7 +697,7 @@
     </main>
 
     <footer class="py-6 text-center text-xs text-slate-500">
-      Desenvolvido por
+      Copyright {{ new Date().getFullYear() }} ©
       <a
         href="https://chavemestragestao.com.br/"
         target="_blank"
@@ -655,6 +751,157 @@
               {{ confirmModal.confirmLabel }}
             </button>
           </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Edit Integration Modal -->
+    <transition name="fade">
+      <div v-if="editModal.visible" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="closeEditModal"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg mx-4 p-6 max-h-[90vh] flex flex-col">
+          <div class="flex items-start justify-between">
+            <h3 class="text-lg font-semibold text-slate-900">Editar integração</h3>
+            <button
+              type="button"
+              @click="closeEditModal"
+              class="text-slate-400 hover:text-slate-600"
+              aria-label="Fechar"
+            >
+              ✕
+            </button>
+          </div>
+          <form class="mt-4 space-y-4 overflow-y-auto pr-1" @submit.prevent="saveEditIntegration">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Nome da integração</label>
+              <input
+                v-model="editModal.form.name"
+                type="text"
+                required
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Memória (MB)</label>
+              <input
+                v-model.number="editModal.form.memoryMb"
+                type="number"
+                min="128"
+                step="64"
+                required
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Exibir custos no painel</label>
+              <label class="flex items-center justify-between px-4 py-2.5 border border-slate-300 rounded-lg bg-white">
+                <span class="text-sm text-slate-600">Mostrar custo estimado</span>
+                <input
+                  v-model="editModal.form.showCostEstimate"
+                  type="checkbox"
+                  class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                />
+              </label>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
+              <select
+                v-model="editModal.form.companyId"
+                required
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
+              >
+                <option value="">Selecione uma empresa</option>
+                <option v-for="company in companies" :key="company.id" :value="company.id">
+                  {{ company.name }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-sm font-medium text-slate-700">Documentações (links)</label>
+                <label class="inline-flex items-center text-xs text-slate-600 space-x-2">
+                  <input
+                    v-model="showEditDocsPreview"
+                    type="checkbox"
+                    class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                  />
+                  <span>Embed</span>
+                </label>
+              </div>
+              <div class="flex flex-col md:flex-row gap-2">
+                <input
+                  v-model="editDocumentationLink"
+                  type="url"
+                  placeholder="https://sua-doc.com/guia"
+                  class="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                />
+                <button
+                  type="button"
+                  @click="addEditDocumentationLink"
+                  class="inline-flex items-center px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50"
+                >
+                  Adicionar link
+                </button>
+              </div>
+              <div v-if="editModal.form.documentationLinks?.length" class="mt-3 space-y-2">
+                <div
+                  v-for="(link, index) in editModal.form.documentationLinks"
+                  :key="`${link}-${index}`"
+                  class="flex items-center justify-between px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                >
+                  <span class="truncate">{{ link }}</span>
+                  <button
+                    type="button"
+                    @click="removeEditDocumentationLink(index)"
+                    class="text-xs text-red-600 hover:text-red-700"
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+              <div v-if="showEditDocsPreview && editModal.form.documentationLinks?.length" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Embed</p>
+                <div class="mt-3 space-y-4">
+                  <div v-for="(link, index) in editModal.form.documentationLinks" :key="`edit-preview-${index}`" class="space-y-2">
+                    <div class="w-full h-40 rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
+                      <iframe
+                        :src="link"
+                        class="w-full h-full"
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                        title="Documentação"
+                      ></iframe>
+                    </div>
+                    <a
+                      :href="link"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      Abrir em nova aba
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="flex justify-end space-x-3 pt-2">
+              <button
+                type="button"
+                @click="closeEditModal"
+                class="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                :disabled="editModal.loading"
+                class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {{ editModal.loading ? 'Salvando...' : 'Salvar alterações' }}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </transition>
@@ -757,8 +1004,10 @@ const testingId = ref<number | null>(null)
 const newIntegration = ref({
   name: '',
   functionName: '',
-  region: 'us-east-1',
+  region: 'us-east-2',
   memoryMb: 128,
+  showCostEstimate: true,
+  documentationLinks: [] as string[],
   companyId: null as number | null,
   accessKeyId: '',
   secretAccessKey: ''
@@ -791,6 +1040,15 @@ interface ConfirmModalState {
   cancelLabel: string
 }
 
+interface EditIntegrationForm {
+  id: number | null
+  name: string
+  memoryMb: number
+  showCostEstimate: boolean
+  companyId: number | null
+  documentationLinks?: string[]
+}
+
 const toasts = ref<Toast[]>([])
 let toastId = 0
 
@@ -802,7 +1060,23 @@ const confirmModal = ref<ConfirmModalState>({
   cancelLabel: 'Cancelar'
 })
 
+const editModal = ref({
+  visible: false,
+  loading: false,
+  form: {
+    id: null,
+    name: '',
+    memoryMb: 128,
+    showCostEstimate: true,
+    companyId: null
+  } as EditIntegrationForm
+})
+
 const showIntegrationHelp = ref(false)
+const showDocsPreview = ref(false)
+const newDocumentationLink = ref('')
+const editDocumentationLink = ref('')
+const showEditDocsPreview = ref(false)
 
 const integrationPolicyJson = `{
   "Version": "2012-10-17",
@@ -837,6 +1111,72 @@ const copyIntegrationPolicyJson = async () => {
   } catch {
     showToast('error', 'Não foi possível copiar o JSON')
   }
+}
+
+const addDocumentationLink = () => {
+  const link = newDocumentationLink.value.trim()
+  if (!link) {
+    showToast('error', 'Informe um link válido')
+    return
+  }
+
+  try {
+    const parsed = new URL(link)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      showToast('error', 'Use links http ou https')
+      return
+    }
+  } catch {
+    showToast('error', 'Link inválido')
+    return
+  }
+
+  if (newIntegration.value.documentationLinks.includes(link)) {
+    showToast('error', 'Este link já foi adicionado')
+    return
+  }
+
+  newIntegration.value.documentationLinks.push(link)
+  newDocumentationLink.value = ''
+}
+
+const removeDocumentationLink = (index: number) => {
+  newIntegration.value.documentationLinks.splice(index, 1)
+}
+
+const addEditDocumentationLink = () => {
+  const link = editDocumentationLink.value.trim()
+  if (!link) {
+    showToast('error', 'Informe um link válido')
+    return
+  }
+
+  try {
+    const parsed = new URL(link)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      showToast('error', 'Use links http ou https')
+      return
+    }
+  } catch {
+    showToast('error', 'Link inválido')
+    return
+  }
+
+  if (editModal.value.form.documentationLinks?.includes(link)) {
+    showToast('error', 'Este link já foi adicionado')
+    return
+  }
+
+  if (!editModal.value.form.documentationLinks) {
+    editModal.value.form.documentationLinks = []
+  }
+
+  editModal.value.form.documentationLinks.push(link)
+  editDocumentationLink.value = ''
+}
+
+const removeEditDocumentationLink = (index: number) => {
+  editModal.value.form.documentationLinks?.splice(index, 1)
 }
 
 const requestConfirm = (options: { title?: string; message: string; confirmLabel?: string; cancelLabel?: string }) => {
@@ -928,19 +1268,25 @@ const addIntegration = async () => {
     await api.post('/lambda/integrations', {
       ...newIntegration.value,
       companyId: newIntegration.value.companyId ? Number(newIntegration.value.companyId) : defaultCompanyId.value,
-      memoryMb: Number(newIntegration.value.memoryMb) || 128
+      memoryMb: Number(newIntegration.value.memoryMb) || 128,
+      showCostEstimate: Boolean(newIntegration.value.showCostEstimate),
+      documentationLinks: newIntegration.value.documentationLinks
     })
 
     showToast('success', 'Integração adicionada com sucesso')
     newIntegration.value = {
       name: '',
       functionName: '',
-      region: 'us-east-1',
+      region: 'us-east-2',
       memoryMb: 128,
+      showCostEstimate: true,
+      documentationLinks: [],
       companyId: defaultCompanyId.value,
       accessKeyId: '',
       secretAccessKey: ''
     }
+    newDocumentationLink.value = ''
+    showDocsPreview.value = false
     await fetchIntegrations()
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao adicionar integração')
@@ -977,6 +1323,55 @@ const deleteIntegration = async (integration: Integration) => {
     integrations.value = integrations.value.filter(i => i.id !== integration.id)
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao excluir integração')
+  }
+}
+
+const openEditIntegration = (integration: Integration) => {
+  editModal.value.visible = true
+  editModal.value.form = {
+    id: integration.id,
+    name: integration.name,
+    memoryMb: integration.memoryMb || 128,
+    showCostEstimate: integration.showCostEstimate !== false,
+    companyId: integration.companyId ?? null,
+    documentationLinks: integration.documentationLinks ? [...integration.documentationLinks] : []
+  }
+}
+
+const closeEditModal = () => {
+  editModal.value.visible = false
+  editModal.value.loading = false
+  editModal.value.form = {
+    id: null,
+    name: '',
+    memoryMb: 128,
+    showCostEstimate: true,
+    companyId: null,
+    documentationLinks: []
+  }
+  editDocumentationLink.value = ''
+  showEditDocsPreview.value = false
+}
+
+const saveEditIntegration = async () => {
+  if (!editModal.value.form.id) return
+  editModal.value.loading = true
+  try {
+    await api.patch(`/lambda/integrations/${editModal.value.form.id}`, {
+      name: editModal.value.form.name,
+      memoryMb: Number(editModal.value.form.memoryMb) || 128,
+      showCostEstimate: Boolean(editModal.value.form.showCostEstimate),
+      companyId: editModal.value.form.companyId,
+      documentationLinks: editModal.value.form.documentationLinks
+    })
+
+    showToast('success', 'Integração atualizada com sucesso')
+    await fetchIntegrations()
+    closeEditModal()
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao atualizar integração')
+  } finally {
+    editModal.value.loading = false
   }
 }
 

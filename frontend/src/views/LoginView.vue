@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
     <div class="flex-1 flex items-center justify-center">
-      <div class="max-w-md w-full space-y-8 bg-white shadow-2xl rounded-2xl px-8 py-10 mx-4">
+      <div class="max-w-md w-full space-y-6 bg-white shadow-2xl rounded-2xl px-6 py-8 mx-4">
       <div class="flex flex-col items-center">
         <img :src="logoDark" alt="Logo da empresa" class="h-14 w-auto" />
         <h2 class="mt-6 text-center text-2xl font-bold text-slate-900">
@@ -9,8 +9,8 @@
         </h2>
         <p class="mt-2 text-sm text-slate-500">Monitore suas funções AWS Lambda em tempo real</p>
       </div>
-      <form class="mt-8 space-y-5" @submit.prevent="handleLogin">
-        <div class="space-y-4">
+      <form class="mt-6 space-y-4" @submit.prevent="handleLogin">
+        <div class="space-y-3">
           <div>
             <div class="flex items-center justify-between">
               <label for="company" class="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
@@ -79,6 +79,10 @@
         <div v-if="error" class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm text-center">
           {{ error }}
         </div>
+
+        <div class="text-sm text-center text-slate-500">
+          <RouterLink to="/admin/login" class="font-medium text-indigo-600 hover:text-indigo-500 transition-colors">Acesso admin</RouterLink>
+        </div>
       </form>
       </div>
     </div>
@@ -140,7 +144,7 @@
       </div>
     </transition>
     <footer class="py-6 text-center text-xs text-slate-300">
-      Desenvolvido por
+      Copyright {{ new Date().getFullYear() }} ©
       <a
         href="https://chavemestragestao.com.br/"
         target="_blank"

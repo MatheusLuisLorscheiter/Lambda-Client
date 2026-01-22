@@ -18,7 +18,7 @@ const createAccessToken = (user) => jwt.sign(
   { expiresIn: accessTokenTtl }
 );
 
-// Login
+// Client login
 router.post('/login', async (req, res) => {
   const { email, password, company } = req.body;
 
@@ -30,7 +30,7 @@ router.post('/login', async (req, res) => {
     `SELECT users.id, users.email, users.password_hash, users.role, users.company_id, companies.name AS company_name
      FROM users
      JOIN companies ON companies.id = users.company_id
-     WHERE users.email = $1 AND companies.name = $2 AND users.is_active = TRUE`,
+     WHERE users.email = $1 AND companies.name = $2 AND users.role = 'client' AND users.is_active = TRUE`,
     [email, company]
   );
   const user = result.rows[0];
@@ -57,6 +57,39 @@ router.post('/login', async (req, res) => {
   res.json({
     token,
     user: { id: user.id, email: user.email, role: user.role, companyId: user.company_id, companyName: user.company_name }
+  });
+});
+
+// Admin login
+router.post('/admin/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
+  }
+
+  const result = await query(
+    `SELECT users.id, users.email, users.password_hash, users.role, users.company_id
+     FROM users
+     WHERE users.email = $1 AND users.role = 'admin' AND users.is_active = TRUE`,
+    [email]
+  );
+
+  const user = result.rows[0];
+  if (!user) {
+    return res.status(401).json({ error: 'Credenciais inválidas' });
+  }
+
+  const validPassword = await bcrypt.compare(password, user.password_hash);
+  if (!validPassword) {
+    return res.status(401).json({ error: 'Credenciais inválidas' });
+  }
+
+  const token = createAccessToken(user);
+
+  res.json({
+    token,
+    user: { id: user.id, email: user.email, role: user.role, companyId: user.company_id || null, companyName: null }
   });
 });
 
@@ -103,7 +136,7 @@ router.post('/companies/by-email', async (req, res) => {
     `SELECT DISTINCT companies.name
      FROM users
      JOIN companies ON companies.id = users.company_id
-     WHERE LOWER(users.email) = $1
+     WHERE LOWER(users.email) = $1 AND users.role = 'client'
      ORDER BY companies.name ASC`,
     [normalizedEmail]
   );
@@ -175,6 +208,9 @@ router.get('/clients', authenticateToken, async (req, res) => {
 
   if (scope !== 'all') {
     const targetCompanyId = companyIdParam || req.user.companyId;
+    if (!targetCompanyId) {
+      return res.status(400).json({ error: 'companyId é obrigatório' });
+    }
     conditions.push(`users.company_id = $${idx++}`);
     values.push(targetCompanyId);
   } else if (companyIdParam) {
@@ -227,6 +263,9 @@ router.post('/clients', authenticateToken, async (req, res) => {
   }
 
   if (!resolvedCompanyId) {
+    if (!req.user.companyId) {
+      return res.status(400).json({ error: 'companyId é obrigatório' });
+    }
     resolvedCompanyId = req.user.companyId;
   }
 

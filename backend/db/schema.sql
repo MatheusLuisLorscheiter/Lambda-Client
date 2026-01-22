@@ -8,13 +8,14 @@ CREATE TABLE IF NOT EXISTS companies (
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
-  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'client')),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (company_id, email)
+  UNIQUE (company_id, email),
+  CHECK (role <> 'client' OR company_id IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS integrations (
@@ -24,6 +25,8 @@ CREATE TABLE IF NOT EXISTS integrations (
   function_name TEXT NOT NULL,
   region TEXT NOT NULL,
   memory_mb INTEGER NOT NULL DEFAULT 128,
+  show_cost_estimate BOOLEAN NOT NULL DEFAULT TRUE,
+  documentation_links JSONB NOT NULL DEFAULT '[]',
   access_key_encrypted TEXT NOT NULL,
   secret_key_encrypted TEXT NOT NULL,
   owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -55,6 +58,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integrations(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_client ON integrations(client_user_id);
 CREATE INDEX IF NOT EXISTS idx_integrations_company ON integrations(company_id);

@@ -14,6 +14,11 @@ const router = createRouter({
       component: () => import('../views/LoginView.vue'),
     },
     {
+      path: '/admin/login',
+      name: 'admin-login',
+      component: () => import('../views/AdminLoginView.vue')
+    },
+    {
       path: '/forgot',
       name: 'forgot-password',
       component: () => import('../views/ForgotPasswordView.vue')
@@ -50,6 +55,10 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth) {
     const isAuthenticated = await auth.checkAuth()
     if (!isAuthenticated) {
+      if (to.meta.requiresAdmin) {
+        next('/admin/login')
+        return
+      }
       next('/login')
       return
     }

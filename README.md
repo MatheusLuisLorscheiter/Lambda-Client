@@ -91,7 +91,7 @@ psql -d lambda_client -f backend/db/schema.sql
 
 # Create first admin user:
 cd backend
-node scripts/create-user.js "MyCompany" "admin@example.com" "SecurePassword123" admin
+node scripts/create-user.js - "admin@example.com" "SecurePassword123" admin
 ```
 
 ## 🔐 AWS IAM Policy
@@ -161,9 +161,9 @@ npm run dev
 ## 📊 API Endpoints
 
 ### Authentication
-- `POST /auth/login` - User login
-- `POST /auth/refresh` - Refresh access token
-- `POST /auth/logout` - Revoke refresh token
+- `POST /auth/login` - Client login (requires company)
+- `POST /auth/admin/login` - Admin login
+- `POST /auth/logout` - Logout
 - `POST /auth/password/forgot` - Request password reset
 - `POST /auth/password/reset` - Reset password
 - `GET /auth/me` - Get current user
@@ -183,7 +183,7 @@ npm run dev
 
 ## 🔒 Security Features
 
-- **JWT** with short-lived access tokens (15m) + refresh tokens (7d)
+- **JWT** with short-lived access tokens (15m)
 - **AES-256-GCM** encryption for AWS credentials at rest
 - **bcrypt** password hashing
 - **CORS** protection

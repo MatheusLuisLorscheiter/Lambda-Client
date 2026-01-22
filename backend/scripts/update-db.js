@@ -21,7 +21,14 @@ const run = async () => {
     const sql = fs.readFileSync(schemaPath, 'utf8');
     await pool.query(sql);
     const migrations = [
-        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS memory_mb INTEGER NOT NULL DEFAULT 128'
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS memory_mb INTEGER NOT NULL DEFAULT 128',
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS show_cost_estimate BOOLEAN NOT NULL DEFAULT TRUE',
+        "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS documentation_links JSONB NOT NULL DEFAULT '[]'",
+        'ALTER TABLE users ALTER COLUMN company_id DROP NOT NULL',
+        `DO $$ BEGIN
+                    ALTER TABLE users ADD CONSTRAINT chk_clients_have_company CHECK (role <> 'client' OR company_id IS NOT NULL);
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL'
     ];
 
     for (const statement of migrations) {

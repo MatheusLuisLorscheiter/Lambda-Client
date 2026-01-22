@@ -34,7 +34,7 @@
       <div class="mb-8">
         <h2 class="text-2xl font-bold text-slate-900">Painel</h2>
         <p class="mt-1 text-sm text-slate-600">
-          Acompanhe o desempenho das suas funções Lambda, logs e custos estimados
+          Acompanhe o desempenho das suas funções Lambda
         </p>
       </div>
 
@@ -144,7 +144,7 @@
           </div>
 
           <!-- Estimated Cost Card -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div v-if="showCostEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <div class="flex items-center">
               <div class="flex-shrink-0">
                 <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
@@ -157,6 +157,10 @@
                 <p class="text-sm font-medium text-slate-500">Custo estimado</p>
                 <p class="text-2xl font-bold text-slate-900">${{ costEstimate.totalCost.toFixed(4) }}</p>
                 <p class="text-xs text-slate-400">{{ costEstimate.period }}</p>
+                <p v-if="costEstimate.pricingRegion" class="text-xs text-slate-400">
+                  Preço base: {{ costEstimate.pricingRegion }}
+                  <span v-if="costEstimate.pricingSource === 'fallback'">(fallback)</span>
+                </p>
               </div>
             </div>
           </div>
@@ -199,7 +203,7 @@
         </div>
 
         <!-- Cost Breakdown -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div v-if="showCostEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <h3 class="text-lg font-semibold text-slate-900 mb-4">Detalhamento de custos</h3>
           <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div class="bg-slate-50 rounded-lg p-4">
@@ -220,9 +224,46 @@
             </div>
           </div>
           <p class="mt-4 text-xs text-slate-400">
-            * Os custos são estimados com base nos preços do AWS Lambda (us-east-1): $0.20/1M requisições + $0.0000166667/GB-segundo.
+            * Os custos são estimados com base nos preços do AWS Lambda ({{ costEstimate.pricingRegion || 'us-east-2' }}):
+            $0.20/1M requisições + $0.0000166667/GB-segundo.
             Os valores reais podem variar conforme a região e alterações nos preços da AWS.
           </p>
+        </div>
+
+        <!-- Documentation Links -->
+        <div v-if="selectedIntegration?.documentationLinks?.length" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 class="text-lg font-semibold text-slate-900 mb-4">Documentações</h3>
+          <div class="space-y-4">
+            <div v-for="(link, index) in selectedIntegration.documentationLinks" :key="`doc-${index}`" class="space-y-2">
+              <div class="w-full h-40 rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
+                <iframe
+                  :src="link"
+                  class="w-full h-full"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                  title="Documentação"
+                ></iframe>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  @click="openDocFullscreen(link)"
+                  class="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
+                >
+                  Tela cheia
+                </button>
+                <a
+                  :href="link"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+                >
+                  Abrir em nova aba
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Logs Section -->
@@ -231,6 +272,22 @@
             <div class="flex items-center justify-between">
               <h3 class="text-lg font-semibold text-slate-900">Logs recentes</h3>
               <div class="flex items-center space-x-4">
+                <label class="inline-flex items-center text-xs text-slate-600 space-x-2">
+                  <input
+                    v-model="simplifyLogs"
+                    type="checkbox"
+                    class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                    @change="loadLogs"
+                  />
+                  <span>Simplificar</span>
+                </label>
+                <button
+                  type="button"
+                  @click="toggleSummary"
+                  class="inline-flex items-center px-3 py-1.5 text-xs border border-slate-300 rounded-lg text-slate-600 bg-white hover:bg-slate-50"
+                >
+                  {{ showSummary ? 'Ocultar resumo' : 'Resumo' }}
+                </button>
                 <select
                   v-model="logFilter"
                   @change="loadLogs"
@@ -251,18 +308,52 @@
               </div>
             </div>
           </div>
+          <div v-if="showSummary" class="px-6 py-4 border-b border-slate-200 bg-white">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-slate-600">
+              <div class="bg-slate-50 rounded-lg p-3">
+                <p class="text-xs text-slate-500">Período analisado</p>
+                <p class="font-medium text-slate-700">
+                  {{ logSummary.startTime ? new Date(logSummary.startTime).toLocaleString() : '-' }}
+                  →
+                  {{ logSummary.endTime ? new Date(logSummary.endTime).toLocaleString() : '-' }}
+                </p>
+              </div>
+              <div class="bg-slate-50 rounded-lg p-3">
+                <p class="text-xs text-slate-500">Erros e timeouts</p>
+                <p class="font-medium text-slate-700">
+                  {{ logSummary.errors }} erro(s)
+                  <span class="mx-1">•</span>
+                  {{ logSummary.timeouts ?? 0 }} timeout(s)
+                </p>
+              </div>
+              <div class="bg-slate-50 rounded-lg p-3">
+                <p class="text-xs text-slate-500">Duração média</p>
+                <p class="font-medium text-slate-700">
+                  {{ logSummary.avgDurationMs ? Math.round(logSummary.avgDurationMs) : 0 }} ms
+                </p>
+              </div>
+            </div>
+            <div v-if="logSummary.topMessages?.length" class="mt-4">
+              <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Principais eventos</h4>
+              <ul class="mt-2 space-y-2">
+                <li v-for="item in logSummary.topMessages" :key="item.message" class="text-sm text-slate-700">
+                  <span class="font-semibold">{{ item.count }}x</span> — {{ item.message }}
+                </li>
+              </ul>
+            </div>
+          </div>
           <div class="max-h-96 overflow-y-auto">
             <ul class="divide-y divide-slate-100">
               <li v-for="log in logs" :key="log.timestamp" class="px-6 py-4 hover:bg-slate-50 transition-colors">
                 <div class="flex items-start space-x-3">
                   <span
-                    :class="getLogTypeClass(log.message)"
+                      :class="getDisplayTypeClass(log)"
                     class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-0.5"
                   >
-                    {{ getLogType(log.message) }}
+                      {{ getDisplayType(log) }}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm text-slate-900 font-mono break-all">{{ log.message }}</p>
+                      <p class="text-sm text-slate-900 font-mono break-all">{{ getDisplayMessage(log) }}</p>
                     <div class="mt-1 flex items-center space-x-4 text-xs text-slate-500">
                       <span>{{ new Date(log.timestamp).toLocaleString() }}</span>
                       <template v-if="log.parsedReport">
@@ -310,7 +401,7 @@
     </main>
 
     <footer class="py-6 text-center text-xs text-slate-500">
-      Desenvolvido por
+      Copyright {{ new Date().getFullYear() }} ©
       <a
         href="https://chavemestragestao.com.br/"
         target="_blank"
@@ -320,6 +411,43 @@
         Chave Mestra Gestão
       </a>
     </footer>
+
+    <!-- Documentation Fullscreen Modal -->
+    <transition name="fade">
+      <div v-if="fullscreenDocLink" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/70" @click="closeDocFullscreen"></div>
+        <div class="relative w-[96vw] h-[92vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+            <span class="text-sm font-semibold text-slate-700">Documentação</span>
+            <div class="flex items-center gap-2">
+              <a
+                :href="fullscreenDocLink"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                Abrir em nova aba
+              </a>
+              <button
+                type="button"
+                @click="closeDocFullscreen"
+                class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+          <iframe
+            :src="fullscreenDocLink"
+            class="w-full h-[calc(92vh-48px)]"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+            title="Documentação em tela cheia"
+          ></iframe>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -365,10 +493,14 @@ const selectedIntegrationId = ref('')
 const timePeriod = ref('7')
 const logFilter = ref('relevant')
 const isLoading = ref(false)
+const simplifyLogs = ref(false)
+const showSummary = ref(false)
 
 const selectedIntegration = computed(() =>
   integrations.value.find(integration => String(integration.id) === String(selectedIntegrationId.value))
 )
+
+const showCostEstimate = computed(() => selectedIntegration.value?.showCostEstimate !== false)
 
 const metrics = ref<Metrics>({
   invocations: 0,
@@ -389,10 +521,13 @@ const costEstimate = ref<CostEstimate>({
   computeCost: 0,
   totalCost: 0,
   currency: 'USD',
-  period: 'Últimos 7 dias'
+  period: 'Últimos 7 dias',
+  pricingRegion: 'us-east-2',
+  pricingSource: 'fallback'
 })
 
 const rawMetricsData = ref<MetricDataResult[]>([])
+const fullscreenDocLink = ref<string | null>(null)
 
 // Chart data
 const invocationsChartData = computed(() => {
@@ -527,6 +662,16 @@ const fetchIntegrations = async () => {
   try {
     const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations')
     integrations.value = data.integrations
+    if (integrations.value.length > 0) {
+      const hasSelected = integrations.value.some(integration => String(integration.id) === String(selectedIntegrationId.value))
+      if (!selectedIntegrationId.value || !hasSelected) {
+        const firstIntegration = integrations.value[0]
+        if (firstIntegration) {
+          selectedIntegrationId.value = String(firstIntegration.id)
+          await loadData()
+        }
+      }
+    }
   } catch (error) {
     console.error('Falha ao buscar integrações:', error)
   }
@@ -577,7 +722,12 @@ const loadMetrics = async () => {
     }
 
     // Calculate cost estimate
-    calculateCostEstimate(totalInvocations, avgDuration, selectedIntegration.value?.memoryMb ?? 128)
+    calculateCostEstimate(
+      totalInvocations,
+      avgDuration,
+      selectedIntegration.value?.memoryMb ?? 128,
+      selectedIntegration.value?.region
+    )
   } catch (error) {
     console.error('Falha ao carregar métricas:', error)
   }
@@ -588,7 +738,7 @@ const loadLogs = async () => {
     const days = parseInt(timePeriod.value)
     const startTime = Date.now() - (days * 24 * 60 * 60 * 1000)
     const data = await api.get<{ logs: LogEntry[], summary: LogSummary }>(
-      `/lambda/logs/${selectedIntegrationId.value}?type=${logFilter.value}&startTime=${startTime}&limit=100`
+      `/lambda/logs/${selectedIntegrationId.value}?type=${logFilter.value}&startTime=${startTime}&limit=100&simplify=${simplifyLogs.value ? '1' : '0'}&summary=1`
     )
 
     logs.value = data.logs
@@ -598,18 +748,55 @@ const loadLogs = async () => {
   }
 }
 
-const calculateCostEstimate = (invocations: number, avgDurationMs: number, memoryMb: number) => {
-  // AWS Lambda pricing (us-east-1)
-  const requestPrice = 0.20 / 1000000 // $0.20 per 1M requests
-  const gbSecondPrice = 0.0000166667 // per GB-second
+const toggleSummary = () => {
+  showSummary.value = !showSummary.value
+  if (showSummary.value) {
+    loadLogs()
+  }
+}
+
+const lambdaPricingByRegion: Record<string, { requestPrice: number; gbSecondPrice: number }> = {
+  'us-east-1': { requestPrice: 0.20 / 1000000, gbSecondPrice: 0.0000166667 },
+  'us-east-2': { requestPrice: 0.20 / 1000000, gbSecondPrice: 0.0000166667 }
+}
+
+type PricingResolution = {
+  requestPrice: number
+  gbSecondPrice: number
+  pricingRegion: string
+  pricingSource: 'selected' | 'fallback'
+}
+
+const resolvePricing = (region?: string): PricingResolution => {
+  const normalizedRegion = (region || '').toLowerCase()
+  if (normalizedRegion && lambdaPricingByRegion[normalizedRegion]) {
+    return {
+      pricingRegion: normalizedRegion,
+      pricingSource: 'selected' as const,
+      ...lambdaPricingByRegion[normalizedRegion]
+    }
+  }
+
+  const fallback = lambdaPricingByRegion['us-east-2'] || { requestPrice: 0, gbSecondPrice: 0 }
+
+  return {
+    pricingRegion: 'us-east-2',
+    pricingSource: 'fallback' as const,
+    requestPrice: fallback.requestPrice,
+    gbSecondPrice: fallback.gbSecondPrice
+  }
+}
+
+const calculateCostEstimate = (invocations: number, avgDurationMs: number, memoryMb: number, region?: string) => {
+  const pricing = resolvePricing(region)
   const memoryMB = memoryMb || 128
 
   const avgDurationSeconds = avgDurationMs / 1000
   const memoryGB = memoryMB / 1024
   const totalGBSeconds = invocations * avgDurationSeconds * memoryGB
 
-  const requestCost = invocations * requestPrice
-  const computeCost = totalGBSeconds * gbSecondPrice
+  const requestCost = invocations * pricing.requestPrice
+  const computeCost = totalGBSeconds * pricing.gbSecondPrice
 
   costEstimate.value = {
     totalInvocations: invocations,
@@ -618,7 +805,9 @@ const calculateCostEstimate = (invocations: number, avgDurationMs: number, memor
     computeCost,
     totalCost: requestCost + computeCost,
     currency: 'USD',
-    period: `Últimos ${timePeriod.value} dias`
+    period: `Últimos ${timePeriod.value} dias`,
+    pricingRegion: pricing.pricingRegion,
+    pricingSource: pricing.pricingSource
   }
 }
 
@@ -642,6 +831,29 @@ const getLogType = (message: string): string => {
   return 'INFO'
 }
 
+const getDisplayMessage = (log: LogEntry): string => {
+  if (simplifyLogs.value && log.simplifiedMessage) {
+    return log.simplifiedMessage
+  }
+  return log.message
+}
+
+const getDisplayType = (log: LogEntry): string => {
+  if (simplifyLogs.value && log.category) {
+    return log.category
+  }
+  return getLogType(log.message)
+}
+
+const getDisplayTypeClass = (log: LogEntry): string => {
+  if (simplifyLogs.value && log.level) {
+    if (log.level === 'error') return 'bg-red-100 text-red-800'
+    if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
+    return 'bg-blue-100 text-blue-800'
+  }
+  return getLogTypeClass(log.message)
+}
+
 const getLogTypeClass = (message: string): string => {
   const type = getLogType(message)
   switch (type) {
@@ -656,6 +868,14 @@ const getLogTypeClass = (message: string): string => {
 const handleLogout = async () => {
   await auth.logout()
   router.push('/login')
+}
+
+const openDocFullscreen = (link: string) => {
+  fullscreenDocLink.value = link
+}
+
+const closeDocFullscreen = () => {
+  fullscreenDocLink.value = null
 }
 
 onMounted(async () => {

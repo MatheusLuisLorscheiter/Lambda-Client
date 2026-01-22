@@ -84,7 +84,7 @@
       </div>
     </div>
     <footer class="py-6 text-center text-xs text-slate-300">
-      Desenvolvido por
+      Copyright {{ new Date().getFullYear() }} ©
       <a
         href="https://chavemestragestao.com.br/"
         target="_blank"

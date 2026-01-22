@@ -4,6 +4,8 @@ export interface Integration {
   functionName: string
   region: string
   memoryMb?: number
+  showCostEstimate?: boolean
+  documentationLinks?: string[]
   companyId?: number
   companyName?: string
   accessKeyId?: string
@@ -33,12 +35,16 @@ export interface ParsedReport {
   memorySizeMb: number | null
   maxMemoryUsedMb: number | null
   initDurationMs: number | null
+  status?: string | null
 }
 
 export interface LogEntry {
   timestamp: number
   message: string
   parsedReport?: ParsedReport | null
+  simplifiedMessage?: string | null
+  category?: string | null
+  level?: 'info' | 'warn' | 'error' | null
 }
 
 export interface MetricDataResult {
@@ -71,6 +77,8 @@ export interface CostEstimate {
   totalCost: number
   currency: string
   period: string
+  pricingRegion?: string
+  pricingSource?: 'selected' | 'fallback'
 }
 
 export interface ChartDataPoint {
@@ -83,6 +91,10 @@ export interface LogSummary {
   reports: number
   errors: number
   avgDurationMs: number | null
+  timeouts?: number
+  startTime?: number | null
+  endTime?: number | null
+  topMessages?: Array<{ message: string; count: number }>
 }
 
 export interface LogsResponse {
