@@ -62,11 +62,8 @@ REDIS_URL=redis://localhost:6379
 
 # JWT
 JWT_SECRET=your-secret-key
-ACCESS_TOKEN_TTL=15m
-REFRESH_TOKEN_TTL_DAYS=7
 
 # Password Reset
-RESET_TOKEN_TTL_MINUTES=30
 FRONTEND_BASE_URL=https://your-frontend-domain.com
 
 # Encryption (64 hex chars)
