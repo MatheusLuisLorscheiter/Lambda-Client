@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-screen bg-slate-50 flex flex-col">
     <!-- Navigation -->
     <nav class="bg-white shadow-sm border-b border-slate-200">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -7,7 +7,7 @@
           <div class="flex items-center space-x-3">
             <img :src="logoDark" alt="Company logo" class="h-8 w-auto" />
             <div>
-              <h1 class="text-lg font-semibold text-slate-900">Monitor de Lambda</h1>
+              <h1 class="text-lg font-semibold text-slate-900">Lambda Pulse</h1>
               <p class="text-xs text-slate-500">{{ auth.user?.companyName }}</p>
             </div>
           </div>
@@ -30,7 +30,7 @@
       </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+    <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 flex-1 w-full">
       <!-- Header -->
       <div class="mb-8">
         <h2 class="text-2xl font-bold text-slate-900">Painel</h2>
@@ -277,7 +277,7 @@
                           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                           </svg>
-                          Billed {{ log.parsedReport.billedDurationMs ?? '-' }} ms
+                          Cobrado {{ log.parsedReport.billedDurationMs ?? '-' }} ms
                         </span>
                         <span class="flex items-center">
                           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -309,6 +309,18 @@
         </p>
       </div>
     </main>
+
+    <footer class="py-6 text-center text-xs text-slate-500">
+      Desenvolvido pela
+      <a
+        href="https://chavemestragestao.com.br/"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="font-medium text-slate-600 hover:text-slate-800"
+      >
+        Chave Mestra Gestão
+      </a>
+    </footer>
   </div>
 </template>
 
@@ -393,7 +405,7 @@ const invocationsChartData = computed(() => {
   return {
     labels: sortedData.map(d => d.timestamp.toLocaleDateString()),
     datasets: [{
-      label: 'Invocations',
+      label: 'Invocações',
       data: sortedData.map(d => d.value),
       borderColor: 'rgb(59, 130, 246)',
       backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -425,7 +437,7 @@ const errorRateChartData = computed(() => {
   return {
     labels: sortedData.map(d => d.timestamp.toLocaleDateString()),
     datasets: [{
-      label: 'Error Rate (%)',
+      label: 'Taxa de erro (%)',
       data: sortedData.map(d => d.rate),
       borderColor: 'rgb(239, 68, 68)',
       backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -448,7 +460,7 @@ const durationChartData = computed(() => {
   return {
     labels: sortedData.map(d => d.timestamp.toLocaleDateString()),
     datasets: [{
-      label: 'Avg Duration (ms)',
+      label: 'Duração média (ms)',
       data: sortedData.map(d => d.value),
       backgroundColor: 'rgba(147, 51, 234, 0.8)',
       borderRadius: 4

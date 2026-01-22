@@ -19,17 +19,17 @@ const sendPasswordResetEmail = async ({ to, resetLink }) => {
     await resend.emails.send({
         from: resendFrom,
         to,
-        subject: 'Reset your password',
+        subject: 'Redefinição de senha',
         html: `
       <div style="font-family: Arial, sans-serif; line-height:1.5;">
-        <h2>Password reset</h2>
-        <p>Click the button below to reset your password. This link expires soon.</p>
+        <h2>Redefinição de senha</h2>
+        <p>Clique no botão abaixo para redefinir sua senha. Este link expira em breve.</p>
         <p>
           <a href="${resetLink}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">
-            Reset password
+            Redefinir senha
           </a>
         </p>
-        <p>If you did not request this, you can ignore this email.</p>
+        <p>Se você não solicitou isso, pode ignorar este e-mail.</p>
       </div>
     `
     });
@@ -44,19 +44,19 @@ const sendClientInviteEmail = async ({ to, companyName, loginLink }) => {
     await resend.emails.send({
         from: resendFrom,
         to,
-        subject: `You have been invited to ${companyName}`,
+        subject: `Você foi convidado para Lambda Pulse - ${companyName}`,
         html: `
       <div style="font-family: Arial, sans-serif; line-height:1.5;">
-        <h2>Welcome to ${companyName}</h2>
-        <p>You have been invited to access the Lambda monitoring dashboard.</p>
-        <p><strong>Login email:</strong> ${to}</p>
-        <p>Use the password provided by your administrator. If you need to set a new password, use the “Forgot password” option.</p>
+        <h2>Bem-vindo à Lambda Pulse</h2>
+        <p>Você foi convidado para acessar o painel de monitoramento Lambda Pulse da empresa ${companyName}.</p>
+        <p><strong>E-mail de login:</strong> ${to}</p>
+        <p>Use a senha enviada pelo administrador. Se precisar definir uma nova senha, utilize a opção “Esqueci minha senha”.</p>
         <p>
           <a href="${loginLink}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">
-            Go to login
+            Ir para o login
           </a>
         </p>
-        <p>If you were not expecting this invite, you can ignore this email.</p>
+        <p>Se você não esperava esse convite, pode ignorar este e-mail.</p>
       </div>
     `
     });

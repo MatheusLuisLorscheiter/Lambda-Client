@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-screen bg-slate-50 flex flex-col">
     <!-- Navigation -->
     <nav class="bg-white shadow-sm border-b border-slate-200">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -7,14 +7,14 @@
           <div class="flex items-center space-x-3">
             <img :src="logoDark" alt="Company logo" class="h-8 w-auto" />
             <div>
-              <h1 class="text-lg font-semibold text-slate-900">Admin Panel</h1>
+              <h1 class="text-lg font-semibold text-slate-900">Painel do Admin</h1>
               <p class="text-xs text-slate-500">{{ auth.user?.companyName }}</p>
             </div>
           </div>
           <div class="flex items-center space-x-4">
             <div class="text-right">
               <p class="text-sm font-medium text-slate-900">{{ auth.user?.email }}</p>
-              <p class="text-xs text-slate-500">Administrator</p>
+              <p class="text-xs text-slate-500">Administrador</p>
             </div>
             <button
               @click="handleLogout"
@@ -23,19 +23,19 @@
               <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
-              Logout
+              Sair
             </button>
           </div>
         </div>
       </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+    <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 flex-1 w-full">
       <!-- Header with Stats -->
       <div class="mb-8">
-        <h2 class="text-2xl font-bold text-slate-900">Lambda Integrations</h2>
+        <h2 class="text-2xl font-bold text-slate-900">Integrações Lambda</h2>
         <p class="mt-1 text-sm text-slate-600">
-          Configure AWS Lambda functions for client monitoring
+          Configure funções AWS Lambda para monitoramento de clientes
         </p>
       </div>
 
@@ -49,7 +49,7 @@
               </svg>
             </div>
             <div class="ml-4">
-              <p class="text-sm font-medium text-slate-500">Integrations</p>
+              <p class="text-sm font-medium text-slate-500">Integrações</p>
               <p class="text-2xl font-bold text-slate-900">{{ integrations.length }}</p>
             </div>
           </div>
@@ -62,7 +62,7 @@
               </svg>
             </div>
             <div class="ml-4">
-              <p class="text-sm font-medium text-slate-500">Client Users</p>
+              <p class="text-sm font-medium text-slate-500">Clientes</p>
               <p class="text-2xl font-bold text-slate-900">{{ clients.length }}</p>
             </div>
           </div>
@@ -75,7 +75,7 @@
               </svg>
             </div>
             <div class="ml-4">
-              <p class="text-sm font-medium text-slate-500">Audit Logs</p>
+              <p class="text-sm font-medium text-slate-500">Logs de auditoria</p>
               <p class="text-2xl font-bold text-slate-900">{{ auditLogs.length }}</p>
             </div>
           </div>
@@ -98,7 +98,7 @@
               <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              Integrations
+              Integrações
             </button>
             <button
               @click="activeTab = 'clients'"
@@ -112,7 +112,7 @@
               <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
-              Client Users
+              Clientes
             </button>
             <button
               @click="activeTab = 'audit'"
@@ -126,7 +126,7 @@
               <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
-              Audit Logs
+              Logs de auditoria
             </button>
           </nav>
         </div>
@@ -135,31 +135,31 @@
         <div v-if="activeTab === 'integrations'" class="p-6">
           <!-- Add Integration Form -->
           <div class="bg-slate-50 rounded-xl p-6 mb-8">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Add New Integration</h3>
+            <h3 class="text-lg font-semibold text-slate-900 mb-4">Adicionar nova integração</h3>
             <form @submit.prevent="addIntegration" class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Integration Name</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Nome da integração</label>
                   <input
                     v-model="newIntegration.name"
                     type="text"
                     required
-                    placeholder="e.g., Production API"
+                    placeholder="ex.: API Produção"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Function Name</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Nome da função</label>
                   <input
                     v-model="newIntegration.functionName"
                     type="text"
                     required
-                    placeholder="e.g., my-lambda-function"
+                    placeholder="ex.: minha-funcao-lambda"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">AWS Region</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Região AWS</label>
                   <select
                     v-model="newIntegration.region"
                     required
@@ -192,7 +192,7 @@
                   </select>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">AWS Access Key ID</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Access Key ID da AWS</label>
                   <input
                     v-model="newIntegration.accessKeyId"
                     type="text"
@@ -202,7 +202,7 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">AWS Secret Access Key</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Secret Access Key da AWS</label>
                   <input
                     v-model="newIntegration.secretAccessKey"
                     type="password"
@@ -212,12 +212,12 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Assign to Client</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Atribuir ao cliente</label>
                   <select
                     v-model="newIntegration.clientId"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
                   >
-                    <option value="">No client assigned</option>
+                    <option value="">Nenhum cliente atribuído</option>
                     <option v-for="client in integrationClients" :key="client.id" :value="client.id">
                       {{ client.email }}
                     </option>
@@ -237,7 +237,7 @@
                   <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                   </svg>
-                  Add Integration
+                  Adicionar integração
                 </button>
               </div>
             </form>
@@ -267,7 +267,7 @@
                       </span>
                     </p>
                     <p v-if="getClientEmail(integration.clientId)" class="text-xs text-slate-400 mt-1">
-                      Assigned to: {{ getClientEmail(integration.clientId) }}
+                      Atribuído a: {{ getClientEmail(integration.clientId) }}
                     </p>
                   </div>
                 </div>
@@ -284,7 +284,7 @@
                     <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Test
+                    Testar
                   </button>
                   <button
                     @click="deleteIntegration(integration)"
@@ -293,7 +293,7 @@
                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
-                    Delete
+                    Excluir
                   </button>
                 </div>
               </div>
@@ -303,7 +303,7 @@
             <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            <p class="mt-4 text-sm">No integrations yet. Add your first Lambda integration above.</p>
+            <p class="mt-4 text-sm">Nenhuma integração ainda. Adicione a primeira integração Lambda acima.</p>
           </div>
         </div>
 
@@ -311,15 +311,15 @@
         <div v-if="activeTab === 'clients'" class="p-6">
           <!-- Add Company Form -->
           <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Create Company</h3>
+            <h3 class="text-lg font-semibold text-slate-900 mb-4">Criar empresa</h3>
             <form @submit.prevent="addCompany" class="flex flex-col md:flex-row md:items-end gap-4">
               <div class="flex-1">
-                <label class="block text-sm font-medium text-slate-700 mb-1">Company Name</label>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Nome da empresa</label>
                 <input
                   v-model="newCompanyName"
                   type="text"
                   required
-                  placeholder="e.g., Acme Corp"
+                  placeholder="ex.: Acme Corp"
                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                 />
               </div>
@@ -335,18 +335,18 @@
                 <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
-                Create Company
+                Criar empresa
               </button>
             </form>
           </div>
 
           <!-- Add Client Form -->
           <div class="bg-slate-50 rounded-xl p-6 mb-8">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Create Client User</h3>
+            <h3 class="text-lg font-semibold text-slate-900 mb-4">Criar cliente</h3>
             <form @submit.prevent="addClient" class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
                   <input
                     v-model="newClient.email"
                     type="email"
@@ -356,26 +356,26 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Senha</label>
                   <input
                     v-model="newClient.password"
                     type="password"
                     required
                     minlength="8"
-                    placeholder="Min. 8 characters"
+                    placeholder="Mín. 8 caracteres"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                   />
                 </div>
                 <div class="md:col-span-2">
                   <div class="flex items-center justify-between mb-2">
-                    <label class="block text-sm font-medium text-slate-700">Company</label>
+                    <label class="block text-sm font-medium text-slate-700">Empresa</label>
                     <label class="inline-flex items-center text-xs text-slate-500 space-x-2">
                       <input
                         v-model="createNewCompany"
                         type="checkbox"
                         class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
                       />
-                      <span>Create new company</span>
+                      <span>Criar nova empresa</span>
                     </label>
                   </div>
                   <select
@@ -383,7 +383,7 @@
                     v-model="newClient.companyId"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
                   >
-                    <option value="">Select a company</option>
+                    <option value="">Selecione uma empresa</option>
                     <option v-for="company in companies" :key="company.id" :value="company.id">
                       {{ company.name }}
                     </option>
@@ -392,7 +392,7 @@
                     v-else
                     v-model="newClient.companyName"
                     type="text"
-                    placeholder="New company name"
+                    placeholder="Nome da nova empresa"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                   />
                 </div>
@@ -410,7 +410,7 @@
                   <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                   </svg>
-                  Create Client
+                  Criar cliente
                 </button>
               </div>
             </form>
@@ -432,18 +432,18 @@
                     <h4 class="text-base font-semibold text-slate-900">{{ client.email }}</h4>
                     <p class="text-sm text-slate-500">
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
-                        Client
+                        Cliente
                       </span>
                       <span
                         :class="client.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'"
                         class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ml-2"
                       >
-                        {{ client.isActive ? 'Active' : 'Inactive' }}
+                        {{ client.isActive ? 'Ativo' : 'Inativo' }}
                       </span>
                       <span class="mx-2">•</span>
-                      <span>{{ getClientIntegrationCount(client.id) }} integration(s)</span>
+                      <span>{{ getClientIntegrationCount(client.id) }} integração(ões)</span>
                     </p>
-                    <p class="text-xs text-slate-400 mt-1">Company: {{ client.companyName }}</p>
+                    <p class="text-xs text-slate-400 mt-1">Empresa: {{ client.companyName }}</p>
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
@@ -463,7 +463,7 @@
                       <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l-4-4m0 0l4-4m-4 4h18" />
                       </svg>
-                      Transfer
+                      Transferir
                     </button>
                   </div>
                   <button
@@ -473,7 +473,7 @@
                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    Resend invite
+                    Reenviar convite
                   </button>
                   <button
                     @click="toggleClientStatus(client)"
@@ -485,7 +485,7 @@
                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    {{ client.isActive ? 'Deactivate' : 'Activate' }}
+                    {{ client.isActive ? 'Inativar' : 'Ativar' }}
                   </button>
                   <button
                     @click="deleteClient(client)"
@@ -494,7 +494,7 @@
                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
-                    Delete
+                    Excluir
                   </button>
                 </div>
               </div>
@@ -504,14 +504,14 @@
             <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
-            <p class="mt-4 text-sm">No client users yet. Create your first client above.</p>
+            <p class="mt-4 text-sm">Nenhum cliente ainda. Crie o primeiro acima.</p>
           </div>
         </div>
 
         <!-- Audit Logs Tab -->
         <div v-if="activeTab === 'audit'" class="p-6">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold text-slate-900">Recent Activity</h3>
+            <h3 class="text-lg font-semibold text-slate-900">Atividade recente</h3>
             <button
               @click="fetchAuditLogs"
               class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
@@ -519,7 +519,7 @@
               <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Refresh
+              Atualizar
             </button>
           </div>
 
@@ -527,11 +527,11 @@
             <table class="min-w-full">
               <thead class="bg-slate-50">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Timestamp</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">User</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Resource</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">IP Address</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Data/hora</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Ação</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Usuário</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Recurso</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Endereço IP</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-slate-100">
@@ -548,7 +548,7 @@
                     </span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-900">
-                    {{ log.userId || 'System' }}
+                    {{ log.userId || 'Sistema' }}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500">
                     {{ log.resourceType ? `${log.resourceType} #${log.resourceId}` : '-' }}
@@ -564,11 +564,23 @@
             <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
-            <p class="mt-4 text-sm">No audit logs yet.</p>
+            <p class="mt-4 text-sm">Nenhum log de auditoria ainda.</p>
           </div>
         </div>
       </div>
     </main>
+
+    <footer class="py-6 text-center text-xs text-slate-500">
+      Desenvolvido pela
+      <a
+        href="https://chavemestragestao.com.br/"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="font-medium text-slate-600 hover:text-slate-800"
+      >
+        Chave Mestra Gestão
+      </a>
+    </footer>
 
     <!-- Toast Notifications -->
     <div class="fixed bottom-4 right-4 z-50 space-y-2">
@@ -591,6 +603,31 @@
         </div>
       </transition-group>
     </div>
+
+    <!-- Confirmation Modal -->
+    <transition name="fade">
+      <div v-if="confirmModal.visible" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="handleModalCancel"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md mx-4 p-6">
+          <h3 class="text-lg font-semibold text-slate-900">{{ confirmModal.title }}</h3>
+          <p class="mt-2 text-sm text-slate-600">{{ confirmModal.message }}</p>
+          <div class="mt-6 flex justify-end space-x-3">
+            <button
+              @click="handleModalCancel"
+              class="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50"
+            >
+              {{ confirmModal.cancelLabel }}
+            </button>
+            <button
+              @click="handleModalConfirm"
+              class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            >
+              {{ confirmModal.confirmLabel }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -648,8 +685,26 @@ interface Toast {
   message: string
 }
 
+interface ConfirmModalState {
+  visible: boolean
+  title: string
+  message: string
+  confirmLabel: string
+  cancelLabel: string
+}
+
 const toasts = ref<Toast[]>([])
 let toastId = 0
+
+const confirmModal = ref<ConfirmModalState>({
+  visible: false,
+  title: 'Confirmar ação',
+  message: '',
+  confirmLabel: 'Confirmar',
+  cancelLabel: 'Cancelar'
+})
+
+let confirmResolver: ((value: boolean) => void) | null = null
 
 const showToast = (type: 'success' | 'error', message: string) => {
   const id = ++toastId
@@ -657,6 +712,39 @@ const showToast = (type: 'success' | 'error', message: string) => {
   setTimeout(() => {
     toasts.value = toasts.value.filter(t => t.id !== id)
   }, 4000)
+}
+
+const requestConfirm = (options: { title?: string; message: string; confirmLabel?: string; cancelLabel?: string }) => {
+  confirmModal.value = {
+    visible: true,
+    title: options.title || 'Confirmar ação',
+    message: options.message,
+    confirmLabel: options.confirmLabel || 'Confirmar',
+    cancelLabel: options.cancelLabel || 'Cancelar'
+  }
+
+  return new Promise<boolean>((resolve) => {
+    confirmResolver = resolve
+  })
+}
+
+const closeConfirmModal = () => {
+  confirmModal.value.visible = false
+  confirmResolver = null
+}
+
+const handleModalConfirm = () => {
+  if (confirmResolver) {
+    confirmResolver(true)
+  }
+  closeConfirmModal()
+}
+
+const handleModalCancel = () => {
+  if (confirmResolver) {
+    confirmResolver(false)
+  }
+  closeConfirmModal()
 }
 
 const fetchIntegrations = async () => {
@@ -713,7 +801,7 @@ const addIntegration = async () => {
       clientId: newIntegration.value.clientId ? Number(newIntegration.value.clientId) : null
     })
 
-    showToast('success', 'Integration added successfully')
+    showToast('success', 'Integração adicionada com sucesso')
     newIntegration.value = {
       name: '',
       functionName: '',
@@ -724,7 +812,7 @@ const addIntegration = async () => {
     }
     await fetchIntegrations()
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to add integration')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao adicionar integração')
   } finally {
     integrationLoading.value = false
   }
@@ -734,25 +822,30 @@ const testIntegration = async (integration: Integration) => {
   testingId.value = integration.id
   try {
     await api.get(`/lambda/metrics/${integration.id}?days=1`)
-    showToast('success', `Integration "${integration.name}" is working correctly!`)
+    showToast('success', `A integração "${integration.name}" está funcionando corretamente!`)
   } catch {
-    showToast('error', `Integration "${integration.name}" test failed. Check your credentials.`)
+    showToast('error', `O teste da integração "${integration.name}" falhou. Verifique suas credenciais.`)
   } finally {
     testingId.value = null
   }
 }
 
 const deleteIntegration = async (integration: Integration) => {
-  if (!confirm(`Are you sure you want to delete "${integration.name}"? This action cannot be undone.`)) {
+  const confirmed = await requestConfirm({
+    title: 'Excluir integração',
+    message: `Tem certeza que deseja excluir "${integration.name}"? Esta ação não pode ser desfeita.`,
+    confirmLabel: 'Excluir'
+  })
+  if (!confirmed) {
     return
   }
 
   try {
     await api.del(`/lambda/integrations/${integration.id}`)
-    showToast('success', 'Integration deleted successfully')
+    showToast('success', 'Integração excluída com sucesso')
     integrations.value = integrations.value.filter(i => i.id !== integration.id)
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to delete integration')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao excluir integração')
   }
 }
 
@@ -761,11 +854,11 @@ const addClient = async () => {
   try {
     if (createNewCompany.value) {
       if (!newClient.value.companyName.trim()) {
-        showToast('error', 'Please enter a company name')
+        showToast('error', 'Informe o nome da empresa')
         return
       }
     } else if (!newClient.value.companyId) {
-      showToast('error', 'Please select a company')
+      showToast('error', 'Selecione uma empresa')
       return
     }
 
@@ -781,13 +874,13 @@ const addClient = async () => {
     }
 
     await api.post('/auth/clients', payload)
-    showToast('success', 'Client user created successfully')
+    showToast('success', 'Cliente criado com sucesso')
     newClient.value = { email: '', password: '', companyId: '', companyName: '' }
     createNewCompany.value = false
     await fetchCompanies()
     await fetchClients()
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to create client')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao criar cliente')
   } finally {
     clientLoading.value = false
   }
@@ -798,47 +891,57 @@ const addCompany = async () => {
   try {
     const trimmedName = newCompanyName.value.trim()
     if (!trimmedName) {
-      showToast('error', 'Please enter a company name')
+      showToast('error', 'Informe o nome da empresa')
       return
     }
 
     await api.post('/auth/companies', { name: trimmedName })
-    showToast('success', 'Company created successfully')
+    showToast('success', 'Empresa criada com sucesso')
     newCompanyName.value = ''
     await fetchCompanies()
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to create company')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao criar empresa')
   } finally {
     companyLoading.value = false
   }
 }
 
 const toggleClientStatus = async (client: ClientUser) => {
-  const action = client.isActive ? 'deactivate' : 'activate'
-  if (!confirm(`Are you sure you want to ${action} ${client.email}?`)) {
+  const action = client.isActive ? 'inativar' : 'ativar'
+  const confirmed = await requestConfirm({
+    title: 'Alterar status do cliente',
+    message: `Tem certeza que deseja ${action} ${client.email}?`,
+    confirmLabel: action === 'ativar' ? 'Ativar' : 'Inativar'
+  })
+  if (!confirmed) {
     return
   }
 
   try {
     await api.patch(`/auth/clients/${client.id}/status`, { isActive: !client.isActive })
-    showToast('success', `Client ${action}d successfully`)
+    showToast('success', `Cliente ${action === 'ativar' ? 'ativado' : 'inativado'} com sucesso`)
     await fetchClients()
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : `Failed to ${action} client`)
+    showToast('error', error instanceof Error ? error.message : `Falha ao ${action} cliente`)
   }
 }
 
 const deleteClient = async (client: ClientUser) => {
-  if (!confirm(`Delete ${client.email}? This action cannot be undone.`)) {
+  const confirmed = await requestConfirm({
+    title: 'Excluir cliente',
+    message: `Excluir ${client.email}? Esta ação não pode ser desfeita.`,
+    confirmLabel: 'Excluir'
+  })
+  if (!confirmed) {
     return
   }
 
   try {
     await api.del(`/auth/clients/${client.id}`)
-    showToast('success', 'Client deleted successfully')
+    showToast('success', 'Cliente excluído com sucesso')
     await fetchClients()
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to delete client')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao excluir cliente')
   }
 }
 
@@ -846,38 +949,48 @@ const transferClientCompany = async (client: ClientUser) => {
   const selectedCompanyId = transferSelection.value[client.id]
 
   if (!selectedCompanyId) {
-    showToast('error', 'Please select a company')
+    showToast('error', 'Selecione uma empresa')
     return
   }
 
   if (Number(selectedCompanyId) === client.companyId) {
-    showToast('error', 'Client is already in this company')
+    showToast('error', 'Cliente já está nesta empresa')
     return
   }
 
-  if (!confirm(`Transfer ${client.email} to another company?`)) {
+  const confirmed = await requestConfirm({
+    title: 'Transferir cliente',
+    message: `Transferir ${client.email} para outra empresa?`,
+    confirmLabel: 'Transferir'
+  })
+  if (!confirmed) {
     return
   }
 
   try {
     await api.patch(`/auth/clients/${client.id}/company`, { companyId: Number(selectedCompanyId) })
-    showToast('success', 'Client transferred successfully')
+    showToast('success', 'Cliente transferido com sucesso')
     await fetchClients()
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to transfer client')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao transferir cliente')
   }
 }
 
 const resendInvite = async (client: ClientUser) => {
-  if (!confirm(`Resend invite email to ${client.email}?`)) {
+  const confirmed = await requestConfirm({
+    title: 'Reenviar convite',
+    message: `Reenviar convite por e-mail para ${client.email}?`,
+    confirmLabel: 'Reenviar'
+  })
+  if (!confirmed) {
     return
   }
 
   try {
     await api.post(`/auth/clients/${client.id}/invite`)
-    showToast('success', 'Invite email sent')
+    showToast('success', 'Convite enviado por e-mail')
   } catch (error) {
-    showToast('error', error instanceof Error ? error.message : 'Failed to send invite')
+    showToast('error', error instanceof Error ? error.message : 'Falha ao enviar convite')
   }
 }
 
@@ -932,5 +1045,15 @@ onMounted(async () => {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(100px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
