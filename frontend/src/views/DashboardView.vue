@@ -31,11 +31,39 @@
 
     <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 flex-1 w-full">
       <!-- Header -->
-      <div class="mb-8">
-        <h2 class="text-2xl font-bold text-slate-900">Painel</h2>
-        <p class="mt-1 text-sm text-slate-600">
-          Acompanhe o desempenho das suas funções Lambda
-        </p>
+      <div class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-900">Painel</h2>
+          <p class="mt-1 text-sm text-slate-600">
+            Acompanhe o desempenho das suas funções Lambda
+          </p>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-4">
+          <label class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
+            <span>Cards & Dashboards</span>
+            <span class="relative inline-flex h-6 w-11 items-center">
+              <input v-model="showCards" type="checkbox" class="peer sr-only" />
+              <span class="absolute inset-0 rounded-full bg-slate-200 transition peer-checked:bg-indigo-600"></span>
+              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
+            </span>
+          </label>
+          <label class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
+            <span>Documentações</span>
+            <span class="relative inline-flex h-6 w-11 items-center">
+              <input v-model="showDocs" type="checkbox" class="peer sr-only" />
+              <span class="absolute inset-0 rounded-full bg-slate-200 transition peer-checked:bg-indigo-600"></span>
+              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
+            </span>
+          </label>
+          <label class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
+            <span>Logs Recentes</span>
+            <span class="relative inline-flex h-6 w-11 items-center">
+              <input v-model="showLogs" type="checkbox" class="peer sr-only" />
+              <span class="absolute inset-0 rounded-full bg-slate-200 transition peer-checked:bg-indigo-600"></span>
+              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
+            </span>
+          </label>
+        </div>
       </div>
 
       <!-- Function Selector & Time Range -->
@@ -88,7 +116,7 @@
 
       <div v-if="selectedIntegrationId" class="space-y-8">
         <!-- Metrics Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div v-if="showCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <!-- Invocations Card -->
           <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <div class="flex items-center">
@@ -167,7 +195,7 @@
         </div>
 
         <!-- Charts Row -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div v-if="showCards" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <!-- Invocations Chart -->
           <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <h3 class="text-lg font-semibold text-slate-900 mb-4">Invocações ao longo do tempo</h3>
@@ -192,7 +220,7 @@
         </div>
 
         <!-- Duration Chart -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div v-if="showCards" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <h3 class="text-lg font-semibold text-slate-900 mb-4">Duração média ao longo do tempo</h3>
           <div class="h-64">
             <Bar v-if="durationChartData.labels.length > 0" :data="durationChartData" :options="barChartOptions" />
@@ -203,7 +231,7 @@
         </div>
 
         <!-- Cost Breakdown -->
-        <div v-if="showCostEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div v-if="showCards && showCostEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <h3 class="text-lg font-semibold text-slate-900 mb-4">Detalhamento de custos</h3>
           <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div class="bg-slate-50 rounded-lg p-4">
@@ -231,19 +259,30 @@
         </div>
 
         <!-- Documentation Links -->
-        <div v-if="selectedIntegration?.documentationLinks?.length" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div v-if="showDocs && selectedIntegration?.documentationLinks?.length" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <h3 class="text-lg font-semibold text-slate-900 mb-4">Documentações</h3>
           <div class="space-y-4">
             <div v-for="(link, index) in selectedIntegration.documentationLinks" :key="`doc-${index}`" class="space-y-2">
-              <div class="w-full h-40 rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
+              <div class="relative w-full h-40 rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
                 <iframe
                   :src="link"
-                  class="w-full h-full"
+                  class="w-full h-full pointer-events-none"
                   loading="lazy"
                   referrerpolicy="no-referrer"
                   sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
                   title="Documentação"
                 ></iframe>
+                <div
+                  class="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[1px]"
+                >
+                  <button
+                    type="button"
+                    @click="openDocFullscreen(link)"
+                    class="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+                  >
+                    Expandir
+                  </button>
+                </div>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <button
@@ -267,7 +306,7 @@
         </div>
 
         <!-- Logs Section -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div v-if="showLogs" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
             <div class="flex items-center justify-between">
               <h3 class="text-lg font-semibold text-slate-900">Logs recentes</h3>
@@ -495,6 +534,9 @@ const logFilter = ref('relevant')
 const isLoading = ref(false)
 const simplifyLogs = ref(false)
 const showSummary = ref(false)
+const showCards = ref(true)
+const showDocs = ref(true)
+const showLogs = ref(true)
 
 const selectedIntegration = computed(() =>
   integrations.value.find(integration => String(integration.id) === String(selectedIntegrationId.value))
