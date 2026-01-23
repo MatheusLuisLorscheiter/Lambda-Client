@@ -1,9 +1,10 @@
 /**
  * GitHub Models API Client
  * Usa a API REST do GitHub Models para inferência de LLMs
+ * Docs: https://docs.github.com/en/rest/models/inference
  */
 
-const GITHUB_MODELS_ENDPOINT = 'https://models.github.com/chat/completions';
+const GITHUB_MODELS_ENDPOINT = 'https://models.github.ai/inference/chat/completions';
 
 const createChatCompletion = async ({ model, messages, maxTokens = 1000 }) => {
     const token = process.env.GITHUB_TOKEN;
@@ -17,6 +18,7 @@ const createChatCompletion = async ({ model, messages, maxTokens = 1000 }) => {
         headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
+            'Accept': 'application/vnd.github+json',
         },
         body: JSON.stringify({
             model,
