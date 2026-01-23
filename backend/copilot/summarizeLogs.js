@@ -2,27 +2,24 @@ const { getCopilotClient } = require('./client');
 
 const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5.1-codex-mini';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
-const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 90000;
+const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 60000;
 const FALLBACK_MAX_LOGS = Number(process.env.COPILOT_FALLBACK_MAX_LOGS) || 60;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
 const CHUNK_TIMEOUT_MS = Number(process.env.COPILOT_CHUNK_TIMEOUT_MS) || 45000;
 const FINAL_TIMEOUT_MS = Number(process.env.COPILOT_FINAL_TIMEOUT_MS) || 60000;
 const COMPACT_TIMEOUT_MS = Number(process.env.COPILOT_COMPACT_TIMEOUT_MS) || 30000;
 
-const buildSystemMessage = () => ({
-    mode: 'append',
-    content: [
-        'Você é um analista de observabilidade e compliance. Sua tarefa é produzir um resumo organizado e fiel dos logs fornecidos.',
-        'Releia os logs até 5 vezes antes de responder. Não invente fatos, causas ou números.',
-        'Se algo não estiver explícito nos logs, diga claramente "Não foi possível inferir".',
-        'Use apenas as informações presentes nos logs. Não use conhecimento externo.',
-        'Apresente a resposta em português, MUITO objetiva e curta, sem raciocínio oculto.',
-        'Limite total: no máximo 8 linhas e 600 caracteres.',
-        'Não repita dados nem liste todos os eventos; só o essencial.',
-        'Inclua evidências citando trechos dos logs (com timestamp) que sustentem cada ponto importante.',
-        'Se detectar erros, timeouts ou falhas, destaque-os com severidade.'
-    ].join('\n')
-});
+const SYSTEM_INSTRUCTIONS = [
+    'Você é um assistente que explica problemas técnicos de forma SIMPLES e HUMANA para pessoas sem conhecimento técnico.',
+    'Escreva como se estivesse conversando com um amigo que não entende de tecnologia.',
+    'NUNCA use termos técnicos como "Runtime", "module", "exception", "invoke", "init". Traduza para linguagem comum.',
+    'Em vez de "Runtime.ImportModuleError", diga "um arquivo necessário não foi encontrado".',
+    'Em vez de "exception", diga "erro" ou "problema".',
+    'Em vez de "invoke/init", diga "quando o sistema tentou executar".',
+    'Seja breve, claro e tranquilizador. Máximo 500 caracteres.',
+    'Se detectar problemas, explique o impacto prático (ex: "isso pode estar impedindo pedidos de serem criados").',
+    'Não invente. Se não souber, diga "não foi possível identificar".'
+].join(' ');
 
 const buildPrompt = ({
     integrationName,
@@ -33,37 +30,29 @@ const buildPrompt = ({
     logs
 }) => {
     const sanitizedLogs = logs.map(log => ({
-        timestamp: log.timestamp,
-        message: log.simplifiedMessage || log.message,
-        category: log.category,
-        level: log.level,
-        parsedReport: log.parsedReport
+        ts: log.timestamp,
+        msg: log.simplifiedMessage || log.message,
+        lvl: log.level
     }));
 
     return [
-        'Contexto do resumo:',
-        `- Integração: ${integrationName || 'não informado'}`,
-        `- Função Lambda: ${functionName || 'não informado'}`,
-        `- Filtro aplicado: ${filter || 'relevant'}`,
-        `- Simplificar: ${simplify ? 'sim' : 'não'}`,
-        `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
-        `- Total de logs recebidos: ${logs.length} (usando ${sanitizedLogs.length})`,
+        SYSTEM_INSTRUCTIONS,
         '',
-        'Tarefa:',
-        '1) Resuma os eventos mais relevantes em ordem lógica.',
-        '2) Liste erros/avisos críticos e sua evidência.',
-        '3) Informe tendências ou padrões observáveis (se houver).',
-        '4) Sugira próximos passos práticos (somente se suportados pelos logs).',
+        `Sistema analisado: ${functionName || integrationName || 'Sistema'}`,
+        `Quantidade de registros: ${sanitizedLogs.length}`,
         '',
-        'Formato de resposta esperado (curto):',
-        '## Resumo',
-        '- 3 bullets no máximo',
-        '## Alertas',
-        '- até 2 bullets',
-        '## Evidências',
-        '- até 3 linhas com timestamp',
+        'Responda neste formato simples:',
         '',
-        'Logs (JSON):',
+        '📊 O que aconteceu:',
+        '(explique em 2-3 frases simples o que os registros mostram)',
+        '',
+        '⚠️ Precisa de atenção?',
+        '(diga se há algo preocupante e o que pode significar na prática)',
+        '',
+        '🔍 Quando ocorreu:',
+        '(mencione os horários principais em formato legível como "20/01 às 15:27")',
+        '',
+        'Registros para analisar:',
         JSON.stringify(sanitizedLogs)
     ].join('\n');
 };
@@ -79,30 +68,13 @@ const buildChunkPrompt = ({
     totalChunks
 }) => {
     const sanitizedLogs = logs.map(log => ({
-        timestamp: log.timestamp,
-        message: log.simplifiedMessage || log.message,
-        category: log.category,
-        level: log.level,
-        parsedReport: log.parsedReport
+        ts: log.timestamp,
+        msg: log.simplifiedMessage || log.message,
+        lvl: log.level
     }));
 
     return [
-        'Você receberá um lote de logs para resumo parcial.',
-        `- Lote ${chunkIndex} de ${totalChunks}`,
-        `- Integração: ${integrationName || 'não informado'}`,
-        `- Função Lambda: ${functionName || 'não informado'}`,
-        `- Filtro aplicado: ${filter || 'relevant'}`,
-        `- Simplificar: ${simplify ? 'sim' : 'não'}`,
-        `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
-        `- Logs no lote: ${sanitizedLogs.length}`,
-        '',
-        'Tarefa do lote: 2 bullets no máximo, cada um com timestamp se possível.',
-        'Se não houver algo, diga "Sem eventos relevantes".',
-        '',
-        'Formato:',
-        '- [timestamp] resumo curto',
-        '',
-        'Logs (JSON):',
+        `Lote ${chunkIndex}/${totalChunks} - Resuma em 2 bullets com timestamp:`,
         JSON.stringify(sanitizedLogs)
     ].join('\n');
 };
@@ -115,24 +87,13 @@ const buildFinalPrompt = ({
     simplify,
     chunkSummaries
 }) => [
-    'Você receberá resumos parciais de vários lotes de logs.',
-    'Consolide em um único resumo final, sem inventar informações.',
-    `- Integração: ${integrationName || 'não informado'}`,
-    `- Função Lambda: ${functionName || 'não informado'}`,
-    `- Filtro aplicado: ${filter || 'relevant'}`,
-    `- Simplificar: ${simplify ? 'sim' : 'não'}`,
-    `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
+    'Consolide os resumos parciais abaixo em um resumo final curto:',
+    '## Resumo\n- (3 bullets)',
+    '## Alertas\n- (se houver)',
+    '## Evidências\n- [timestamp] descrição',
     '',
-    'Formato de resposta esperado (curto):',
-    '## Resumo',
-    '- 3 bullets no máximo',
-    '## Alertas',
-    '- até 2 bullets',
-    '## Evidências',
-    '- até 3 linhas com timestamp',
-    '',
-    'Resumos parciais:',
-    chunkSummaries.join('\n\n')
+    'Parciais:',
+    chunkSummaries.join('\n')
 ].join('\n');
 
 const buildCompactPrompt = ({
@@ -144,43 +105,24 @@ const buildCompactPrompt = ({
     summary,
     logs
 }) => {
-    const samples = logs.slice(0, 20).map(log => ({
-        timestamp: log.timestamp,
-        message: log.simplifiedMessage || log.message,
-        level: log.level,
-        category: log.category
+    const samples = logs.slice(0, 10).map(log => ({
+        ts: log.timestamp,
+        msg: log.simplifiedMessage || log.message,
+        lvl: log.level
     }));
 
-    const topMessages = summary?.topMessages || [];
-
     return [
-        'Você receberá um contexto compactado para gerar um resumo seguro e objetivo.',
-        `- Integração: ${integrationName || 'não informado'}`,
-        `- Função Lambda: ${functionName || 'não informado'}`,
-        `- Filtro aplicado: ${filter || 'relevant'}`,
-        `- Simplificar: ${simplify ? 'sim' : 'não'}`,
-        `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
+        SYSTEM_INSTRUCTIONS,
         '',
-        'Resumo estatístico:',
-        `- Total de logs: ${summary?.total ?? 0}`,
-        `- Erros: ${summary?.errors ?? 0}`,
-        `- Timeouts: ${summary?.timeouts ?? 0}`,
-        `- Duração média: ${summary?.avgDurationMs ? Math.round(summary.avgDurationMs) : 0} ms`,
+        `Função: ${functionName || integrationName || 'Lambda'}`,
+        `Stats: ${summary?.total ?? 0} logs, ${summary?.errors ?? 0} erros`,
         '',
-        'Principais mensagens (contagem x mensagem):',
-        topMessages.length ? topMessages.map(item => `- ${item.count}x ${item.message}`).join('\n') : '- Sem dados',
+        '## Resumo\\n- (3 bullets)',
+        '## Alertas\\n- (se houver)',
         '',
-        'Amostras de logs:',
-        JSON.stringify(samples),
-        '',
-        'Formato de resposta esperado (curto):',
-        '## Resumo',
-        '- 3 bullets no máximo',
-        '## Alertas',
-        '- até 2 bullets',
-        '## Evidências',
-        '- até 3 linhas com timestamp'
-    ].join('\n');
+        'Amostras:',
+        JSON.stringify(samples)
+    ].join('\\n');
 };
 
 const safeAbortSession = async (session) => {
@@ -226,8 +168,12 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
 
     const client = await getCopilotClient();
     let session = await client.createSession({
-        model: DEFAULT_MODEL,
-        systemMessage: buildSystemMessage()
+        model: DEFAULT_MODEL
+    });
+
+    // Debug: log session events
+    session.on((event) => {
+        console.log(`[copilot] evento: ${event.type}`);
     });
 
     const timeRange = {
@@ -249,8 +195,10 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
     const recreateSession = async () => {
         await safeDestroySession(session);
         session = await client.createSession({
-            model: DEFAULT_MODEL,
-            systemMessage: buildSystemMessage()
+            model: DEFAULT_MODEL
+        });
+        session.on((event) => {
+            console.log(`[copilot] evento: ${event.type}`);
         });
     };
 

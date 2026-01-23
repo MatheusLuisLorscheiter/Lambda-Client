@@ -491,13 +491,29 @@
               <p v-if="aiSummaryGeneratedAt" class="text-xs text-slate-400">
                 Gerado em {{ new Date(aiSummaryGeneratedAt).toLocaleString() }}
               </p>
-              <button
-                type="button"
-                @click="clearAiSummary"
-                class="inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
-              >
-                Limpar resumo
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="aiSummary"
+                  type="button"
+                  @click="copyAiSummary"
+                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+                >
+                  <svg v-if="!aiSummaryCopied" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <svg v-else class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {{ aiSummaryCopied ? 'Copiado!' : 'Copiar resumo' }}
+                </button>
+                <button
+                  type="button"
+                  @click="clearAiSummary"
+                  class="inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+                >
+                  Limpar resumo
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -616,6 +632,7 @@ const aiSummaryGeneratedAt = ref<number | null>(null)
 const aiSummaryModalOpen = ref(false)
 const aiSummaryError = ref<string | null>(null)
 const aiSummaryStartTime = ref<number | null>(null)
+const aiSummaryCopied = ref(false)
 let aiSummaryPollTimeout: ReturnType<typeof setTimeout> | null = null
 const aiSummaryStoragePrefix = 'ai-summary'
 
@@ -1050,6 +1067,20 @@ const clearAiSummary = async () => {
 
   resetAiSummaryState()
   clearAiSummaryStorage()
+}
+
+const copyAiSummary = async () => {
+  if (!aiSummary.value) return
+  
+  try {
+    await navigator.clipboard.writeText(aiSummary.value)
+    aiSummaryCopied.value = true
+    setTimeout(() => {
+      aiSummaryCopied.value = false
+    }, 2000)
+  } catch (error) {
+    console.error('Falha ao copiar resumo:', error)
+  }
 }
 
 const aiSummaryButtonLabel = computed(() => {
