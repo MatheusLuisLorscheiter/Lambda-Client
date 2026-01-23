@@ -1,10 +1,19 @@
-const { CopilotClient } = require('@github/copilot-sdk');
-
 let client = null;
 let clientStartPromise = null;
+let copilotClientClassPromise = null;
+
+const getCopilotClientClass = async () => {
+    if (!copilotClientClassPromise) {
+        copilotClientClassPromise = import('@github/copilot-sdk')
+            .then((module) => module.CopilotClient);
+    }
+
+    return copilotClientClassPromise;
+};
 
 const getCopilotClient = async () => {
     if (!client) {
+        const CopilotClient = await getCopilotClientClass();
         client = new CopilotClient();
         clientStartPromise = client.start();
     }
