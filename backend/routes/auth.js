@@ -7,7 +7,7 @@ const { query } = require('../db');
 const { logAudit } = require('../audit/logger');
 const { sendPasswordResetEmail, sendClientInviteEmail } = require('../email/resend');
 
-const accessTokenTtl = '15m';
+const accessTokenTtl = '24h';
 const resetTokenTtlMinutes = 30;
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
