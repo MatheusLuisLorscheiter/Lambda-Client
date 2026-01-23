@@ -1,6 +1,6 @@
 const { getCopilotClient } = require('./client');
 
-const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5';
+const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5.1-codex-mini';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
 const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 90000;
 const FALLBACK_MAX_LOGS = Number(process.env.COPILOT_FALLBACK_MAX_LOGS) || 60;
