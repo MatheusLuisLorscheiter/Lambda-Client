@@ -378,6 +378,24 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   };
 };
 
+const buildAiSummaryCacheKey = ({ integrationId, query, simplifyFlag, model }) => {
+  return `logs-ai-summary:${integrationId}:${query.type || 'relevant'}:${query.limit || 100}:${query.startTime || 'default'}:${query.endTime || 'now'}:${query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${model}`;
+};
+
+const parseAiSummaryState = (raw) => {
+  if (!raw) {
+    return { status: 'idle' };
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { status: 'idle' };
+  }
+};
+
+const AI_SUMMARY_TTL_SECONDS = 60 * 60;
+
 // Get integrations for user
 router.get('/integrations', authenticateToken, async (req, res) => {
   if (req.user.role === 'admin') {
@@ -728,7 +746,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/logs/:integrationId/ai-summary', authenticateToken, async (req, res) => {
+router.post('/logs/:integrationId/ai-summary/start', authenticateToken, async (req, res) => {
   const integrationId = parseInt(req.params.integrationId);
   const integration = await getIntegrationForUser(integrationId, req.user);
 
@@ -741,46 +759,146 @@ router.get('/logs/:integrationId/ai-summary', authenticateToken, async (req, res
 
     const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
     const model = process.env.COPILOT_MODEL || 'gpt-5-mini';
-    const cacheKey = `logs-ai-summary:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${model}`;
-    const cached = await redisClient.get(cacheKey);
-    if (cached) {
-      return res.json(JSON.parse(cached));
+    const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
+    const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
+
+    if (cachedState.status === 'running' || cachedState.status === 'complete') {
+      return res.json(cachedState);
     }
 
-    const payload = await buildLogsPayload({
-      integration,
-      query: req.query,
-      simplifyFlag,
-      summaryFlag: true
-    });
-
-    const result = await summarizeLogs({
-      logs: payload.logs,
-      summary: payload.summary,
-      integration
-    });
-
-    const responsePayload = {
-      summary: result.summary,
+    const runningState = {
+      status: 'running',
       model,
-      generatedAt: Date.now(),
-      logCount: payload.logs.length
+      requestedAt: Date.now()
     };
 
-    await redisClient.set(cacheKey, JSON.stringify(responsePayload), { EX: 120 });
-
-    await logAudit({
-      companyId: req.user.companyId,
-      userId: req.user.id,
-      action: 'lambda.logs.ai_summary',
-      resourceType: 'integration',
-      resourceId: String(integrationId),
-      metadata: { type: payload.filter, limit: payload.limit, startTime: payload.startTime, endTime: payload.endTime, search: payload.search, model },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
+    console.info('[copilot] resumo iniciado', {
+      integrationId,
+      type: req.query.type || 'relevant',
+      limit: req.query.limit || 100,
+      startTime: req.query.startTime || 'default',
+      endTime: req.query.endTime || 'now',
+      simplify: simplifyFlag,
+      model
     });
 
-    res.json(responsePayload);
+    await redisClient.set(cacheKey, JSON.stringify(runningState), { EX: AI_SUMMARY_TTL_SECONDS });
+
+    setImmediate(async () => {
+      try {
+        const payload = await buildLogsPayload({
+          integration,
+          query: req.query,
+          simplifyFlag,
+          summaryFlag: true
+        });
+
+        const result = await summarizeLogs({
+          logs: payload.logs,
+          summary: payload.summary,
+          integration
+        });
+
+        const responsePayload = {
+          status: 'complete',
+          summary: result.summary,
+          model,
+          generatedAt: Date.now(),
+          requestedAt: runningState.requestedAt,
+          logCount: payload.logs.length
+        };
+
+        await redisClient.set(cacheKey, JSON.stringify(responsePayload), { EX: AI_SUMMARY_TTL_SECONDS });
+
+        console.info('[copilot] resumo concluido', {
+          integrationId,
+          model,
+          logCount: payload.logs.length
+        });
+
+        await logAudit({
+          companyId: req.user.companyId,
+          userId: req.user.id,
+          action: 'lambda.logs.ai_summary',
+          resourceType: 'integration',
+          resourceId: String(integrationId),
+          metadata: { type: payload.filter, limit: payload.limit, startTime: payload.startTime, endTime: payload.endTime, search: payload.search, model },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')
+        });
+      } catch (error) {
+        const errorPayload = {
+          status: 'error',
+          model,
+          requestedAt: runningState.requestedAt,
+          error: error.message || 'Falha ao gerar resumo.'
+        };
+        await redisClient.set(cacheKey, JSON.stringify(errorPayload), { EX: AI_SUMMARY_TTL_SECONDS });
+
+        console.error('[copilot] erro ao gerar resumo', {
+          integrationId,
+          model,
+          message: error.message || 'Falha ao gerar resumo.'
+        });
+      }
+    });
+
+    res.json(runningState);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/logs/:integrationId/ai-summary/status', authenticateToken, async (req, res) => {
+  const integrationId = parseInt(req.params.integrationId);
+  const integration = await getIntegrationForUser(integrationId, req.user);
+
+  if (!integration) {
+    return res.status(404).json({ error: 'Integração não encontrada' });
+  }
+
+  try {
+    await connectRedis();
+
+    const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
+    const model = process.env.COPILOT_MODEL || 'gpt-5-mini';
+    const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
+    const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
+
+    return res.json(cachedState);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/logs/:integrationId/ai-summary', authenticateToken, async (req, res) => {
+  const integrationId = parseInt(req.params.integrationId);
+  const integration = await getIntegrationForUser(integrationId, req.user);
+
+  if (!integration) {
+    return res.status(404).json({ error: 'Integração não encontrada' });
+  }
+
+  try {
+    await connectRedis();
+
+    const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
+    const model = process.env.COPILOT_MODEL || 'gpt-5-mini';
+    const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
+
+    await redisClient.del(cacheKey);
+
+    console.info('[copilot] resumo limpo', {
+      integrationId,
+      type: req.query.type || 'relevant',
+      limit: req.query.limit || 100,
+      startTime: req.query.startTime || 'default',
+      endTime: req.query.endTime || 'now',
+      simplify: simplifyFlag,
+      model
+    });
+
+    return res.json({ cleared: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

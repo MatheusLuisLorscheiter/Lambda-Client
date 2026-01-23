@@ -327,6 +327,14 @@
                 >
                   {{ showSummary ? 'Ocultar resumo' : 'Resumo' }}
                 </button>
+                <button
+                  type="button"
+                  @click="handleAiSummaryAction"
+                  :disabled="!selectedIntegrationId || aiSummaryStatus === 'running'"
+                  class="inline-flex items-center px-3 py-1.5 text-xs border border-indigo-200 rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {{ aiSummaryButtonLabel }}
+                </button>
                 <select
                   v-model="logFilter"
                   @change="loadLogs"
@@ -379,28 +387,6 @@
                   <span class="font-semibold">{{ item.count }}x</span> — {{ item.message }}
                 </li>
               </ul>
-            </div>
-            <div class="mt-6 border-t border-slate-200 pt-4">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <h4 class="text-sm font-semibold text-slate-900">Resumo inteligente (Copilot)</h4>
-                <span v-if="aiSummaryModel" class="text-xs text-slate-500">Modelo: {{ aiSummaryModel }}</span>
-              </div>
-              <div v-if="isAiSummaryLoading" class="mt-3 text-sm text-slate-500 flex items-center gap-2">
-                <svg class="animate-spin h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Gerando resumo...
-              </div>
-              <div v-else-if="aiSummaryError" class="mt-3 text-sm text-red-600">
-                {{ aiSummaryError }}
-              </div>
-              <div v-else-if="aiSummary" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
-                {{ aiSummary }}
-              </div>
-              <div v-else class="mt-3 text-sm text-slate-500">
-                Resumo ainda não disponível.
-              </div>
             </div>
           </div>
           <div class="max-h-96 overflow-y-auto">
@@ -472,6 +458,48 @@
         Chave Mestra Gestão
       </a>
     </footer>
+
+    <!-- AI Summary Modal -->
+    <transition name="fade">
+      <div v-if="aiSummaryModalOpen" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/70" @click="closeAiSummaryModal"></div>
+        <div class="relative w-[92vw] max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50">
+            <div>
+              <h4 class="text-sm font-semibold text-slate-900">Resumo inteligente (Copilot)</h4>
+              <p v-if="aiSummaryModel" class="text-xs text-slate-500">Modelo: {{ aiSummaryModel }}</p>
+            </div>
+            <button
+              type="button"
+              @click="closeAiSummaryModal"
+              class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100"
+            >
+              Fechar
+            </button>
+          </div>
+          <div class="px-5 py-4">
+            <div v-if="aiSummary" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-wrap">
+              {{ aiSummary }}
+            </div>
+            <div v-else class="text-sm text-slate-500">
+              Resumo ainda não disponível.
+            </div>
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p v-if="aiSummaryGeneratedAt" class="text-xs text-slate-400">
+                Gerado em {{ new Date(aiSummaryGeneratedAt).toLocaleString() }}
+              </p>
+              <button
+                type="button"
+                @click="clearAiSummary"
+                class="inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+              >
+                Limpar resumo
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <!-- Documentation Fullscreen Modal -->
     <transition name="fade">
@@ -579,8 +607,12 @@ const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
 const aiSummary = ref<string | null>(null)
 const aiSummaryModel = ref<string | null>(null)
-const isAiSummaryLoading = ref(false)
+const aiSummaryStatus = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
+const aiSummaryRequestedAt = ref<number | null>(null)
+const aiSummaryGeneratedAt = ref<number | null>(null)
+const aiSummaryModalOpen = ref(false)
 const aiSummaryError = ref<string | null>(null)
+let aiSummaryPollTimeout: ReturnType<typeof setTimeout> | null = null
 
 const costEstimate = ref<CostEstimate>({
   totalInvocations: 0,
@@ -748,6 +780,7 @@ const fetchIntegrations = async () => {
 const loadData = async () => {
   if (!selectedIntegrationId.value) return
   isLoading.value = true
+  resetAiSummaryState()
 
   try {
     await Promise.all([
@@ -811,35 +844,9 @@ const loadLogs = async () => {
 
     logs.value = data.logs
     logSummary.value = data.summary
-    if (showSummary.value) {
-      await loadAiSummary(startTime)
-    }
+    await fetchAiSummaryStatus(startTime)
   } catch (error) {
     console.error('Falha ao carregar logs:', error)
-  }
-}
-
-const loadAiSummary = async (startTimeOverride?: number) => {
-  if (!selectedIntegrationId.value) return
-
-  const days = parseInt(timePeriod.value)
-  const startTime = startTimeOverride ?? Date.now() - (days * 24 * 60 * 60 * 1000)
-
-  isAiSummaryLoading.value = true
-  aiSummaryError.value = null
-
-  try {
-    const data = await api.get<{ summary: string; model?: string }>(
-      `/lambda/logs/${selectedIntegrationId.value}/ai-summary?type=${logFilter.value}&startTime=${startTime}&limit=100&simplify=${simplifyLogs.value ? '1' : '0'}`
-    )
-
-    aiSummary.value = data.summary
-    aiSummaryModel.value = data.model || null
-  } catch (error) {
-    console.error('Falha ao carregar resumo inteligente:', error)
-    aiSummaryError.value = 'Não foi possível gerar o resumo agora.'
-  } finally {
-    isAiSummaryLoading.value = false
   }
 }
 
@@ -847,11 +854,138 @@ const toggleSummary = () => {
   showSummary.value = !showSummary.value
   if (showSummary.value) {
     loadLogs()
-  } else {
-    aiSummary.value = null
-    aiSummaryError.value = null
   }
 }
+
+const resetAiSummaryState = () => {
+  aiSummaryStatus.value = 'idle'
+  aiSummary.value = null
+  aiSummaryModel.value = null
+  aiSummaryRequestedAt.value = null
+  aiSummaryGeneratedAt.value = null
+  aiSummaryError.value = null
+  aiSummaryModalOpen.value = false
+  if (aiSummaryPollTimeout) {
+    clearTimeout(aiSummaryPollTimeout)
+    aiSummaryPollTimeout = null
+  }
+}
+
+const buildAiSummaryQuery = (startTimeOverride?: number) => {
+  const days = parseInt(timePeriod.value)
+  const startTime = startTimeOverride ?? Date.now() - (days * 24 * 60 * 60 * 1000)
+
+  return {
+    startTime,
+    type: logFilter.value,
+    limit: 100,
+    simplify: simplifyLogs.value ? '1' : '0'
+  }
+}
+
+const fetchAiSummaryStatus = async (startTimeOverride?: number) => {
+  if (!selectedIntegrationId.value) return
+
+  const params = buildAiSummaryQuery(startTimeOverride)
+
+  try {
+    const data = await api.get<{ status: string; summary?: string; model?: string; requestedAt?: number; generatedAt?: number; error?: string }>(
+      `/lambda/logs/${selectedIntegrationId.value}/ai-summary/status?type=${params.type}&startTime=${params.startTime}&limit=${params.limit}&simplify=${params.simplify}`
+    )
+
+    aiSummaryStatus.value = (data.status as typeof aiSummaryStatus.value) || 'idle'
+    aiSummary.value = data.summary || null
+    aiSummaryModel.value = data.model || null
+    aiSummaryRequestedAt.value = data.requestedAt || null
+    aiSummaryGeneratedAt.value = data.generatedAt || null
+    aiSummaryError.value = data.error || null
+
+    if (aiSummaryStatus.value === 'running') {
+      scheduleAiSummaryPoll()
+    } else {
+      if (aiSummaryPollTimeout) {
+        clearTimeout(aiSummaryPollTimeout)
+        aiSummaryPollTimeout = null
+      }
+    }
+  } catch (error) {
+    console.error('Falha ao buscar status do resumo inteligente:', error)
+  }
+}
+
+const scheduleAiSummaryPoll = () => {
+  if (aiSummaryPollTimeout) {
+    clearTimeout(aiSummaryPollTimeout)
+  }
+  aiSummaryPollTimeout = setTimeout(() => fetchAiSummaryStatus(), 4000)
+}
+
+const startAiSummary = async () => {
+  if (!selectedIntegrationId.value) return
+
+  const params = buildAiSummaryQuery()
+
+  aiSummaryStatus.value = 'running'
+  aiSummaryError.value = null
+  scheduleAiSummaryPoll()
+
+  try {
+    const data = await api.post<{ status: string; summary?: string; model?: string; requestedAt?: number; generatedAt?: number; error?: string }>(
+      `/lambda/logs/${selectedIntegrationId.value}/ai-summary/start?type=${params.type}&startTime=${params.startTime}&limit=${params.limit}&simplify=${params.simplify}`
+    )
+
+    aiSummaryStatus.value = (data.status as typeof aiSummaryStatus.value) || 'running'
+    aiSummary.value = data.summary || null
+    aiSummaryModel.value = data.model || null
+    aiSummaryRequestedAt.value = data.requestedAt || null
+    aiSummaryGeneratedAt.value = data.generatedAt || null
+    aiSummaryError.value = data.error || null
+
+    if (aiSummaryStatus.value === 'running') {
+      scheduleAiSummaryPoll()
+    }
+  } catch (error) {
+    console.error('Falha ao iniciar resumo inteligente:', error)
+    aiSummaryStatus.value = 'error'
+    aiSummaryError.value = 'Não foi possível iniciar o resumo agora.'
+  }
+}
+
+const handleAiSummaryAction = async () => {
+  if (aiSummaryStatus.value === 'complete') {
+    aiSummaryModalOpen.value = true
+    return
+  }
+
+  await startAiSummary()
+}
+
+const closeAiSummaryModal = () => {
+  aiSummaryModalOpen.value = false
+}
+
+const clearAiSummary = async () => {
+  if (!selectedIntegrationId.value) return
+
+  const params = buildAiSummaryQuery()
+
+  try {
+    await api.del(
+      `/lambda/logs/${selectedIntegrationId.value}/ai-summary?type=${params.type}&startTime=${params.startTime}&limit=${params.limit}&simplify=${params.simplify}`
+    )
+  } catch (error) {
+    console.error('Falha ao limpar resumo inteligente:', error)
+  }
+
+  resetAiSummaryState()
+}
+
+const aiSummaryButtonLabel = computed(() => {
+  if (aiSummaryStatus.value === 'complete') return 'Visualizar resumo gerado'
+  if (aiSummaryStatus.value === 'running') return 'Gerando resumo...'
+  if (aiSummaryStatus.value === 'error') return 'Gerar resumo novamente'
+  return 'Resumo inteligente (Copilot)'
+})
 
 const lambdaPricingByRegion: Record<string, { requestPrice: number; gbSecondPrice: number }> = {
   'us-east-1': { requestPrice: 0.20 / 1000000, gbSecondPrice: 0.0000166667 },
