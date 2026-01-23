@@ -380,6 +380,28 @@
                 </li>
               </ul>
             </div>
+            <div class="mt-6 border-t border-slate-200 pt-4">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <h4 class="text-sm font-semibold text-slate-900">Resumo inteligente (Copilot)</h4>
+                <span v-if="aiSummaryModel" class="text-xs text-slate-500">Modelo: {{ aiSummaryModel }}</span>
+              </div>
+              <div v-if="isAiSummaryLoading" class="mt-3 text-sm text-slate-500 flex items-center gap-2">
+                <svg class="animate-spin h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Gerando resumo...
+              </div>
+              <div v-else-if="aiSummaryError" class="mt-3 text-sm text-red-600">
+                {{ aiSummaryError }}
+              </div>
+              <div v-else-if="aiSummary" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
+                {{ aiSummary }}
+              </div>
+              <div v-else class="mt-3 text-sm text-slate-500">
+                Resumo ainda não disponível.
+              </div>
+            </div>
           </div>
           <div class="max-h-96 overflow-y-auto">
             <ul class="divide-y divide-slate-100">
@@ -555,6 +577,10 @@ const metrics = ref<Metrics>({
 
 const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
+const aiSummary = ref<string | null>(null)
+const aiSummaryModel = ref<string | null>(null)
+const isAiSummaryLoading = ref(false)
+const aiSummaryError = ref<string | null>(null)
 
 const costEstimate = ref<CostEstimate>({
   totalInvocations: 0,
@@ -785,8 +811,35 @@ const loadLogs = async () => {
 
     logs.value = data.logs
     logSummary.value = data.summary
+    if (showSummary.value) {
+      await loadAiSummary(startTime)
+    }
   } catch (error) {
     console.error('Falha ao carregar logs:', error)
+  }
+}
+
+const loadAiSummary = async (startTimeOverride?: number) => {
+  if (!selectedIntegrationId.value) return
+
+  const days = parseInt(timePeriod.value)
+  const startTime = startTimeOverride ?? Date.now() - (days * 24 * 60 * 60 * 1000)
+
+  isAiSummaryLoading.value = true
+  aiSummaryError.value = null
+
+  try {
+    const data = await api.get<{ summary: string; model?: string }>(
+      `/lambda/logs/${selectedIntegrationId.value}/ai-summary?type=${logFilter.value}&startTime=${startTime}&limit=100&simplify=${simplifyLogs.value ? '1' : '0'}`
+    )
+
+    aiSummary.value = data.summary
+    aiSummaryModel.value = data.model || null
+  } catch (error) {
+    console.error('Falha ao carregar resumo inteligente:', error)
+    aiSummaryError.value = 'Não foi possível gerar o resumo agora.'
+  } finally {
+    isAiSummaryLoading.value = false
   }
 }
 
@@ -794,6 +847,9 @@ const toggleSummary = () => {
   showSummary.value = !showSummary.value
   if (showSummary.value) {
     loadLogs()
+  } else {
+    aiSummary.value = null
+    aiSummaryError.value = null
   }
 }
 

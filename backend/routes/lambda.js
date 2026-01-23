@@ -7,6 +7,7 @@ const { query } = require('../db');
 const { encrypt, decrypt } = require('../security/crypto');
 const { client: redisClient, connectRedis } = require('../cache/redis');
 const { logAudit } = require('../audit/logger');
+const { summarizeLogs } = require('../copilot/summarizeLogs');
 
 const router = express.Router();
 
@@ -253,6 +254,128 @@ const normalizeDocumentationLinks = (input) => {
   }
 
   return normalized;
+};
+
+const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag }) => {
+  const logsClient = new CloudWatchLogsClient({
+    region: integration.region,
+    credentials: {
+      accessKeyId: decrypt(integration.access_key_encrypted),
+      secretAccessKey: decrypt(integration.secret_key_encrypted)
+    }
+  });
+
+  const logGroupName = `/aws/lambda/${integration.function_name}`;
+
+  const limit = Math.min(Number(query.limit) || 100, 500);
+  const startTime = Number(query.startTime) || Date.now() - (24 * 60 * 60 * 1000);
+  const endTime = Number(query.endTime) || Date.now();
+  const search = (query.search || '').toString().trim();
+
+  const filterCommand = new FilterLogEventsCommand({
+    logGroupName,
+    limit,
+    startTime,
+    endTime,
+    filterPattern: search ? `?"${search}"` : undefined
+  });
+
+  const response = await logsClient.send(filterCommand);
+
+  const type = (query.type || 'relevant').toString().toLowerCase();
+
+  const normalizedLogs = (response.events || []).map(event => {
+    const parsedReport = parseReportLine(event.message);
+    const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport) : null;
+
+    return {
+      timestamp: event.timestamp,
+      message: event.message,
+      parsedReport,
+      simplifiedMessage: simplified?.simplifiedMessage ?? null,
+      category: simplified?.category ?? null,
+      level: simplified?.level ?? null
+    };
+  });
+
+  const relevantLogs = normalizedLogs.filter(event => {
+    const message = (event.message || '').toLowerCase();
+    const isReportLine = /^report\b/i.test(event.message || '');
+
+    if (type === 'error') {
+      return message.includes('error') || message.includes('fail') || message.includes('exception');
+    }
+
+    if (type === 'report') {
+      return isReportLine;
+    }
+
+    if (type === 'all') {
+      return true;
+    }
+
+    return message.includes('error') ||
+      message.includes('duration') ||
+      message.includes('report') ||
+      message.includes('fail') ||
+      Boolean(event.parsedReport);
+  });
+
+  const sortedLogs = relevantLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  const reportEvents = sortedLogs.filter(log => log.parsedReport);
+  const durationSamples = reportEvents
+    .map(log => log.parsedReport.durationMs)
+    .filter(value => typeof value === 'number');
+
+  const timeRange = sortedLogs.length
+    ? {
+      startTime: sortedLogs[sortedLogs.length - 1].timestamp,
+      endTime: sortedLogs[0].timestamp
+    }
+    : { startTime: null, endTime: null };
+
+  const timeoutCount = reportEvents.filter(log => log.parsedReport?.status === 'timeout').length;
+
+  const topMessagesMap = new Map();
+  if (summaryFlag) {
+    sortedLogs.forEach(log => {
+      const baseMessage = log.simplifiedMessage || log.message || '';
+      const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
+      if (!trimmed) return;
+      topMessagesMap.set(trimmed, (topMessagesMap.get(trimmed) || 0) + 1);
+    });
+  }
+
+  const topMessages = summaryFlag
+    ? Array.from(topMessagesMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([message, count]) => ({ message, count }))
+    : undefined;
+
+  return {
+    logs: sortedLogs,
+    summary: {
+      total: sortedLogs.length,
+      reports: reportEvents.length,
+      errors: sortedLogs.filter(log => log.level === 'error' || (log.message || '').toLowerCase().includes('error')).length,
+      avgDurationMs: durationSamples.length
+        ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
+        : null,
+      timeouts: timeoutCount,
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
+      topMessages,
+      filter: type,
+      simplify: simplifyFlag
+    },
+    filter: type,
+    limit,
+    startTime,
+    endTime,
+    search
+  };
 };
 
 // Get integrations for user
@@ -580,119 +703,12 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    const logsClient = new CloudWatchLogsClient({
-      region: integration.region,
-      credentials: {
-        accessKeyId: decrypt(integration.access_key_encrypted),
-        secretAccessKey: decrypt(integration.secret_key_encrypted)
-      }
+    const payload = await buildLogsPayload({
+      integration,
+      query: req.query,
+      simplifyFlag,
+      summaryFlag
     });
-
-    // Get log group for the function
-    const logGroupName = `/aws/lambda/${integration.function_name}`;
-
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
-    const startTime = Number(req.query.startTime) || Date.now() - (24 * 60 * 60 * 1000);
-    const endTime = Number(req.query.endTime) || Date.now();
-    const search = (req.query.search || '').toString().trim();
-
-    const filterCommand = new FilterLogEventsCommand({
-      logGroupName,
-      limit,
-      startTime,
-      endTime,
-      filterPattern: search ? `?"${search}"` : undefined
-    });
-
-    const response = await logsClient.send(filterCommand);
-
-    const type = (req.query.type || 'relevant').toString().toLowerCase();
-
-    const normalizedLogs = (response.events || []).map(event => {
-      const parsedReport = parseReportLine(event.message);
-      const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport) : null;
-
-      return {
-        timestamp: event.timestamp,
-        message: event.message,
-        parsedReport,
-        simplifiedMessage: simplified?.simplifiedMessage ?? null,
-        category: simplified?.category ?? null,
-        level: simplified?.level ?? null
-      };
-    });
-
-    const relevantLogs = normalizedLogs.filter(event => {
-      const message = (event.message || '').toLowerCase();
-      const isReportLine = /^report\b/i.test(event.message || '');
-
-      if (type === 'error') {
-        return message.includes('error') || message.includes('fail') || message.includes('exception');
-      }
-
-      if (type === 'report') {
-        return isReportLine;
-      }
-
-      if (type === 'all') {
-        return true;
-      }
-
-      return message.includes('error') ||
-        message.includes('duration') ||
-        message.includes('report') ||
-        message.includes('fail') ||
-        Boolean(event.parsedReport);
-    });
-
-    const sortedLogs = relevantLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-    const reportEvents = sortedLogs.filter(log => log.parsedReport);
-    const durationSamples = reportEvents
-      .map(log => log.parsedReport.durationMs)
-      .filter(value => typeof value === 'number');
-
-    const timeRange = sortedLogs.length
-      ? {
-        startTime: sortedLogs[sortedLogs.length - 1].timestamp,
-        endTime: sortedLogs[0].timestamp
-      }
-      : { startTime: null, endTime: null };
-
-    const timeoutCount = reportEvents.filter(log => log.parsedReport?.status === 'timeout').length;
-
-    const topMessagesMap = new Map();
-    if (summaryFlag) {
-      sortedLogs.forEach(log => {
-        const baseMessage = log.simplifiedMessage || log.message || '';
-        const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
-        if (!trimmed) return;
-        topMessagesMap.set(trimmed, (topMessagesMap.get(trimmed) || 0) + 1);
-      });
-    }
-
-    const topMessages = summaryFlag
-      ? Array.from(topMessagesMap.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([message, count]) => ({ message, count }))
-      : undefined;
-
-    const payload = {
-      logs: sortedLogs,
-      summary: {
-        total: sortedLogs.length,
-        reports: reportEvents.length,
-        errors: sortedLogs.filter(log => log.level === 'error' || (log.message || '').toLowerCase().includes('error')).length,
-        avgDurationMs: durationSamples.length
-          ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
-          : null,
-        timeouts: timeoutCount,
-        startTime: timeRange.startTime,
-        endTime: timeRange.endTime,
-        topMessages
-      }
-    };
 
     await redisClient.set(cacheKey, JSON.stringify(payload), { EX: 60 });
 
@@ -702,11 +718,69 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
       action: 'lambda.logs.fetch',
       resourceType: 'integration',
       resourceId: String(integrationId),
-      metadata: { type, limit, startTime, endTime, search },
+      metadata: { type: payload.filter, limit: payload.limit, startTime: payload.startTime, endTime: payload.endTime, search: payload.search },
       ipAddress: req.ip,
       userAgent: req.get('user-agent')
     });
     res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/logs/:integrationId/ai-summary', authenticateToken, async (req, res) => {
+  const integrationId = parseInt(req.params.integrationId);
+  const integration = await getIntegrationForUser(integrationId, req.user);
+
+  if (!integration) {
+    return res.status(404).json({ error: 'Integração não encontrada' });
+  }
+
+  try {
+    await connectRedis();
+
+    const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
+    const model = process.env.COPILOT_MODEL || 'gpt-5-mini';
+    const cacheKey = `logs-ai-summary:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${model}`;
+    const cached = await redisClient.get(cacheKey);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
+
+    const payload = await buildLogsPayload({
+      integration,
+      query: req.query,
+      simplifyFlag,
+      summaryFlag: true
+    });
+
+    const result = await summarizeLogs({
+      logs: payload.logs,
+      summary: payload.summary,
+      integration
+    });
+
+    const responsePayload = {
+      summary: result.summary,
+      model,
+      generatedAt: Date.now(),
+      logCount: payload.logs.length
+    };
+
+    await redisClient.set(cacheKey, JSON.stringify(responsePayload), { EX: 120 });
+
+    await logAudit({
+      companyId: req.user.companyId,
+      userId: req.user.id,
+      action: 'lambda.logs.ai_summary',
+      resourceType: 'integration',
+      resourceId: String(integrationId),
+      metadata: { type: payload.filter, limit: payload.limit, startTime: payload.startTime, endTime: payload.endTime, search: payload.search, model },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
