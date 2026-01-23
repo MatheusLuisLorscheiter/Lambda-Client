@@ -1,8 +1,8 @@
 const { getCopilotClient } = require('./client');
 
-const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5-codex-mini';
+const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
-const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 360000;
+const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 90000;
 const FALLBACK_MAX_LOGS = Number(process.env.COPILOT_FALLBACK_MAX_LOGS) || 60;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
 const CHUNK_TIMEOUT_MS = Number(process.env.COPILOT_CHUNK_TIMEOUT_MS) || 45000;
@@ -10,6 +10,7 @@ const FINAL_TIMEOUT_MS = Number(process.env.COPILOT_FINAL_TIMEOUT_MS) || 60000;
 const COMPACT_TIMEOUT_MS = Number(process.env.COPILOT_COMPACT_TIMEOUT_MS) || 30000;
 
 const buildSystemMessage = () => ({
+    mode: 'append',
     content: [
         'Você é um analista de observabilidade e compliance. Sua tarefa é produzir um resumo organizado e fiel dos logs fornecidos.',
         'Releia os logs até 5 vezes antes de responder. Não invente fatos, causas ou números.',
@@ -182,6 +183,40 @@ const buildCompactPrompt = ({
     ].join('\n');
 };
 
+const safeAbortSession = async (session) => {
+    try {
+        if (session?.abort) {
+            await session.abort();
+        }
+    } catch {
+        // ignore abort errors
+    }
+};
+
+const safeDestroySession = async (session) => {
+    try {
+        if (session?.destroy) {
+            await session.destroy();
+        }
+    } catch {
+        // ignore destroy errors
+    }
+};
+
+const sendWithTimeout = async (session, options, timeout) => {
+    try {
+        const response = await session.sendAndWait(options, timeout);
+        return response;
+    } catch (error) {
+        const message = error?.message || '';
+        if (message.toLowerCase().includes('timeout')) {
+            // On timeout, try to abort the session to clean up any pending work
+            await safeAbortSession(session);
+        }
+        throw error;
+    }
+};
+
 const summarizeLogs = async ({ logs, summary, integration }) => {
     if (!logs?.length) {
         return {
@@ -212,11 +247,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
     const primaryLogs = logs.slice(0, MAX_LOGS);
 
     const recreateSession = async () => {
-        try {
-            await session.destroy();
-        } catch {
-            // ignore
-        }
+        await safeDestroySession(session);
         session = await client.createSession({
             model: DEFAULT_MODEL,
             systemMessage: buildSystemMessage()
@@ -225,7 +256,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
 
     try {
         if (primaryLogs.length <= CHUNK_SIZE) {
-            const response = await session.sendAndWait({
+            const response = await sendWithTimeout(session, {
                 prompt: buildPromptPayload(primaryLogs)
             }, DEFAULT_TIMEOUT_MS);
 
@@ -244,7 +275,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
             const chunkLogs = primaryLogs.slice(i, i + CHUNK_SIZE);
 
             try {
-                const chunkResponse = await session.sendAndWait({
+                const chunkResponse = await sendWithTimeout(session, {
                     prompt: buildChunkPrompt({
                         integrationName: integration?.name,
                         functionName: integration?.function_name,
@@ -262,10 +293,15 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
             } catch (error) {
                 const errorMessage = error?.message || 'Falha ao resumir este lote.';
                 chunkSummaries.push(`## Lote ${chunkIndex}\nFalha ao resumir este lote: ${errorMessage}`);
+
+                // On chunk error, recreate session to avoid state issues
+                if (errorMessage.toLowerCase().includes('timeout')) {
+                    await recreateSession();
+                }
             }
         }
 
-        const finalResponse = await session.sendAndWait({
+        const finalResponse = await sendWithTimeout(session, {
             prompt: buildFinalPrompt({
                 integrationName: integration?.name,
                 functionName: integration?.function_name,
@@ -295,7 +331,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
         const retryTimeout = Math.max(DEFAULT_TIMEOUT_MS, 120000);
 
         try {
-            const retryResponse = await session.sendAndWait({
+            const retryResponse = await sendWithTimeout(session, {
                 prompt: buildPromptPayload(fallbackLogs)
             }, retryTimeout);
 
@@ -307,7 +343,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
         } catch (retryError) {
             await recreateSession();
 
-            const compactResponse = await session.sendAndWait({
+            const compactResponse = await sendWithTimeout(session, {
                 prompt: buildCompactPrompt({
                     integrationName: integration?.name,
                     functionName: integration?.function_name,
@@ -326,7 +362,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
             };
         }
     } finally {
-        await session.destroy();
+        await safeDestroySession(session);
     }
 };
 

@@ -335,6 +335,9 @@
                 >
                   {{ aiSummaryButtonLabel }}
                 </button>
+                <span v-if="aiSummaryStatus === 'error'" class="text-xs text-red-600">
+                  {{ aiSummaryError || 'Não foi possível gerar o resumo com o Copilot. Tente novamente com um filtro menor/menos logs.' }}
+                </span>
                 <select
                   v-model="logFilter"
                   @change="loadLogs"
@@ -955,7 +958,11 @@ const fetchAiSummaryStatus = async (startTimeOverride?: number) => {
     aiSummaryModel.value = data.model || null
     aiSummaryRequestedAt.value = data.requestedAt || null
     aiSummaryGeneratedAt.value = data.generatedAt || null
-    aiSummaryError.value = data.error || null
+    if (aiSummaryStatus.value === 'error') {
+      aiSummaryError.value = data.error || 'Não foi possível gerar o resumo com o Copilot. Tente novamente com um filtro menor/menos logs.'
+    } else {
+      aiSummaryError.value = data.error || null
+    }
 
     if (aiSummaryStatus.value === 'idle') {
       clearAiSummaryStorage()
