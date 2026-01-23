@@ -757,7 +757,7 @@ router.post('/logs/:integrationId/ai-summary/start', authenticateToken, async (r
   try {
     await connectRedis();
 
-    const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
+    const simplifyFlag = true;
     const model = process.env.COPILOT_MODEL || 'gpt-5-codex-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
@@ -860,7 +860,7 @@ router.get('/logs/:integrationId/ai-summary/status', authenticateToken, async (r
   try {
     await connectRedis();
 
-    const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
+    const simplifyFlag = true;
     const model = process.env.COPILOT_MODEL || 'gpt-5-codex-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
@@ -882,7 +882,7 @@ router.delete('/logs/:integrationId/ai-summary', authenticateToken, async (req, 
   try {
     await connectRedis();
 
-    const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
+    const simplifyFlag = true;
     const model = process.env.COPILOT_MODEL || 'gpt-5-codex-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
 

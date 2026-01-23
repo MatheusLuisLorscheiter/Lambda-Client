@@ -33,8 +33,7 @@ const buildPrompt = ({
 }) => {
     const sanitizedLogs = logs.map(log => ({
         timestamp: log.timestamp,
-        message: log.message,
-        simplifiedMessage: log.simplifiedMessage,
+        message: log.simplifiedMessage || log.message,
         category: log.category,
         level: log.level,
         parsedReport: log.parsedReport
@@ -80,8 +79,7 @@ const buildChunkPrompt = ({
 }) => {
     const sanitizedLogs = logs.map(log => ({
         timestamp: log.timestamp,
-        message: log.message,
-        simplifiedMessage: log.simplifiedMessage,
+        message: log.simplifiedMessage || log.message,
         category: log.category,
         level: log.level,
         parsedReport: log.parsedReport
