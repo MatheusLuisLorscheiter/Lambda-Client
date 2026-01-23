@@ -612,6 +612,7 @@ const aiSummaryRequestedAt = ref<number | null>(null)
 const aiSummaryGeneratedAt = ref<number | null>(null)
 const aiSummaryModalOpen = ref(false)
 const aiSummaryError = ref<string | null>(null)
+const aiSummaryStartTime = ref<number | null>(null)
 let aiSummaryPollTimeout: ReturnType<typeof setTimeout> | null = null
 
 const costEstimate = ref<CostEstimate>({
@@ -863,6 +864,7 @@ const resetAiSummaryState = () => {
   aiSummaryModel.value = null
   aiSummaryRequestedAt.value = null
   aiSummaryGeneratedAt.value = null
+  aiSummaryStartTime.value = null
   aiSummaryError.value = null
   aiSummaryModalOpen.value = false
   if (aiSummaryPollTimeout) {
@@ -873,7 +875,7 @@ const resetAiSummaryState = () => {
 
 const buildAiSummaryQuery = (startTimeOverride?: number) => {
   const days = parseInt(timePeriod.value)
-  const startTime = startTimeOverride ?? Date.now() - (days * 24 * 60 * 60 * 1000)
+  const startTime = startTimeOverride ?? aiSummaryStartTime.value ?? Date.now() - (days * 24 * 60 * 60 * 1000)
 
   return {
     startTime,
@@ -885,6 +887,10 @@ const buildAiSummaryQuery = (startTimeOverride?: number) => {
 
 const fetchAiSummaryStatus = async (startTimeOverride?: number) => {
   if (!selectedIntegrationId.value) return
+
+  if (startTimeOverride && !aiSummaryStartTime.value) {
+    aiSummaryStartTime.value = startTimeOverride
+  }
 
   const params = buildAiSummaryQuery(startTimeOverride)
 
@@ -924,6 +930,8 @@ const startAiSummary = async () => {
   if (!selectedIntegrationId.value) return
 
   const params = buildAiSummaryQuery()
+
+  aiSummaryStartTime.value = params.startTime
 
   aiSummaryStatus.value = 'running'
   aiSummaryError.value = null

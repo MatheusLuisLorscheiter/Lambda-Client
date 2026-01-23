@@ -1,8 +1,13 @@
 const { getCopilotClient } = require('./client');
 
-const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5-mini';
+const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5-codex-mini';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
-const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 60000;
+const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 180000;
+const FALLBACK_MAX_LOGS = Number(process.env.COPILOT_FALLBACK_MAX_LOGS) || 60;
+const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
+const CHUNK_TIMEOUT_MS = Number(process.env.COPILOT_CHUNK_TIMEOUT_MS) || 45000;
+const FINAL_TIMEOUT_MS = Number(process.env.COPILOT_FINAL_TIMEOUT_MS) || 60000;
+const COMPACT_TIMEOUT_MS = Number(process.env.COPILOT_COMPACT_TIMEOUT_MS) || 30000;
 
 const buildSystemMessage = () => ({
     content: [
@@ -24,7 +29,7 @@ const buildPrompt = ({
     simplify,
     logs
 }) => {
-    const sanitizedLogs = logs.slice(0, MAX_LOGS).map(log => ({
+    const sanitizedLogs = logs.map(log => ({
         timestamp: log.timestamp,
         message: log.message,
         simplifiedMessage: log.simplifiedMessage,
@@ -65,6 +70,132 @@ const buildPrompt = ({
     ].join('\n');
 };
 
+const buildChunkPrompt = ({
+    integrationName,
+    functionName,
+    timeRange,
+    filter,
+    simplify,
+    logs,
+    chunkIndex,
+    totalChunks
+}) => {
+    const sanitizedLogs = logs.map(log => ({
+        timestamp: log.timestamp,
+        message: log.message,
+        simplifiedMessage: log.simplifiedMessage,
+        category: log.category,
+        level: log.level,
+        parsedReport: log.parsedReport
+    }));
+
+    return [
+        'Você receberá um lote de logs para resumo parcial.',
+        `- Lote ${chunkIndex} de ${totalChunks}`,
+        `- Integração: ${integrationName || 'não informado'}`,
+        `- Função Lambda: ${functionName || 'não informado'}`,
+        `- Filtro aplicado: ${filter || 'relevant'}`,
+        `- Simplificar: ${simplify ? 'sim' : 'não'}`,
+        `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
+        `- Logs no lote: ${sanitizedLogs.length}`,
+        '',
+        'Tarefa do lote:',
+        '1) Resuma os eventos relevantes desse lote em tópicos curtos.',
+        '2) Inclua evidências com timestamp para cada ponto crítico.',
+        '3) Se não houver algo, diga "Sem eventos relevantes".',
+        '',
+        'Formato:',
+        '- [timestamp] evento/resumo breve',
+        '',
+        'Logs (JSON):',
+        JSON.stringify(sanitizedLogs)
+    ].join('\n');
+};
+
+const buildFinalPrompt = ({
+    integrationName,
+    functionName,
+    timeRange,
+    filter,
+    simplify,
+    chunkSummaries
+}) => [
+    'Você receberá resumos parciais de vários lotes de logs.',
+    'Consolide em um único resumo final, sem inventar informações.',
+    `- Integração: ${integrationName || 'não informado'}`,
+    `- Função Lambda: ${functionName || 'não informado'}`,
+    `- Filtro aplicado: ${filter || 'relevant'}`,
+    `- Simplificar: ${simplify ? 'sim' : 'não'}`,
+    `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
+    '',
+    'Formato de resposta esperado:',
+    '## Resumo geral',
+    '- ...',
+    '## Erros e alertas',
+    '- ...',
+    '## Linha do tempo',
+    '- [timestamp] ...',
+    '## Recomendações',
+    '- ...',
+    '## Evidências',
+    '- [timestamp] "trecho do log"',
+    '',
+    'Resumos parciais:',
+    chunkSummaries.join('\n\n')
+].join('\n');
+
+const buildCompactPrompt = ({
+    integrationName,
+    functionName,
+    timeRange,
+    filter,
+    simplify,
+    summary,
+    logs
+}) => {
+    const samples = logs.slice(0, 20).map(log => ({
+        timestamp: log.timestamp,
+        message: log.simplifiedMessage || log.message,
+        level: log.level,
+        category: log.category
+    }));
+
+    const topMessages = summary?.topMessages || [];
+
+    return [
+        'Você receberá um contexto compactado para gerar um resumo seguro e objetivo.',
+        `- Integração: ${integrationName || 'não informado'}`,
+        `- Função Lambda: ${functionName || 'não informado'}`,
+        `- Filtro aplicado: ${filter || 'relevant'}`,
+        `- Simplificar: ${simplify ? 'sim' : 'não'}`,
+        `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
+        '',
+        'Resumo estatístico:',
+        `- Total de logs: ${summary?.total ?? 0}`,
+        `- Erros: ${summary?.errors ?? 0}`,
+        `- Timeouts: ${summary?.timeouts ?? 0}`,
+        `- Duração média: ${summary?.avgDurationMs ? Math.round(summary.avgDurationMs) : 0} ms`,
+        '',
+        'Principais mensagens (contagem x mensagem):',
+        topMessages.length ? topMessages.map(item => `- ${item.count}x ${item.message}`).join('\n') : '- Sem dados',
+        '',
+        'Amostras de logs:',
+        JSON.stringify(samples),
+        '',
+        'Formato de resposta esperado:',
+        '## Resumo geral',
+        '- ...',
+        '## Erros e alertas',
+        '- ...',
+        '## Linha do tempo',
+        '- [timestamp] ...',
+        '## Recomendações',
+        '- ...',
+        '## Evidências',
+        '- [timestamp] "trecho do log"'
+    ].join('\n');
+};
+
 const summarizeLogs = async ({ logs, summary, integration }) => {
     if (!logs?.length) {
         return {
@@ -73,7 +204,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
     }
 
     const client = await getCopilotClient();
-    const session = await client.createSession({
+    let session = await client.createSession({
         model: DEFAULT_MODEL,
         systemMessage: buildSystemMessage()
     });
@@ -83,24 +214,136 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
         end: summary?.endTime || null
     };
 
+    const buildPromptPayload = (logsSlice) => buildPrompt({
+        integrationName: integration?.name,
+        functionName: integration?.function_name,
+        timeRange,
+        filter: summary?.filter,
+        simplify: summary?.simplify,
+        logs: logsSlice
+    });
+
+    const primaryLogs = logs.slice(0, MAX_LOGS);
+
+    const recreateSession = async () => {
+        try {
+            await session.destroy();
+        } catch {
+            // ignore
+        }
+        session = await client.createSession({
+            model: DEFAULT_MODEL,
+            systemMessage: buildSystemMessage()
+        });
+    };
+
     try {
-        const response = await session.sendAndWait({
-            prompt: buildPrompt({
+        if (primaryLogs.length <= CHUNK_SIZE) {
+            const response = await session.sendAndWait({
+                prompt: buildPromptPayload(primaryLogs),
+                timeout: DEFAULT_TIMEOUT_MS
+            });
+
+            const content = response?.data?.content?.trim();
+
+            return {
+                summary: content || 'Não foi possível gerar o resumo no momento.'
+            };
+        }
+
+        const totalChunks = Math.ceil(primaryLogs.length / CHUNK_SIZE);
+        const chunkSummaries = [];
+
+        for (let i = 0; i < primaryLogs.length; i += CHUNK_SIZE) {
+            const chunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
+            const chunkLogs = primaryLogs.slice(i, i + CHUNK_SIZE);
+
+            try {
+                const chunkResponse = await session.sendAndWait({
+                    prompt: buildChunkPrompt({
+                        integrationName: integration?.name,
+                        functionName: integration?.function_name,
+                        timeRange,
+                        filter: summary?.filter,
+                        simplify: summary?.simplify,
+                        logs: chunkLogs,
+                        chunkIndex,
+                        totalChunks
+                    }),
+                    timeout: CHUNK_TIMEOUT_MS
+                });
+
+                const chunkContent = chunkResponse?.data?.content?.trim() || 'Sem eventos relevantes.';
+                chunkSummaries.push(`## Lote ${chunkIndex}\n${chunkContent}`);
+            } catch (error) {
+                const errorMessage = error?.message || 'Falha ao resumir este lote.';
+                chunkSummaries.push(`## Lote ${chunkIndex}\nFalha ao resumir este lote: ${errorMessage}`);
+            }
+        }
+
+        const finalResponse = await session.sendAndWait({
+            prompt: buildFinalPrompt({
                 integrationName: integration?.name,
                 functionName: integration?.function_name,
                 timeRange,
                 filter: summary?.filter,
                 simplify: summary?.simplify,
-                logs
+                chunkSummaries
             }),
-            timeout: DEFAULT_TIMEOUT_MS
+            timeout: FINAL_TIMEOUT_MS
         });
 
-        const content = response?.data?.content?.trim();
+        const finalContent = finalResponse?.data?.content?.trim();
 
         return {
-            summary: content || 'Não foi possível gerar o resumo no momento.'
+            summary: finalContent || 'Não foi possível gerar o resumo no momento.'
         };
+    } catch (error) {
+        const message = error?.message || '';
+        const isTimeout = message.toLowerCase().includes('timeout');
+
+        if (!isTimeout || primaryLogs.length <= FALLBACK_MAX_LOGS) {
+            throw error;
+        }
+
+        await recreateSession();
+
+        const fallbackLogs = primaryLogs.slice(0, FALLBACK_MAX_LOGS);
+        const retryTimeout = Math.max(DEFAULT_TIMEOUT_MS, 120000);
+
+        try {
+            const retryResponse = await session.sendAndWait({
+                prompt: buildPromptPayload(fallbackLogs),
+                timeout: retryTimeout
+            });
+
+            const retryContent = retryResponse?.data?.content?.trim();
+
+            return {
+                summary: retryContent || 'Não foi possível gerar o resumo no momento.'
+            };
+        } catch (retryError) {
+            await recreateSession();
+
+            const compactResponse = await session.sendAndWait({
+                prompt: buildCompactPrompt({
+                    integrationName: integration?.name,
+                    functionName: integration?.function_name,
+                    timeRange,
+                    filter: summary?.filter,
+                    simplify: summary?.simplify,
+                    summary,
+                    logs: fallbackLogs
+                }),
+                timeout: COMPACT_TIMEOUT_MS
+            });
+
+            const compactContent = compactResponse?.data?.content?.trim();
+
+            return {
+                summary: compactContent || 'Não foi possível gerar o resumo no momento.'
+            };
+        }
     } finally {
         await session.destroy();
     }
