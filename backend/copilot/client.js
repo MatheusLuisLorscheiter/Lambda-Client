@@ -1,42 +1,39 @@
-let client = null;
-let clientStartPromise = null;
-let copilotClientClassPromise = null;
+/**
+ * GitHub Models API Client
+ * Usa a API REST do GitHub Models para inferência de LLMs
+ */
 
-const getCopilotClientClass = async () => {
-    if (!copilotClientClassPromise) {
-        copilotClientClassPromise = import('@github/copilot-sdk')
-            .then((module) => module.CopilotClient);
+const GITHUB_MODELS_ENDPOINT = 'https://models.github.com/chat/completions';
+
+const createChatCompletion = async ({ model, messages, maxTokens = 1000 }) => {
+    const token = process.env.GITHUB_TOKEN;
+
+    if (!token) {
+        throw new Error('GITHUB_TOKEN não configurado. Adicione seu Personal Access Token nas variáveis de ambiente.');
     }
 
-    return copilotClientClassPromise;
-};
+    const response = await fetch(GITHUB_MODELS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            model,
+            messages,
+            max_tokens: maxTokens,
+        }),
+    });
 
-const getCopilotClient = async () => {
-    if (!client) {
-        const CopilotClient = await getCopilotClientClass();
-        client = new CopilotClient();
-        clientStartPromise = client.start();
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`GitHub Models API error (${response.status}): ${errorText}`);
     }
 
-    if (clientStartPromise) {
-        await clientStartPromise;
-    }
-
-    return client;
-};
-
-const stopCopilotClient = async () => {
-    if (!client) return;
-
-    try {
-        await client.stop();
-    } finally {
-        client = null;
-        clientStartPromise = null;
-    }
+    const data = await response.json();
+    return data;
 };
 
 module.exports = {
-    getCopilotClient,
-    stopCopilotClient
+    createChatCompletion
 };

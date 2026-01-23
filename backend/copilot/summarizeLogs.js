@@ -1,13 +1,9 @@
-const { getCopilotClient } = require('./client');
+const { createChatCompletion } = require('./client');
 
-const DEFAULT_MODEL = process.env.COPILOT_MODEL || 'gpt-5.1-codex-mini';
+// Modelos disponíveis no GitHub Models: gpt-4o, gpt-4o-mini, gpt-5.1-codex-mini, o1, o1-mini, etc.
+const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'gpt-5.1-codex-mini';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
-const DEFAULT_TIMEOUT_MS = Number(process.env.COPILOT_SUMMARY_TIMEOUT_MS) || 60000;
-const FALLBACK_MAX_LOGS = Number(process.env.COPILOT_FALLBACK_MAX_LOGS) || 60;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
-const CHUNK_TIMEOUT_MS = Number(process.env.COPILOT_CHUNK_TIMEOUT_MS) || 45000;
-const FINAL_TIMEOUT_MS = Number(process.env.COPILOT_FINAL_TIMEOUT_MS) || 60000;
-const COMPACT_TIMEOUT_MS = Number(process.env.COPILOT_COMPACT_TIMEOUT_MS) || 30000;
 
 const SYSTEM_INSTRUCTIONS = [
     'Você é um assistente que explica problemas técnicos de forma SIMPLES e HUMANA para pessoas sem conhecimento técnico.',
@@ -21,12 +17,9 @@ const SYSTEM_INSTRUCTIONS = [
     'Não invente. Se não souber, diga "não foi possível identificar".'
 ].join(' ');
 
-const buildPrompt = ({
+const buildUserPrompt = ({
     integrationName,
     functionName,
-    timeRange,
-    filter,
-    simplify,
     logs
 }) => {
     const sanitizedLogs = logs.map(log => ({
@@ -36,8 +29,6 @@ const buildPrompt = ({
     }));
 
     return [
-        SYSTEM_INSTRUCTIONS,
-        '',
         `Sistema analisado: ${functionName || integrationName || 'Sistema'}`,
         `Quantidade de registros: ${sanitizedLogs.length}`,
         '',
@@ -57,16 +48,7 @@ const buildPrompt = ({
     ].join('\n');
 };
 
-const buildChunkPrompt = ({
-    integrationName,
-    functionName,
-    timeRange,
-    filter,
-    simplify,
-    logs,
-    chunkIndex,
-    totalChunks
-}) => {
+const buildChunkUserPrompt = ({ logs, chunkIndex, totalChunks }) => {
     const sanitizedLogs = logs.map(log => ({
         ts: log.timestamp,
         msg: log.simplifiedMessage || log.message,
@@ -79,85 +61,21 @@ const buildChunkPrompt = ({
     ].join('\n');
 };
 
-const buildFinalPrompt = ({
-    integrationName,
-    functionName,
-    timeRange,
-    filter,
-    simplify,
-    chunkSummaries
-}) => [
-    'Consolide os resumos parciais abaixo em um resumo final curto:',
-    '## Resumo\n- (3 bullets)',
-    '## Alertas\n- (se houver)',
-    '## Evidências\n- [timestamp] descrição',
+const buildFinalUserPrompt = ({ chunkSummaries }) => [
+    'Consolide os resumos parciais abaixo em um resumo final seguindo o formato:',
     '',
-    'Parciais:',
-    chunkSummaries.join('\n')
+    '📊 O que aconteceu:',
+    '(explique em 2-3 frases simples)',
+    '',
+    '⚠️ Precisa de atenção?',
+    '(diga se há algo preocupante)',
+    '',
+    '🔍 Quando ocorreu:',
+    '(horários principais)',
+    '',
+    'Resumos parciais:',
+    chunkSummaries.join('\n\n')
 ].join('\n');
-
-const buildCompactPrompt = ({
-    integrationName,
-    functionName,
-    timeRange,
-    filter,
-    simplify,
-    summary,
-    logs
-}) => {
-    const samples = logs.slice(0, 10).map(log => ({
-        ts: log.timestamp,
-        msg: log.simplifiedMessage || log.message,
-        lvl: log.level
-    }));
-
-    return [
-        SYSTEM_INSTRUCTIONS,
-        '',
-        `Função: ${functionName || integrationName || 'Lambda'}`,
-        `Stats: ${summary?.total ?? 0} logs, ${summary?.errors ?? 0} erros`,
-        '',
-        '## Resumo\\n- (3 bullets)',
-        '## Alertas\\n- (se houver)',
-        '',
-        'Amostras:',
-        JSON.stringify(samples)
-    ].join('\\n');
-};
-
-const safeAbortSession = async (session) => {
-    try {
-        if (session?.abort) {
-            await session.abort();
-        }
-    } catch {
-        // ignore abort errors
-    }
-};
-
-const safeDestroySession = async (session) => {
-    try {
-        if (session?.destroy) {
-            await session.destroy();
-        }
-    } catch {
-        // ignore destroy errors
-    }
-};
-
-const sendWithTimeout = async (session, options, timeout) => {
-    try {
-        const response = await session.sendAndWait(options, timeout);
-        return response;
-    } catch (error) {
-        const message = error?.message || '';
-        if (message.toLowerCase().includes('timeout')) {
-            // On timeout, try to abort the session to clean up any pending work
-            await safeAbortSession(session);
-        }
-        throw error;
-    }
-};
 
 const summarizeLogs = async ({ logs, summary, integration }) => {
     if (!logs?.length) {
@@ -166,55 +84,38 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
         };
     }
 
-    const client = await getCopilotClient();
-    let session = await client.createSession({
-        model: DEFAULT_MODEL
-    });
-
-    // Debug: log session events
-    session.on((event) => {
-        console.log(`[copilot] evento: ${event.type}`);
-    });
-
-    const timeRange = {
-        start: summary?.startTime || null,
-        end: summary?.endTime || null
-    };
-
-    const buildPromptPayload = (logsSlice) => buildPrompt({
-        integrationName: integration?.name,
-        functionName: integration?.function_name,
-        timeRange,
-        filter: summary?.filter,
-        simplify: summary?.simplify,
-        logs: logsSlice
-    });
-
+    const model = DEFAULT_MODEL;
     const primaryLogs = logs.slice(0, MAX_LOGS);
 
-    const recreateSession = async () => {
-        await safeDestroySession(session);
-        session = await client.createSession({
-            model: DEFAULT_MODEL
-        });
-        session.on((event) => {
-            console.log(`[copilot] evento: ${event.type}`);
-        });
-    };
+    console.log(`[github-models] iniciando resumo com modelo ${model}, ${primaryLogs.length} logs`);
 
     try {
+        // Se poucos logs, processa direto
         if (primaryLogs.length <= CHUNK_SIZE) {
-            const response = await sendWithTimeout(session, {
-                prompt: buildPromptPayload(primaryLogs)
-            }, DEFAULT_TIMEOUT_MS);
+            const response = await createChatCompletion({
+                model,
+                messages: [
+                    { role: 'system', content: SYSTEM_INSTRUCTIONS },
+                    {
+                        role: 'user', content: buildUserPrompt({
+                            integrationName: integration?.name,
+                            functionName: integration?.function_name,
+                            logs: primaryLogs
+                        })
+                    }
+                ],
+                maxTokens: 800
+            });
 
-            const content = response?.data?.content?.trim();
+            const content = response?.choices?.[0]?.message?.content?.trim();
+            console.log(`[github-models] resumo gerado com sucesso`);
 
             return {
                 summary: content || 'Não foi possível gerar o resumo no momento.'
             };
         }
 
+        // Muitos logs: processa em chunks
         const totalChunks = Math.ceil(primaryLogs.length / CHUNK_SIZE);
         const chunkSummaries = [];
 
@@ -222,95 +123,54 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
             const chunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
             const chunkLogs = primaryLogs.slice(i, i + CHUNK_SIZE);
 
+            console.log(`[github-models] processando chunk ${chunkIndex}/${totalChunks}`);
+
             try {
-                const chunkResponse = await sendWithTimeout(session, {
-                    prompt: buildChunkPrompt({
-                        integrationName: integration?.name,
-                        functionName: integration?.function_name,
-                        timeRange,
-                        filter: summary?.filter,
-                        simplify: summary?.simplify,
-                        logs: chunkLogs,
-                        chunkIndex,
-                        totalChunks
-                    })
-                }, CHUNK_TIMEOUT_MS);
+                const chunkResponse = await createChatCompletion({
+                    model,
+                    messages: [
+                        { role: 'system', content: 'Resuma os logs de forma concisa em português.' },
+                        {
+                            role: 'user', content: buildChunkUserPrompt({
+                                logs: chunkLogs,
+                                chunkIndex,
+                                totalChunks
+                            })
+                        }
+                    ],
+                    maxTokens: 300
+                });
 
-                const chunkContent = chunkResponse?.data?.content?.trim() || 'Sem eventos relevantes.';
-                chunkSummaries.push(`## Lote ${chunkIndex}\n${chunkContent}`);
-            } catch (error) {
-                const errorMessage = error?.message || 'Falha ao resumir este lote.';
-                chunkSummaries.push(`## Lote ${chunkIndex}\nFalha ao resumir este lote: ${errorMessage}`);
-
-                // On chunk error, recreate session to avoid state issues
-                if (errorMessage.toLowerCase().includes('timeout')) {
-                    await recreateSession();
-                }
+                const chunkContent = chunkResponse?.choices?.[0]?.message?.content?.trim() || 'Sem eventos relevantes.';
+                chunkSummaries.push(`Lote ${chunkIndex}:\n${chunkContent}`);
+            } catch (chunkError) {
+                console.error(`[github-models] erro no chunk ${chunkIndex}:`, chunkError.message);
+                chunkSummaries.push(`Lote ${chunkIndex}: Falha ao processar.`);
             }
         }
 
-        const finalResponse = await sendWithTimeout(session, {
-            prompt: buildFinalPrompt({
-                integrationName: integration?.name,
-                functionName: integration?.function_name,
-                timeRange,
-                filter: summary?.filter,
-                simplify: summary?.simplify,
-                chunkSummaries
-            })
-        }, FINAL_TIMEOUT_MS);
+        // Consolida os chunks
+        console.log(`[github-models] consolidando ${chunkSummaries.length} chunks`);
 
-        const finalContent = finalResponse?.data?.content?.trim();
+        const finalResponse = await createChatCompletion({
+            model,
+            messages: [
+                { role: 'system', content: SYSTEM_INSTRUCTIONS },
+                { role: 'user', content: buildFinalUserPrompt({ chunkSummaries }) }
+            ],
+            maxTokens: 800
+        });
+
+        const finalContent = finalResponse?.choices?.[0]?.message?.content?.trim();
+        console.log(`[github-models] resumo final gerado com sucesso`);
 
         return {
             summary: finalContent || 'Não foi possível gerar o resumo no momento.'
         };
+
     } catch (error) {
-        const message = error?.message || '';
-        const isTimeout = message.toLowerCase().includes('timeout');
-
-        if (!isTimeout || primaryLogs.length <= FALLBACK_MAX_LOGS) {
-            throw error;
-        }
-
-        await recreateSession();
-
-        const fallbackLogs = primaryLogs.slice(0, FALLBACK_MAX_LOGS);
-        const retryTimeout = Math.max(DEFAULT_TIMEOUT_MS, 120000);
-
-        try {
-            const retryResponse = await sendWithTimeout(session, {
-                prompt: buildPromptPayload(fallbackLogs)
-            }, retryTimeout);
-
-            const retryContent = retryResponse?.data?.content?.trim();
-
-            return {
-                summary: retryContent || 'Não foi possível gerar o resumo no momento.'
-            };
-        } catch (retryError) {
-            await recreateSession();
-
-            const compactResponse = await sendWithTimeout(session, {
-                prompt: buildCompactPrompt({
-                    integrationName: integration?.name,
-                    functionName: integration?.function_name,
-                    timeRange,
-                    filter: summary?.filter,
-                    simplify: summary?.simplify,
-                    summary,
-                    logs: fallbackLogs
-                })
-            }, COMPACT_TIMEOUT_MS);
-
-            const compactContent = compactResponse?.data?.content?.trim();
-
-            return {
-                summary: compactContent || 'Não foi possível gerar o resumo no momento.'
-            };
-        }
-    } finally {
-        await safeDestroySession(session);
+        console.error('[github-models] erro ao gerar resumo:', error.message);
+        throw error;
     }
 };
 

@@ -16,7 +16,6 @@
     "@aws-sdk/client-cloudwatch": "^3.972.0",
     "@aws-sdk/client-cloudwatch-logs": "^3.972.0",
     "@aws-sdk/client-lambda": "^3.972.0",
-    "@github/copilot-sdk": "^0.1.16",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
