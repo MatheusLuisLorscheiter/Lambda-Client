@@ -614,6 +614,7 @@ const aiSummaryModalOpen = ref(false)
 const aiSummaryError = ref<string | null>(null)
 const aiSummaryStartTime = ref<number | null>(null)
 let aiSummaryPollTimeout: ReturnType<typeof setTimeout> | null = null
+const aiSummaryStoragePrefix = 'ai-summary'
 
 const costEstimate = ref<CostEstimate>({
   totalInvocations: 0,
@@ -781,7 +782,10 @@ const fetchIntegrations = async () => {
 const loadData = async () => {
   if (!selectedIntegrationId.value) return
   isLoading.value = true
-  resetAiSummaryState()
+  const restored = restoreAiSummaryFromStorage()
+  if (!restored) {
+    resetAiSummaryState()
+  }
 
   try {
     await Promise.all([
@@ -845,6 +849,7 @@ const loadLogs = async () => {
 
     logs.value = data.logs
     logSummary.value = data.summary
+    restoreAiSummaryFromStorage()
     await fetchAiSummaryStatus(startTime)
   } catch (error) {
     console.error('Falha ao carregar logs:', error)
@@ -871,6 +876,52 @@ const resetAiSummaryState = () => {
     clearTimeout(aiSummaryPollTimeout)
     aiSummaryPollTimeout = null
   }
+}
+
+const getAiSummaryStorageKey = () => {
+  if (!selectedIntegrationId.value) return null
+  return `${aiSummaryStoragePrefix}:${selectedIntegrationId.value}`
+}
+
+const readAiSummaryStorage = () => {
+  const key = getAiSummaryStorageKey()
+  if (!key) return null
+  const raw = localStorage.getItem(key)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as { startTime: number; type: string; limit: number; simplify: string }
+  } catch {
+    return null
+  }
+}
+
+const saveAiSummaryStorage = (params: { startTime: number; type: string; limit: number; simplify: string }) => {
+  const key = getAiSummaryStorageKey()
+  if (!key) return
+  localStorage.setItem(key, JSON.stringify(params))
+}
+
+const clearAiSummaryStorage = () => {
+  const key = getAiSummaryStorageKey()
+  if (!key) return
+  localStorage.removeItem(key)
+}
+
+const restoreAiSummaryFromStorage = () => {
+  const stored = readAiSummaryStorage()
+  if (!stored) return false
+
+  const simplifyFlag = simplifyLogs.value ? '1' : '0'
+  if (stored.type !== logFilter.value || stored.simplify !== simplifyFlag || stored.limit !== 100) {
+    clearAiSummaryStorage()
+    return false
+  }
+
+  aiSummaryStartTime.value = stored.startTime
+  if (aiSummaryStatus.value !== 'complete') {
+    aiSummaryStatus.value = 'running'
+  }
+  return true
 }
 
 const buildAiSummaryQuery = (startTimeOverride?: number) => {
@@ -906,6 +957,10 @@ const fetchAiSummaryStatus = async (startTimeOverride?: number) => {
     aiSummaryGeneratedAt.value = data.generatedAt || null
     aiSummaryError.value = data.error || null
 
+    if (aiSummaryStatus.value === 'idle') {
+      clearAiSummaryStorage()
+    }
+
     if (aiSummaryStatus.value === 'running') {
       scheduleAiSummaryPoll()
     } else {
@@ -932,6 +987,7 @@ const startAiSummary = async () => {
   const params = buildAiSummaryQuery()
 
   aiSummaryStartTime.value = params.startTime
+  saveAiSummaryStorage(params)
 
   aiSummaryStatus.value = 'running'
   aiSummaryError.value = null
@@ -986,6 +1042,7 @@ const clearAiSummary = async () => {
   }
 
   resetAiSummaryState()
+  clearAiSummaryStorage()
 }
 
 const aiSummaryButtonLabel = computed(() => {
