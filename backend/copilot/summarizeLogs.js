@@ -15,7 +15,9 @@ const buildSystemMessage = () => ({
         'Releia os logs até 5 vezes antes de responder. Não invente fatos, causas ou números.',
         'Se algo não estiver explícito nos logs, diga claramente "Não foi possível inferir".',
         'Use apenas as informações presentes nos logs. Não use conhecimento externo.',
-        'Apresente a resposta em português, objetiva e estruturada, sem raciocínio oculto.',
+        'Apresente a resposta em português, MUITO objetiva e curta, sem raciocínio oculto.',
+        'Limite total: no máximo 8 linhas e 600 caracteres.',
+        'Não repita dados nem liste todos os eventos; só o essencial.',
         'Inclua evidências citando trechos dos logs (com timestamp) que sustentem cada ponto importante.',
         'Se detectar erros, timeouts ou falhas, destaque-os com severidade.'
     ].join('\n')
@@ -53,17 +55,13 @@ const buildPrompt = ({
         '3) Informe tendências ou padrões observáveis (se houver).',
         '4) Sugira próximos passos práticos (somente se suportados pelos logs).',
         '',
-        'Formato de resposta esperado:',
-        '## Resumo geral',
-        '- ...',
-        '## Erros e alertas',
-        '- ...',
-        '## Linha do tempo',
-        '- [timestamp] ...',
-        '## Recomendações',
-        '- ...',
+        'Formato de resposta esperado (curto):',
+        '## Resumo',
+        '- 3 bullets no máximo',
+        '## Alertas',
+        '- até 2 bullets',
         '## Evidências',
-        '- [timestamp] "trecho do log"',
+        '- até 3 linhas com timestamp',
         '',
         'Logs (JSON):',
         JSON.stringify(sanitizedLogs)
@@ -99,13 +97,11 @@ const buildChunkPrompt = ({
         `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
         `- Logs no lote: ${sanitizedLogs.length}`,
         '',
-        'Tarefa do lote:',
-        '1) Resuma os eventos relevantes desse lote em tópicos curtos.',
-        '2) Inclua evidências com timestamp para cada ponto crítico.',
-        '3) Se não houver algo, diga "Sem eventos relevantes".',
+        'Tarefa do lote: 2 bullets no máximo, cada um com timestamp se possível.',
+        'Se não houver algo, diga "Sem eventos relevantes".',
         '',
         'Formato:',
-        '- [timestamp] evento/resumo breve',
+        '- [timestamp] resumo curto',
         '',
         'Logs (JSON):',
         JSON.stringify(sanitizedLogs)
@@ -128,17 +124,13 @@ const buildFinalPrompt = ({
     `- Simplificar: ${simplify ? 'sim' : 'não'}`,
     `- Intervalo: ${timeRange?.start ? new Date(timeRange.start).toISOString() : 'n/a'} → ${timeRange?.end ? new Date(timeRange.end).toISOString() : 'n/a'}`,
     '',
-    'Formato de resposta esperado:',
-    '## Resumo geral',
-    '- ...',
-    '## Erros e alertas',
-    '- ...',
-    '## Linha do tempo',
-    '- [timestamp] ...',
-    '## Recomendações',
-    '- ...',
+    'Formato de resposta esperado (curto):',
+    '## Resumo',
+    '- 3 bullets no máximo',
+    '## Alertas',
+    '- até 2 bullets',
     '## Evidências',
-    '- [timestamp] "trecho do log"',
+    '- até 3 linhas com timestamp',
     '',
     'Resumos parciais:',
     chunkSummaries.join('\n\n')
@@ -182,17 +174,13 @@ const buildCompactPrompt = ({
         'Amostras de logs:',
         JSON.stringify(samples),
         '',
-        'Formato de resposta esperado:',
-        '## Resumo geral',
-        '- ...',
-        '## Erros e alertas',
-        '- ...',
-        '## Linha do tempo',
-        '- [timestamp] ...',
-        '## Recomendações',
-        '- ...',
+        'Formato de resposta esperado (curto):',
+        '## Resumo',
+        '- 3 bullets no máximo',
+        '## Alertas',
+        '- até 2 bullets',
         '## Evidências',
-        '- [timestamp] "trecho do log"'
+        '- até 3 linhas com timestamp'
     ].join('\n');
 };
 
@@ -240,9 +228,8 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
     try {
         if (primaryLogs.length <= CHUNK_SIZE) {
             const response = await session.sendAndWait({
-                prompt: buildPromptPayload(primaryLogs),
-                timeout: DEFAULT_TIMEOUT_MS
-            });
+                prompt: buildPromptPayload(primaryLogs)
+            }, DEFAULT_TIMEOUT_MS);
 
             const content = response?.data?.content?.trim();
 
@@ -269,9 +256,8 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                         logs: chunkLogs,
                         chunkIndex,
                         totalChunks
-                    }),
-                    timeout: CHUNK_TIMEOUT_MS
-                });
+                    })
+                }, CHUNK_TIMEOUT_MS);
 
                 const chunkContent = chunkResponse?.data?.content?.trim() || 'Sem eventos relevantes.';
                 chunkSummaries.push(`## Lote ${chunkIndex}\n${chunkContent}`);
@@ -289,9 +275,8 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                 filter: summary?.filter,
                 simplify: summary?.simplify,
                 chunkSummaries
-            }),
-            timeout: FINAL_TIMEOUT_MS
-        });
+            })
+        }, FINAL_TIMEOUT_MS);
 
         const finalContent = finalResponse?.data?.content?.trim();
 
@@ -313,9 +298,8 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
 
         try {
             const retryResponse = await session.sendAndWait({
-                prompt: buildPromptPayload(fallbackLogs),
-                timeout: retryTimeout
-            });
+                prompt: buildPromptPayload(fallbackLogs)
+            }, retryTimeout);
 
             const retryContent = retryResponse?.data?.content?.trim();
 
@@ -334,9 +318,8 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                     simplify: summary?.simplify,
                     summary,
                     logs: fallbackLogs
-                }),
-                timeout: COMPACT_TIMEOUT_MS
-            });
+                })
+            }, COMPACT_TIMEOUT_MS);
 
             const compactContent = compactResponse?.data?.content?.trim();
 

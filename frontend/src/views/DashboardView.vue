@@ -463,7 +463,7 @@
     <transition name="fade">
       <div v-if="aiSummaryModalOpen" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="absolute inset-0 bg-slate-900/70" @click="closeAiSummaryModal"></div>
-        <div class="relative w-[92vw] max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+        <div class="relative w-[92vw] max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[85vh]">
           <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50">
             <div>
               <h4 class="text-sm font-semibold text-slate-900">Resumo inteligente (Copilot)</h4>
@@ -477,7 +477,7 @@
               Fechar
             </button>
           </div>
-          <div class="px-5 py-4">
+          <div class="px-5 py-4 overflow-y-auto max-h-[70vh]">
             <div v-if="aiSummary" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-wrap">
               {{ aiSummary }}
             </div>
