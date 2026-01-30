@@ -1272,16 +1272,16 @@ const formatLogTimestamp = (timestamp?: number | null): string => {
   if (!timestamp) return '-'
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) return '-'
-  const formatted = new Intl.DateTimeFormat('pt-BR', {
+  return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    timeZone: 'UTC'
+    hour12: false,
+    timeZoneName: 'short'
   }).format(date)
-  return `${formatted} UTC`
 }
 
 const getLogType = (message: string): string => {
