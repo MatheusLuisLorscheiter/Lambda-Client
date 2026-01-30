@@ -416,7 +416,9 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     const hasMoreToken = Boolean(resp.nextToken);
     const hasMoreByBefore = !hasMoreToken && eventsToProcess.length === pageLimit;
 
-    if (relevantLogs.length || (!hasMoreToken && !hasMoreByBefore) || pageHops >= maxPageHops) {
+    // If we already have events for the current page, do not hop backwards.
+    // This avoids showing older logs when the newest page has no matching entries.
+    if (eventsToProcess.length > 0 || (!hasMoreToken && !hasMoreByBefore) || pageHops >= maxPageHops) {
       break;
     }
 
