@@ -1322,7 +1322,13 @@ const mergeLogs = (currentLogs: LogEntry[], newLogs: LogEntry[]) => {
     existingKeys.add(key)
     merged.push(log)
   }
-  return merged
+  return merged.sort((a, b) => {
+    const timeDiff = (b.timestamp || 0) - (a.timestamp || 0)
+    if (timeDiff !== 0) return timeDiff
+    const ingestDiff = (b.ingestionTime || 0) - (a.ingestionTime || 0)
+    if (ingestDiff !== 0) return ingestDiff
+    return String(b.eventId || '').localeCompare(String(a.eventId || ''))
+  })
 }
 
 const getLogTypeClass = (message: string): string => {
