@@ -642,6 +642,7 @@ const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
 const nextBefore = ref<number | null>(null)
 const nextToken = ref<string | null>(null)
+const logEndTime = ref<number | null>(null)
 const isLoadingMore = ref(false)
 const aiSummary = ref<string | null>(null)
 const aiSummaryModel = ref<string | null>(null)
@@ -672,21 +673,69 @@ const fullscreenDocLink = ref<string | null>(null)
 const canLoadMore = computed(() => Boolean(nextToken.value || nextBefore.value))
 
 // Chart data
+const padDatePart = (value: number) => String(value).padStart(2, '0')
+
+const toLocalDateKey = (date: Date) => {
+  const year = date.getFullYear()
+  const month = padDatePart(date.getMonth() + 1)
+  const day = padDatePart(date.getDate())
+  return `${year}-${month}-${day}`
+}
+
+const formatDateKey = (key: string) => {
+  const [year, month, day] = key.split('-')
+  if (!year || !month || !day) return key
+  return `${day}/${month}/${year}`
+}
+
+const aggregateSumByDay = (metric?: MetricDataResult) => {
+  const map = new Map<string, number>()
+  if (!metric?.Timestamps?.length) return map
+
+  metric.Timestamps.forEach((ts, i) => {
+    const date = new Date(ts)
+    const key = toLocalDateKey(date)
+    const value = metric.Values?.[i] ?? 0
+    map.set(key, (map.get(key) || 0) + value)
+  })
+
+  return map
+}
+
+const aggregateAverageByDay = (metric?: MetricDataResult) => {
+  const map = new Map<string, { sum: number; count: number }>()
+  if (!metric?.Timestamps?.length) return map
+
+  metric.Timestamps.forEach((ts, i) => {
+    const date = new Date(ts)
+    const key = toLocalDateKey(date)
+    const value = metric.Values?.[i]
+    if (value === undefined || value === null) return
+    const entry = map.get(key) || { sum: 0, count: 0 }
+    entry.sum += value
+    entry.count += 1
+    map.set(key, entry)
+  })
+
+  return map
+}
+
+const buildDayLabels = (keys: string[]) => keys.sort().map(formatDateKey)
+
 const invocationsChartData = computed(() => {
   const invocationsMetric = rawMetricsData.value.find(m => m.Id === 'invocations')
-  if (!invocationsMetric?.Timestamps?.length) {
+  const byDay = aggregateSumByDay(invocationsMetric)
+  if (byDay.size === 0) {
     return { labels: [], datasets: [] }
   }
 
-  const sortedData = invocationsMetric.Timestamps
-    .map((ts, i) => ({ timestamp: new Date(ts), value: invocationsMetric.Values?.[i] || 0 }))
-    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  const keys = Array.from(byDay.keys()).sort()
 
   return {
-    labels: sortedData.map(d => d.timestamp.toLocaleDateString()),
+    labels: buildDayLabels(keys),
     datasets: [{
       label: 'Invocações',
-      data: sortedData.map(d => d.value),
+      data: keys.map(key => byDay.get(key) || 0),
       borderColor: 'rgb(59, 130, 246)',
       backgroundColor: 'rgba(59, 130, 246, 0.1)',
       fill: true,
@@ -699,26 +748,26 @@ const errorRateChartData = computed(() => {
   const invocationsMetric = rawMetricsData.value.find(m => m.Id === 'invocations')
   const errorsMetric = rawMetricsData.value.find(m => m.Id === 'errors')
 
-  if (!invocationsMetric?.Timestamps?.length) {
+  const invocationsByDay = aggregateSumByDay(invocationsMetric)
+  if (invocationsByDay.size === 0) {
     return { labels: [], datasets: [] }
   }
 
-  const sortedData = invocationsMetric.Timestamps
-    .map((ts, i) => {
-      const invocations = invocationsMetric.Values?.[i] || 0
-      const errors = errorsMetric?.Values?.[i] || 0
-      return {
-        timestamp: new Date(ts),
-        rate: invocations > 0 ? (errors / invocations) * 100 : 0
-      }
-    })
-    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  const errorsByDay = aggregateSumByDay(errorsMetric)
+  const keys = Array.from(invocationsByDay.keys())
+    .concat(Array.from(errorsByDay.keys()))
+    .filter((value, index, self) => self.indexOf(value) === index)
+    .sort()
 
   return {
-    labels: sortedData.map(d => d.timestamp.toLocaleDateString()),
+    labels: buildDayLabels(keys),
     datasets: [{
       label: 'Taxa de erro (%)',
-      data: sortedData.map(d => d.rate),
+      data: keys.map(key => {
+        const invocations = invocationsByDay.get(key) || 0
+        const errors = errorsByDay.get(key) || 0
+        return invocations > 0 ? (errors / invocations) * 100 : 0
+      }),
       borderColor: 'rgb(239, 68, 68)',
       backgroundColor: 'rgba(239, 68, 68, 0.1)',
       fill: true,
@@ -729,19 +778,22 @@ const errorRateChartData = computed(() => {
 
 const durationChartData = computed(() => {
   const durationMetric = rawMetricsData.value.find(m => m.Id === 'duration')
-  if (!durationMetric?.Timestamps?.length) {
+  const byDay = aggregateAverageByDay(durationMetric)
+  if (byDay.size === 0) {
     return { labels: [], datasets: [] }
   }
 
-  const sortedData = durationMetric.Timestamps
-    .map((ts, i) => ({ timestamp: new Date(ts), value: durationMetric.Values?.[i] || 0 }))
-    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  const keys = Array.from(byDay.keys()).sort()
 
   return {
-    labels: sortedData.map(d => d.timestamp.toLocaleDateString()),
+    labels: buildDayLabels(keys),
     datasets: [{
       label: 'Duração média (ms)',
-      data: sortedData.map(d => d.value),
+      data: keys.map(key => {
+        const entry = byDay.get(key)
+        if (!entry || entry.count === 0) return 0
+        return entry.sum / entry.count
+      }),
       backgroundColor: 'rgba(147, 51, 234, 0.8)',
       borderRadius: 4
     }]
@@ -856,7 +908,9 @@ const loadMetrics = async () => {
 
     const totalInvocations = invocationsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
     const totalErrors = errorsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
-    const avgDuration = durationMetric?.Values?.[0] || 0
+    const avgDuration = durationMetric?.Values?.length
+      ? durationMetric.Values.reduce((sum, value) => sum + value, 0) / durationMetric.Values.length
+      : 0
 
     metrics.value = {
       invocations: totalInvocations,
@@ -891,10 +945,12 @@ const loadLogs = async (append = false) => {
       logs.value = []
       nextBefore.value = null
       nextToken.value = null
+      logEndTime.value = Date.now()
     }
 
     const limit = 100
-    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
+    const resolvedEndTime = logEndTime.value ?? Date.now()
+    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${resolvedEndTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
     if (append && nextBefore.value) {
       params.push(`before=${nextBefore.value}`)
     } else if (append && nextToken.value) {
