@@ -272,23 +272,44 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   const endTime = Number(query.endTime) || Date.now();
   const search = (query.search || '').toString().trim();
 
-  const filterCommand = new FilterLogEventsCommand({
+  // Support cursor-based pagination by 'before' timestamp.
+  // Client may pass `before` (epoch ms) to request logs strictly before that timestamp.
+  // We will request one page from CloudWatch with the provided `limit` and the
+  // interval [startTime, before], then return logs ordered from newest → oldest
+  // along with `nextBefore` to load older logs.
+  const pageLimit = Math.min(Math.max(Number(limit) || 100, 10), 1000);
+  const before = Number(query.before) || endTime;
+  const nextToken = (query.nextToken || '').toString().trim() || undefined;
+  const pageEndTime = nextToken ? endTime : before;
+
+  const cmd = new FilterLogEventsCommand({
     logGroupName,
-    limit,
+    limit: pageLimit,
     startTime,
-    endTime,
-    filterPattern: search ? `?"${search}"` : undefined
+    endTime: pageEndTime,
+    filterPattern: search ? `?"${search}"` : undefined,
+    nextToken
   });
 
-  const response = await logsClient.send(filterCommand);
+  let resp;
+  try {
+    resp = await logsClient.send(cmd);
+  } catch (err) {
+    // If request fails, return empty set and surface the error upstream
+    throw err;
+  }
 
   const type = (query.type || 'relevant').toString().toLowerCase();
 
-  const normalizedLogs = (response.events || []).map(event => {
+  const eventsToProcess = resp.events || [];
+
+  const normalizedLogs = (eventsToProcess || []).map(event => {
     const parsedReport = parseReportLine(event.message);
     const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport) : null;
 
     return {
+      eventId: event.eventId || null,
+      ingestionTime: event.ingestionTime || null,
       timestamp: event.timestamp,
       message: event.message,
       parsedReport,
@@ -297,7 +318,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       level: simplified?.level ?? null
     };
   });
-
+  // CloudWatch returns events in chronological order (oldest → newest). We want
+  // to display newest first on the UI, so sort descending here after filtering.
   const relevantLogs = normalizedLogs.filter(event => {
     const message = (event.message || '').toLowerCase();
     const isReportLine = /^report\b/i.test(event.message || '');
@@ -321,7 +343,13 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       Boolean(event.parsedReport);
   });
 
-  const sortedLogs = relevantLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  const sortedLogs = relevantLogs.sort((a, b) => {
+    const timeDiff = (b.timestamp || 0) - (a.timestamp || 0);
+    if (timeDiff !== 0) return timeDiff;
+    const ingestDiff = (b.ingestionTime || 0) - (a.ingestionTime || 0);
+    if (ingestDiff !== 0) return ingestDiff;
+    return String(b.eventId || '').localeCompare(String(a.eventId || ''));
+  });
 
   const reportEvents = sortedLogs.filter(log => log.parsedReport);
   const durationSamples = reportEvents
@@ -337,44 +365,132 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
 
   const timeoutCount = reportEvents.filter(log => log.parsedReport?.status === 'timeout').length;
 
-  const topMessagesMap = new Map();
+  // Compute summary values. By default we compute summary for the current page.
+  // If summaryFlag is true, aggregate across all pages in the requested interval
+  // to provide an accurate total and top messages.
+  let totalCount = sortedLogs.length;
+  let reportCount = reportEvents.length;
+  let errorsCount = sortedLogs.filter(log => log.level === 'error' || (log.message || '').toLowerCase().includes('error')).length;
+  let avgDurationMs = durationSamples.length
+    ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
+    : null;
+  let timeouts = timeoutCount;
+  let summaryTopMessages = undefined;
+
   if (summaryFlag) {
-    sortedLogs.forEach(log => {
-      const baseMessage = log.simplifiedMessage || log.message || '';
-      const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
-      if (!trimmed) return;
-      topMessagesMap.set(trimmed, (topMessagesMap.get(trimmed) || 0) + 1);
-    });
+    // Paginate through all matching events to compute totals and top messages.
+    const aggPageLimit = 1000;
+    let aggNextToken = undefined;
+    const topMap = new Map();
+    let aggTotal = 0;
+    let aggReports = 0;
+    let aggErrors = 0;
+    let aggTimeouts = 0;
+    const aggDurations = [];
+    const maxAggregate = 100000; // safety cap
+
+    try {
+      do {
+        const aggCmd = new FilterLogEventsCommand({
+          logGroupName,
+          limit: aggPageLimit,
+          startTime,
+          endTime: endTime, // aggregate across the full requested interval, not the page-bound 'before'
+          filterPattern: search ? `?"${search}"` : undefined,
+          nextToken: aggNextToken
+        });
+
+        const aggResp = await logsClient.send(aggCmd);
+        const aggEvents = aggResp.events || [];
+
+        for (const event of aggEvents) {
+          const pr = parseReportLine(event.message);
+          const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, pr) : null;
+
+          const messageLower = (event.message || '').toLowerCase();
+          const isReportLine = /^report\b/i.test(event.message || '');
+
+          // Determine relevant per type
+          let isRelevant = false;
+          if (type === 'error') {
+            isRelevant = messageLower.includes('error') || messageLower.includes('fail') || messageLower.includes('exception');
+          } else if (type === 'report') {
+            isRelevant = isReportLine;
+          } else if (type === 'all') {
+            isRelevant = true;
+          } else {
+            isRelevant = messageLower.includes('error') || messageLower.includes('duration') || messageLower.includes('report') || messageLower.includes('fail') || Boolean(pr);
+          }
+
+          if (!isRelevant) continue;
+
+          aggTotal += 1;
+
+          if (pr) {
+            aggReports += 1;
+            if (typeof pr.durationMs === 'number') aggDurations.push(pr.durationMs);
+            if (pr.status === 'timeout') aggTimeouts += 1;
+          }
+
+          if (messageLower.includes('error') || messageLower.includes('fail') || messageLower.includes('exception') || (simplified?.level === 'error')) {
+            aggErrors += 1;
+          }
+
+          const baseMessage = (simplified?.simplifiedMessage ?? event.message ?? '').trim();
+          const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
+          if (trimmed) topMap.set(trimmed, (topMap.get(trimmed) || 0) + 1);
+
+          if (aggTotal >= maxAggregate) break;
+        }
+
+        aggNextToken = aggResp.nextToken;
+        if (aggTotal >= maxAggregate) break;
+      } while (aggNextToken);
+    } catch (err) {
+      console.error('Failed to aggregate full summary for logs:', err && err.message ? err.message : err);
+    }
+
+    totalCount = aggTotal;
+    reportCount = aggReports;
+    errorsCount = aggErrors;
+    timeouts = aggTimeouts;
+    avgDurationMs = aggDurations.length ? aggDurations.reduce((s, v) => s + v, 0) / aggDurations.length : null;
+    summaryTopMessages = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([message, count]) => ({ message, count }));
   }
 
-  const topMessages = summaryFlag
-    ? Array.from(topMessagesMap.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([message, count]) => ({ message, count }))
-    : undefined;
+  // Determine nextBefore cursor for pagination: if we received a full page,
+  // the oldest event in this page is chronological[0] (since resp.events is chronological).
+  // To fetch older events next, client should pass nextBefore = oldestTimestamp - 1.
+  const chronological = eventsToProcess; // already oldest->newest
+  const nextBefore = (chronological.length === pageLimit && chronological[0])
+    ? (chronological[0].timestamp - 1)
+    : null;
+
+  const nextTokenResponse = (resp.nextToken && resp.nextToken !== nextToken)
+    ? resp.nextToken
+    : null;
 
   return {
     logs: sortedLogs,
     summary: {
-      total: sortedLogs.length,
-      reports: reportEvents.length,
-      errors: sortedLogs.filter(log => log.level === 'error' || (log.message || '').toLowerCase().includes('error')).length,
-      avgDurationMs: durationSamples.length
-        ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
-        : null,
-      timeouts: timeoutCount,
-      startTime: timeRange.startTime,
-      endTime: timeRange.endTime,
-      topMessages,
+      total: totalCount,
+      reports: reportCount,
+      errors: errorsCount,
+      avgDurationMs: avgDurationMs,
+      timeouts: timeouts,
+      startTime: timeRange.startTime ?? startTime,
+      endTime: timeRange.endTime ?? pageEndTime,
+      topMessages: summaryTopMessages || undefined,
       filter: type,
       simplify: simplifyFlag
     },
     filter: type,
     limit,
     startTime,
-    endTime,
-    search
+    endTime: pageEndTime,
+    search,
+    nextBefore,
+    nextToken: nextTokenResponse
   };
 };
 
@@ -417,7 +533,6 @@ router.get('/integrations', authenticateToken, async (req, res) => {
     );
     return res.json({ integrations: result.rows });
   }
-
   if (req.user.role === 'client') {
     const result = await query(
       `SELECT integrations.id,
@@ -715,7 +830,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
     const summaryFlag = ['1', 'true', 'yes'].includes((req.query.summary || '').toString().toLowerCase());
 
-    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}`;
+    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.before || req.query.endTime || 'now'}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}`;
     const cached = await redisClient.get(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));

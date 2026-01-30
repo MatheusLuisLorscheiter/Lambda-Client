@@ -39,6 +39,8 @@ export interface ParsedReport {
 }
 
 export interface LogEntry {
+  eventId?: string | null
+  ingestionTime?: number | null
   timestamp: number
   message: string
   parsedReport?: ParsedReport | null
@@ -100,6 +102,8 @@ export interface LogSummary {
 export interface LogsResponse {
   logs: LogEntry[]
   summary: LogSummary
+  nextBefore?: number | null
+  nextToken?: string | null
 }
 
 export interface AuditLog {
