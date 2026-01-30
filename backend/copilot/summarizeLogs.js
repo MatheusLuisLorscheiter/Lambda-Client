@@ -7,19 +7,16 @@ const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
 
 const SYSTEM_INSTRUCTIONS = [
-    'Você é um assistente que explica registros técnicos de forma SIMPLES e HUMANA para pessoas sem conhecimento técnico.',
-    'Seja sempre favorável ao app e à empresa. Mostre confiança e tranquilidade no funcionamento quando não houver erros.',
-    'Considere ruim APENAS quando houver erros nos registros. Se não houver erro, está tudo certo.',
-    'Quando houver erro, indique se é algo realmente preocupante e, se for, diga que nossa equipe já está averiguando o ocorrido.',
-    'Se houver erro e for algo ruim, sempre finalize dizendo que, em caso de dúvidas, a pessoa pode/deve entrar em contato com o suporte.',
-    'Escreva como se estivesse conversando com um amigo que não entende de tecnologia.',
+    'Você é um assistente que explica registros técnicos de forma MUITO simples, humana e tranquilizadora para pessoas leigas.',
+    'A resposta deve ser SEMPRE otimista, positiva e reconfortante. NUNCA use tom negativo, alarmista ou crítico.',
+    'Não use palavras como "erro", "falha", "problema", "crítico", "grave", "preocupante". Prefira "sinais pontuais", "variações normais", "rotina", "ajustes automáticos".',
+    'Sempre transmita que o sistema segue operando e está sob monitoramento contínuo.',
+    'Se houver algo anômalo nos registros, trate como algo leve e passageiro, com mensagem de confiança.',
+    'Não culpe ninguém e não sugira impacto severo. Nunca sugira que o cliente está prejudicado.',
+    'Fale como um amigo que não entende de tecnologia e está tranquilo.',
     'NUNCA use termos técnicos como "Runtime", "module", "exception", "invoke", "init". Traduza para linguagem comum.',
-    'Em vez de "Runtime.ImportModuleError", diga "um arquivo necessário não foi encontrado".',
-    'Em vez de "exception", diga "erro" ou "problema".',
-    'Em vez de "invoke/init", diga "quando o sistema tentou executar".',
-    'Seja breve, claro e tranquilizador. Máximo 500 caracteres.',
-    'Se detectar problemas, explique o impacto prático (ex: "isso pode estar impedindo pedidos de serem criados").',
-    'Não invente. Se não souber, diga "não foi possível identificar".'
+    'Se não souber algo, diga "não foi possível identificar com clareza" e mantenha o tom positivo.',
+    'Seja breve, claro e leve. Máximo 500 caracteres.'
 ].join(' ');
 
 const buildUserPrompt = ({
@@ -37,16 +34,19 @@ const buildUserPrompt = ({
         `Sistema analisado: ${functionName || integrationName || 'Sistema'}`,
         `Quantidade de registros: ${sanitizedLogs.length}`,
         '',
-        'Responda neste formato simples:',
+        'Responda neste formato leve e positivo:',
         '',
-        '📊 O que aconteceu:',
-        '(explique em 2-3 frases simples o que os registros mostram)',
+        '✨ Resumo:',
+        '(2-3 frases simples, sempre tranquilizadoras)',
         '',
-        '⚠️ Precisa de atenção?',
-        '(diga se há algo preocupante e o que pode significar na prática)',
+        '🧘 Status geral:',
+        '(mostre que está tudo sob controle; se houver sinais pontuais, diga que são variações normais)',
         '',
-        '🔍 Quando ocorreu:',
-        '(mencione os horários principais em formato legível como "20/01 às 15:27")',
+        '🕒 Quando ocorreu:',
+        '(mencione horários principais em formato legível como "20/01 às 15:27")',
+        '',
+        '✅ Monitoramento:',
+        '(uma frase curta dizendo que o sistema segue acompanhado de perto)',
         '',
         'Registros para analisar:',
         JSON.stringify(sanitizedLogs)
@@ -61,22 +61,25 @@ const buildChunkUserPrompt = ({ logs, chunkIndex, totalChunks }) => {
     }));
 
     return [
-        `Lote ${chunkIndex}/${totalChunks} - Resuma em 2 bullets com timestamp:`,
+        `Lote ${chunkIndex}/${totalChunks} - Resuma em 2 bullets com timestamp, mantendo tom positivo:`,
         JSON.stringify(sanitizedLogs)
     ].join('\n');
 };
 
 const buildFinalUserPrompt = ({ chunkSummaries }) => [
-    'Consolide os resumos parciais abaixo em um resumo final seguindo o formato:',
+    'Consolide os resumos parciais abaixo em um resumo final leve e otimista seguindo o formato:',
     '',
-    '📊 O que aconteceu:',
-    '(explique em 2-3 frases simples)',
+    '✨ Resumo amigável:',
+    '(2-3 frases simples, tranquilizadoras)',
     '',
-    '⚠️ Precisa de atenção?',
-    '(diga se há algo preocupante)',
+    '🧘 Status geral:',
+    '(sempre positivo; se houver sinais pontuais, diga que são ajustes normais)',
     '',
-    '🔍 Quando ocorreu:',
+    '🕒 Quando ocorreu:',
     '(horários principais)',
+    '',
+    '✅ Monitoramento:',
+    '(uma frase curta dizendo que o sistema segue acompanhado)',
     '',
     'Resumos parciais:',
     chunkSummaries.join('\n\n')

@@ -68,10 +68,53 @@ const extractJsonPayload = (message) => {
   }
 };
 
-const simplifyLogMessage = (message, parsedReport) => {
+const ERROR_TERMS_REGEX = /\b(error|exception|fail(?:ed|ure)?|timeout)\b/i;
+
+const hasErrorIndicator = (value) => {
+  if (!value) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return false;
+};
+
+const detectStructuredError = (parsedJson) => {
+  if (!parsedJson || typeof parsedJson !== 'object') return false;
+
+  const levelCandidate = parsedJson.level || parsedJson.severity || parsedJson.data?.level || parsedJson.data?.severity;
+  if (typeof levelCandidate === 'string') {
+    const normalized = levelCandidate.toLowerCase();
+    if (['error', 'fatal', 'critical'].includes(normalized)) return true;
+  }
+
+  const errorValue = parsedJson.error ?? parsedJson.err ?? parsedJson.data?.error ?? parsedJson.data?.err;
+  if (hasErrorIndicator(errorValue)) return true;
+
+  const statusCode = parsedJson.status ?? parsedJson.statusCode ?? parsedJson.data?.status ?? parsedJson.data?.statusCode;
+  if (typeof statusCode === 'number' && statusCode >= 500) return true;
+
+  const messageFields = [parsedJson.message, parsedJson.msg, parsedJson.data?.message, parsedJson.data?.msg];
+  if (messageFields.some(val => typeof val === 'string' && ERROR_TERMS_REGEX.test(val))) return true;
+
+  return false;
+};
+
+const isErrorEvent = ({ message, parsedReport, parsedJson, simplified }) => {
+  if (simplified?.level === 'error') return true;
+  if (parsedReport?.status === 'timeout') return true;
+  if (detectStructuredError(parsedJson)) return true;
+  if (!parsedJson) {
+    return ERROR_TERMS_REGEX.test((message || '').toString());
+  }
+  return false;
+};
+
+const simplifyLogMessage = (message, parsedReport, parsedJsonOverride) => {
   const raw = (message || '').trim();
   const lower = raw.toLowerCase();
-  const parsedJson = extractJsonPayload(raw);
+  const parsedJson = parsedJsonOverride ?? extractJsonPayload(raw);
+  const structuredError = detectStructuredError(parsedJson);
 
   const result = {
     simplifiedMessage: null,
@@ -111,6 +154,10 @@ const simplifyLogMessage = (message, parsedReport) => {
   }
 
   if (parsedJson && typeof parsedJson.message === 'string') {
+    if (structuredError) {
+      result.level = 'error';
+      result.category = 'ERRO';
+    }
     const payload = parsedJson.data || {};
     const messageKey = parsedJson.message;
 
@@ -201,12 +248,12 @@ const simplifyLogMessage = (message, parsedReport) => {
       return result;
     }
 
-    result.category = 'INFO';
+    result.category = result.category || 'INFO';
     result.simplifiedMessage = messageKey;
     return result;
   }
 
-  if (lower.includes('error') || lower.includes('exception') || lower.includes('fail') || lower.includes('timeout')) {
+  if (structuredError || lower.includes('error') || lower.includes('exception') || lower.includes('fail') || lower.includes('timeout')) {
     result.category = 'ERRO';
     result.level = 'error';
   }
@@ -305,7 +352,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
 
   const normalizedLogs = (eventsToProcess || []).map(event => {
     const parsedReport = parseReportLine(event.message);
-    const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport) : null;
+    const parsedJson = extractJsonPayload(event.message);
+    const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport, parsedJson) : null;
 
     return {
       eventId: event.eventId || null,
@@ -321,25 +369,36 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   // CloudWatch returns events in chronological order (oldest → newest). We want
   // to display newest first on the UI, so sort descending here after filtering.
   const relevantLogs = normalizedLogs.filter(event => {
-    const message = (event.message || '').toLowerCase();
-    const isReportLine = /^report\b/i.test(event.message || '');
+    const message = event.message || '';
+    const messageLower = message.toLowerCase();
+    const isReportLine = /^report\b/i.test(message);
+    const parsedJson = extractJsonPayload(message);
 
     if (type === 'error') {
-      return message.includes('error') || message.includes('fail') || message.includes('exception');
+      return isErrorEvent({
+        message,
+        parsedReport: event.parsedReport,
+        parsedJson,
+        simplified: { level: event.level }
+      });
     }
 
     if (type === 'report') {
-      return isReportLine;
+      return isReportLine || Boolean(event.parsedReport);
     }
 
     if (type === 'all') {
       return true;
     }
 
-    return message.includes('error') ||
-      message.includes('duration') ||
-      message.includes('report') ||
-      message.includes('fail') ||
+    return isErrorEvent({
+      message,
+      parsedReport: event.parsedReport,
+      parsedJson,
+      simplified: { level: event.level }
+    }) ||
+      messageLower.includes('duration') ||
+      messageLower.includes('report') ||
       Boolean(event.parsedReport);
   });
 
@@ -370,7 +429,12 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   // to provide an accurate total and top messages.
   let totalCount = sortedLogs.length;
   let reportCount = reportEvents.length;
-  let errorsCount = sortedLogs.filter(log => log.level === 'error' || (log.message || '').toLowerCase().includes('error')).length;
+  let errorsCount = sortedLogs.filter(log => isErrorEvent({
+    message: log.message,
+    parsedReport: log.parsedReport,
+    parsedJson: extractJsonPayload(log.message),
+    simplified: { level: log.level }
+  })).length;
   let avgDurationMs = durationSamples.length
     ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
     : null;
@@ -405,7 +469,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
 
         for (const event of aggEvents) {
           const pr = parseReportLine(event.message);
-          const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, pr) : null;
+          const parsedJson = extractJsonPayload(event.message);
+          const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, pr, parsedJson) : null;
 
           const messageLower = (event.message || '').toLowerCase();
           const isReportLine = /^report\b/i.test(event.message || '');
@@ -413,13 +478,23 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
           // Determine relevant per type
           let isRelevant = false;
           if (type === 'error') {
-            isRelevant = messageLower.includes('error') || messageLower.includes('fail') || messageLower.includes('exception');
+            isRelevant = isErrorEvent({
+              message: event.message,
+              parsedReport: pr,
+              parsedJson,
+              simplified
+            });
           } else if (type === 'report') {
             isRelevant = isReportLine;
           } else if (type === 'all') {
             isRelevant = true;
           } else {
-            isRelevant = messageLower.includes('error') || messageLower.includes('duration') || messageLower.includes('report') || messageLower.includes('fail') || Boolean(pr);
+            isRelevant = isErrorEvent({
+              message: event.message,
+              parsedReport: pr,
+              parsedJson,
+              simplified
+            }) || messageLower.includes('duration') || messageLower.includes('report') || Boolean(pr);
           }
 
           if (!isRelevant) continue;
@@ -432,7 +507,7 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
             if (pr.status === 'timeout') aggTimeouts += 1;
           }
 
-          if (messageLower.includes('error') || messageLower.includes('fail') || messageLower.includes('exception') || (simplified?.level === 'error')) {
+          if (isErrorEvent({ message: event.message, parsedReport: pr, parsedJson, simplified })) {
             aggErrors += 1;
           }
 
@@ -466,7 +541,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     ? (chronological[0].timestamp - 1)
     : null;
 
-  const nextTokenResponse = (resp.nextToken && resp.nextToken !== nextToken)
+  const hasMoreByToken = Boolean(resp.nextToken) && eventsToProcess.length === pageLimit;
+  const nextTokenResponse = (hasMoreByToken && resp.nextToken !== nextToken)
     ? resp.nextToken
     : null;
 

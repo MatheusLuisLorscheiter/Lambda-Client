@@ -1221,6 +1221,13 @@ const getLogType = (message: string): string => {
   return 'INFO'
 }
 
+const getLogTypeFromEntry = (log: LogEntry): string => {
+  if (log.level === 'error') return 'ERRO'
+  if (log.level === 'warn') return 'ALERTA'
+  if (log.level === 'info') return 'INFO'
+  return getLogType(log.message)
+}
+
 const getDisplayMessage = (log: LogEntry): string => {
   if (simplifyLogs.value && log.simplifiedMessage) {
     return log.simplifiedMessage
@@ -1232,7 +1239,7 @@ const getDisplayType = (log: LogEntry): string => {
   if (simplifyLogs.value && log.category) {
     return log.category
   }
-  return getLogType(log.message)
+  return getLogTypeFromEntry(log)
 }
 
 const getDisplayTypeClass = (log: LogEntry): string => {
@@ -1241,7 +1248,7 @@ const getDisplayTypeClass = (log: LogEntry): string => {
     if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
     return 'bg-blue-100 text-blue-800'
   }
-  return getLogTypeClass(log.message)
+  return getLogTypeClassFromEntry(log)
 }
 
 const getLogKey = (log: LogEntry): string => {
@@ -1271,6 +1278,13 @@ const getLogTypeClass = (message: string): string => {
     case 'FIM': return 'bg-gray-100 text-gray-800'
     default: return 'bg-blue-100 text-blue-800'
   }
+}
+
+const getLogTypeClassFromEntry = (log: LogEntry): string => {
+  if (log.level === 'error') return 'bg-red-100 text-red-800'
+  if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
+  if (log.level === 'info') return 'bg-blue-100 text-blue-800'
+  return getLogTypeClass(log.message)
 }
 
 const handleLogout = async () => {

@@ -19,3 +19,6 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+lambda-handler.js
+logs-aws.json
