@@ -640,7 +640,7 @@ const metrics = ref<Metrics>({
 
 const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
-const nextToken = ref<string | null>(null)
+const nextBefore = ref<number | null>(null)
 const isLoadingMore = ref(false)
 const aiSummary = ref<string | null>(null)
 const aiSummaryModel = ref<string | null>(null)
@@ -668,7 +668,7 @@ const costEstimate = ref<CostEstimate>({
 
 const rawMetricsData = ref<MetricDataResult[]>([])
 const fullscreenDocLink = ref<string | null>(null)
-const canLoadMore = computed(() => Boolean(nextToken.value))
+const canLoadMore = computed(() => Boolean(nextBefore.value))
 
 // Chart data
 const padDatePart = (value: number) => String(value).padStart(2, '0')
@@ -942,15 +942,15 @@ const loadLogs = async (append = false) => {
     if (!append) {
       // Reset pagination for fresh load
       logs.value = []
-      nextToken.value = null
+      nextBefore.value = null
     }
 
     const limit = 100
     const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${endTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
-    
-    // Only add nextToken if we're appending (loading more)
-    if (append && nextToken.value) {
-      params.push(`nextToken=${encodeURIComponent(nextToken.value)}`)
+
+    // When appending, request older logs by passing before cursor
+    if (append && nextBefore.value) {
+      params.push(`before=${nextBefore.value}`)
     }
 
     const url = `/lambda/logs/${selectedIntegrationId.value}?${params.join('&')}`
@@ -967,7 +967,7 @@ const loadLogs = async (append = false) => {
     }
 
     logSummary.value = data.summary
-    nextToken.value = data.nextToken ?? null
+    nextBefore.value = data.nextBefore ?? null
     restoreAiSummaryFromStorage()
     await fetchAiSummaryStatus(startTime)
   } catch (error) {
@@ -978,7 +978,7 @@ const loadLogs = async (append = false) => {
 }
 
 const loadMoreLogs = async () => {
-  if (!nextToken.value) return
+  if (!nextBefore.value) return
   await loadLogs(true)
 }
 

@@ -102,6 +102,7 @@ export interface LogSummary {
 export interface LogsResponse {
   logs: LogEntry[]
   summary: LogSummary
+  nextBefore?: number | null
   nextToken?: string | null
 }
 
