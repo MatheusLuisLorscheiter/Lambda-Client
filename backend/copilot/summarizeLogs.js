@@ -1,8 +1,8 @@
 const { createChatCompletion } = require('./client');
 
-// Modelos disponíveis: openai/gpt-4o-mini, openai/gpt-4o, openai/gpt-4.1, etc.
+// Modelos disponíveis: openai/gpt-5.1-codex-mini, openai/gpt-4o, openai/gpt-4.1, etc.
 // Formato: {publisher}/{model_name}
-const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
 
@@ -19,13 +19,25 @@ const SYSTEM_INSTRUCTIONS = [
     'Seja breve, claro e leve. Máximo 500 caracteres.'
 ].join(' ');
 
+const formatTimestamp = (timestamp) => {
+    if (!timestamp) return null;
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return String(timestamp);
+    return new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    }).format(date);
+};
+
 const buildUserPrompt = ({
     integrationName,
     functionName,
     logs
 }) => {
     const sanitizedLogs = logs.map(log => ({
-        ts: log.timestamp,
+        ts: formatTimestamp(log.timestamp),
         msg: log.simplifiedMessage || log.message,
         lvl: log.level
     }));
@@ -43,7 +55,7 @@ const buildUserPrompt = ({
         '(mostre que está tudo sob controle; se houver sinais pontuais, diga que são variações normais)',
         '',
         '🕒 Quando ocorreu:',
-        '(mencione horários principais em formato legível como "20/01 às 15:27")',
+        '(mencione horários principais em formato legível)',
         '',
         '✅ Monitoramento:',
         '(uma frase curta dizendo que o sistema segue acompanhado de perto)',
@@ -55,7 +67,7 @@ const buildUserPrompt = ({
 
 const buildChunkUserPrompt = ({ logs, chunkIndex, totalChunks }) => {
     const sanitizedLogs = logs.map(log => ({
-        ts: log.timestamp,
+        ts: formatTimestamp(log.timestamp),
         msg: log.simplifiedMessage || log.message,
         lvl: log.level
     }));

@@ -329,28 +329,20 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   const nextToken = (query.nextToken || '').toString().trim() || undefined;
   const pageEndTime = nextToken ? endTime : before;
 
-  const cmd = new FilterLogEventsCommand({
-    logGroupName,
-    limit: pageLimit,
-    startTime,
-    endTime: pageEndTime,
-    filterPattern: search ? `?"${search}"` : undefined,
-    nextToken
-  });
-
-  let resp;
-  try {
-    resp = await logsClient.send(cmd);
-  } catch (err) {
-    // If request fails, return empty set and surface the error upstream
-    throw err;
-  }
+  const summaryScope = (query.summaryScope || (summaryFlag ? 'full' : 'page')).toString().toLowerCase();
 
   const type = (query.type || 'relevant').toString().toLowerCase();
+  let resp;
+  let eventsToProcess = [];
+  let normalizedLogs = [];
+  let relevantLogs = [];
+  let pageEndTimeLocal = pageEndTime;
+  let effectiveNextToken = nextToken;
+  let beforeCursor = before;
+  const maxPageHops = 5;
+  let pageHops = 0;
 
-  const eventsToProcess = resp.events || [];
-
-  const normalizedLogs = (eventsToProcess || []).map(event => {
+  const buildNormalizedLogs = (events) => (events || []).map(event => {
     const parsedReport = parseReportLine(event.message);
     const parsedJson = extractJsonPayload(event.message);
     const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport, parsedJson) : null;
@@ -366,9 +358,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       level: simplified?.level ?? null
     };
   });
-  // CloudWatch returns events in chronological order (oldest → newest). We want
-  // to display newest first on the UI, so sort descending here after filtering.
-  const relevantLogs = normalizedLogs.filter(event => {
+
+  const filterRelevantLogs = (events) => (events || []).filter(event => {
     const message = event.message || '';
     const messageLower = message.toLowerCase();
     const isReportLine = /^report\b/i.test(message);
@@ -401,6 +392,46 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       messageLower.includes('report') ||
       Boolean(event.parsedReport);
   });
+
+  while (true) {
+    const cmd = new FilterLogEventsCommand({
+      logGroupName,
+      limit: pageLimit,
+      startTime,
+      endTime: pageEndTimeLocal,
+      filterPattern: search ? `?"${search}"` : undefined,
+      nextToken: effectiveNextToken
+    });
+
+    try {
+      resp = await logsClient.send(cmd);
+    } catch (err) {
+      throw err;
+    }
+
+    eventsToProcess = resp.events || [];
+    normalizedLogs = buildNormalizedLogs(eventsToProcess);
+    relevantLogs = filterRelevantLogs(normalizedLogs);
+
+    const hasMoreToken = Boolean(resp.nextToken);
+    const hasMoreByBefore = !hasMoreToken && eventsToProcess.length === pageLimit;
+
+    if (relevantLogs.length || (!hasMoreToken && !hasMoreByBefore) || pageHops >= maxPageHops) {
+      break;
+    }
+
+    if (hasMoreToken) {
+      effectiveNextToken = resp.nextToken;
+      pageEndTimeLocal = endTime;
+    } else {
+      const oldestTimestamp = eventsToProcess[0]?.timestamp ?? pageEndTimeLocal;
+      beforeCursor = oldestTimestamp - 1;
+      pageEndTimeLocal = beforeCursor;
+      effectiveNextToken = undefined;
+    }
+
+    pageHops += 1;
+  }
 
   const sortedLogs = relevantLogs.sort((a, b) => {
     const timeDiff = (b.timestamp || 0) - (a.timestamp || 0);
@@ -441,7 +472,17 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   let timeouts = timeoutCount;
   let summaryTopMessages = undefined;
 
-  if (summaryFlag) {
+  if (summaryFlag && summaryScope !== 'full') {
+    const topMap = new Map();
+    for (const log of sortedLogs) {
+      const baseMessage = (log.simplifiedMessage ?? log.message ?? '').trim();
+      const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
+      if (trimmed) topMap.set(trimmed, (topMap.get(trimmed) || 0) + 1);
+    }
+    summaryTopMessages = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([message, count]) => ({ message, count }));
+  }
+
+  if (summaryFlag && summaryScope === 'full') {
     // Paginate through all matching events to compute totals and top messages.
     const aggPageLimit = 1000;
     let aggNextToken = undefined;
@@ -537,14 +578,11 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   // the oldest event in this page is chronological[0] (since resp.events is chronological).
   // To fetch older events next, client should pass nextBefore = oldestTimestamp - 1.
   const chronological = eventsToProcess; // already oldest->newest
-  const nextBefore = (chronological.length === pageLimit && chronological[0])
+  const nextBefore = (!resp.nextToken && chronological.length === pageLimit && chronological[0])
     ? (chronological[0].timestamp - 1)
     : null;
 
-  const hasMoreByToken = Boolean(resp.nextToken) && eventsToProcess.length === pageLimit;
-  const nextTokenResponse = (hasMoreByToken && resp.nextToken !== nextToken)
-    ? resp.nextToken
-    : null;
+  const nextTokenResponse = resp.nextToken ? resp.nextToken : null;
 
   return {
     logs: sortedLogs,
@@ -563,7 +601,7 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     filter: type,
     limit,
     startTime,
-    endTime: pageEndTime,
+    endTime: pageEndTimeLocal,
     search,
     nextBefore,
     nextToken: nextTokenResponse
@@ -906,7 +944,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
     const summaryFlag = ['1', 'true', 'yes'].includes((req.query.summary || '').toString().toLowerCase());
 
-    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.before || req.query.endTime || 'now'}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}`;
+    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.before || req.query.endTime || 'now'}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}:${req.query.summaryScope || 'auto'}`;
     const cached = await redisClient.get(cacheKey);
     if (cached) {
       return res.json(JSON.parse(cached));
@@ -949,7 +987,7 @@ router.post('/logs/:integrationId/ai-summary/start', authenticateToken, async (r
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
 
@@ -1052,7 +1090,7 @@ router.get('/logs/:integrationId/ai-summary/status', authenticateToken, async (r
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
 
@@ -1074,7 +1112,7 @@ router.delete('/logs/:integrationId/ai-summary', authenticateToken, async (req, 
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
 
     await redisClient.del(cacheKey);

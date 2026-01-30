@@ -894,7 +894,7 @@ const loadLogs = async (append = false) => {
     }
 
     const limit = 100
-    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`]
+    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
     if (append && nextBefore.value) {
       params.push(`before=${nextBefore.value}`)
     } else if (append && nextToken.value) {
