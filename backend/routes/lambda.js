@@ -987,7 +987,7 @@ router.post('/logs/:integrationId/ai-summary/start', authenticateToken, async (r
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-5-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
 
@@ -1090,7 +1090,7 @@ router.get('/logs/:integrationId/ai-summary/status', authenticateToken, async (r
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-5-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
 
@@ -1112,7 +1112,7 @@ router.delete('/logs/:integrationId/ai-summary', authenticateToken, async (req, 
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-5-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
 
     await redisClient.del(cacheKey);

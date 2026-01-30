@@ -1,8 +1,8 @@
 const { createChatCompletion } = require('./client');
 
-// Modelos disponíveis: openai/gpt-5.1-codex-mini, openai/gpt-4o, openai/gpt-4.1, etc.
+// Modelos disponíveis: openai/gpt-5-mini, openai/gpt-4o, openai/gpt-4.1, etc.
 // Formato: {publisher}/{model_name}
-const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'openai/gpt-5.1-codex-mini';
+const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'openai/gpt-5-mini';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
 
