@@ -6,7 +6,7 @@
 
 const GITHUB_MODELS_ENDPOINT = 'https://models.github.ai/inference/chat/completions';
 
-const createChatCompletion = async ({ model, messages, maxTokens = 1000 }) => {
+const createChatCompletion = async ({ model, messages, maxTokens = 1000, max_completion_tokens }) => {
     const token = process.env.GITHUB_TOKEN;
 
     if (!token) {
@@ -23,7 +23,7 @@ const createChatCompletion = async ({ model, messages, maxTokens = 1000 }) => {
         body: JSON.stringify({
             model,
             messages,
-            max_tokens: max_completion_tokens ?? maxTokens,
+            max_completion_tokens: max_completion_tokens ?? maxTokens,
         }),
     });
 
