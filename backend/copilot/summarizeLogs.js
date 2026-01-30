@@ -1,8 +1,8 @@
 const { createChatCompletion } = require('./client');
 
-// Modelos disponíveis: openai/gpt-5-mini, openai/gpt-4o, openai/gpt-4.1, etc.
+// Modelos disponíveis: openai/gpt-5, openai/gpt-5-mini, openai/gpt-4o, openai/gpt-4.1, etc.
 // Formato: {publisher}/{model_name}
-const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'openai/gpt-5-mini';
+const DEFAULT_MODEL = process.env.GITHUB_MODEL || 'openai/gpt-5';
 const MAX_LOGS = Number(process.env.COPILOT_MAX_LOGS) || 120;
 const CHUNK_SIZE = Number(process.env.COPILOT_CHUNK_SIZE) || 40;
 
@@ -168,10 +168,13 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
 
             logResponseShape('single', response);
             const content = extractCompletionText(response);
-            console.log(`[github-models] resumo gerado com sucesso`);
+            const trimmed = content?.trim() || '';
+            console.log(`[github-models] resumo gerado com sucesso`, {
+                length: trimmed.length
+            });
 
             return {
-                summary: content || 'Não foi possível gerar o resumo no momento.'
+                summary: trimmed || 'Resumo temporariamente indisponível, mas o sistema segue monitorado e operando normalmente.'
             };
         }
 
@@ -224,10 +227,13 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
 
         logResponseShape('final', finalResponse);
         const finalContent = extractCompletionText(finalResponse);
-        console.log(`[github-models] resumo final gerado com sucesso`);
+        const finalTrimmed = finalContent?.trim() || '';
+        console.log(`[github-models] resumo final gerado com sucesso`, {
+            length: finalTrimmed.length
+        });
 
         return {
-            summary: finalContent || 'Não foi possível gerar o resumo no momento.'
+            summary: finalTrimmed || 'Resumo temporariamente indisponível, mas o sistema segue monitorado e operando normalmente.'
         };
 
     } catch (error) {

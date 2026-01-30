@@ -19,6 +19,7 @@ const createChatCompletion = async ({ model, messages, maxTokens = 1000, max_com
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
             'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
         },
         body: JSON.stringify({
             model,
