@@ -102,10 +102,38 @@ const extractCompletionText = (response) => {
     const choice = response.choices?.[0];
     if (!choice) return null;
     if (typeof choice.message?.content === 'string') return choice.message.content.trim();
+    if (Array.isArray(choice.message?.content)) {
+        const parts = choice.message.content
+            .map(part => (typeof part === 'string' ? part : part?.text))
+            .filter(Boolean);
+        if (parts.length) return parts.join('').trim();
+    }
     if (typeof choice.message?.text === 'string') return choice.message.text.trim();
     if (typeof choice.text === 'string') return choice.text.trim();
     if (typeof choice.content === 'string') return choice.content.trim();
+    if (Array.isArray(choice.content)) {
+        const parts = choice.content
+            .map(part => (typeof part === 'string' ? part : part?.text))
+            .filter(Boolean);
+        if (parts.length) return parts.join('').trim();
+    }
     return null;
+};
+
+const logResponseShape = (label, response) => {
+    try {
+        const choice = response?.choices?.[0] || {};
+        console.log(`[github-models] ${label} response shape`, {
+            hasChoices: Array.isArray(response?.choices),
+            choiceKeys: Object.keys(choice),
+            messageKeys: Object.keys(choice.message || {}),
+            contentType: Array.isArray(choice.message?.content)
+                ? 'array'
+                : typeof choice.message?.content,
+        });
+    } catch (err) {
+        console.warn('[github-models] failed to inspect response shape', err?.message || err);
+    }
 };
 
 const summarizeLogs = async ({ logs, summary, integration }) => {
@@ -138,6 +166,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                 max_completion_tokens: 800
             });
 
+            logResponseShape('single', response);
             const content = extractCompletionText(response);
             console.log(`[github-models] resumo gerado com sucesso`);
 
@@ -172,6 +201,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                     max_completion_tokens: 300
                 });
 
+                logResponseShape(`chunk-${chunkIndex}`, chunkResponse);
                 const chunkContent = extractCompletionText(chunkResponse) || 'Sem eventos relevantes.';
                 chunkSummaries.push(`Lote ${chunkIndex}:\n${chunkContent}`);
             } catch (chunkError) {
@@ -192,6 +222,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
             max_completion_tokens: 800
         });
 
+        logResponseShape('final', finalResponse);
         const finalContent = extractCompletionText(finalResponse);
         console.log(`[github-models] resumo final gerado com sucesso`);
 
