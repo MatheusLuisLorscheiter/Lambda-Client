@@ -585,6 +585,7 @@ import logoDark from '@/assets/logos/logo-dark.svg'
 import { Line, Bar } from 'vue-chartjs'
 import {
   Chart as ChartJS,
+  type ChartOptions,
   CategoryScale,
   LinearScale,
   PointElement,
@@ -798,7 +799,7 @@ const durationChartData = computed(() => {
   }
 })
 
-const lineChartOptions = {
+const lineChartOptions: ChartOptions<'line'> = {
   responsive: true,
   maintainAspectRatio: false,
   animation: false,
@@ -818,7 +819,7 @@ const lineChartOptions = {
   }
 }
 
-const errorChartOptions = {
+const errorChartOptions: ChartOptions<'line'> = {
   responsive: true,
   maintainAspectRatio: false,
   animation: false,
@@ -839,7 +840,7 @@ const errorChartOptions = {
   }
 }
 
-const barChartOptions = {
+const barChartOptions: ChartOptions<'bar'> = {
   responsive: true,
   maintainAspectRatio: false,
   animation: false,
