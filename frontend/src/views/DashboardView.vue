@@ -801,6 +801,9 @@ const durationChartData = computed(() => {
 const lineChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  animation: false,
+  normalized: true,
+  parsing: false as const,
   plugins: {
     legend: { display: false }
   },
@@ -818,6 +821,9 @@ const lineChartOptions = {
 const errorChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  animation: false,
+  normalized: true,
+  parsing: false as const,
   plugins: {
     legend: { display: false }
   },
@@ -836,6 +842,9 @@ const errorChartOptions = {
 const barChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  animation: false,
+  normalized: true,
+  parsing: false as const,
   plugins: {
     legend: { display: false }
   },
