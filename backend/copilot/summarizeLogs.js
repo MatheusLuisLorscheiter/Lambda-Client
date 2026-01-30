@@ -124,7 +124,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                         })
                     }
                 ],
-                maxTokens: 800
+                max_completion_tokens: 800
             });
 
             const content = response?.choices?.[0]?.message?.content?.trim();
@@ -158,7 +158,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                             })
                         }
                     ],
-                    maxTokens: 300
+                    max_completion_tokens: 300
                 });
 
                 const chunkContent = chunkResponse?.choices?.[0]?.message?.content?.trim() || 'Sem eventos relevantes.';
@@ -178,7 +178,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                 { role: 'system', content: SYSTEM_INSTRUCTIONS },
                 { role: 'user', content: buildFinalUserPrompt({ chunkSummaries }) }
             ],
-            maxTokens: 800
+            max_completion_tokens: 800
         });
 
         const finalContent = finalResponse?.choices?.[0]?.message?.content?.trim();
