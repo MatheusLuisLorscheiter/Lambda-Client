@@ -363,9 +363,9 @@
               <div class="bg-slate-50 rounded-lg p-3">
                 <p class="text-xs text-slate-500">Período analisado</p>
                 <p class="font-medium text-slate-700">
-                  {{ logSummary.startTime ? new Date(logSummary.startTime).toLocaleString() : '-' }}
+                  {{ logSummary.startTime ? formatLogTimestamp(logSummary.startTime) : '-' }}
                   →
-                  {{ logSummary.endTime ? new Date(logSummary.endTime).toLocaleString() : '-' }}
+                  {{ logSummary.endTime ? formatLogTimestamp(logSummary.endTime) : '-' }}
                 </p>
               </div>
               <div class="bg-slate-50 rounded-lg p-3">
@@ -405,7 +405,7 @@
                   <div class="flex-1 min-w-0">
                       <p class="text-sm text-slate-900 font-mono break-all">{{ getDisplayMessage(log) }}</p>
                     <div class="mt-1 flex items-center space-x-4 text-xs text-slate-500">
-                      <span>{{ new Date(log.timestamp).toLocaleString() }}</span>
+                      <span>{{ formatLogTimestamp(log.timestamp) }}</span>
                       <template v-if="log.parsedReport">
                         <span class="flex items-center">
                           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1266,6 +1266,22 @@ const formatNumber = (num: number): string => {
 const formatDuration = (ms: number): string => {
   if (ms >= 1000) return (ms / 1000).toFixed(2) + 's'
   return Math.round(ms) + 'ms'
+}
+
+const formatLogTimestamp = (timestamp?: number | null): string => {
+  if (!timestamp) return '-'
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '-'
+  const formatted = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone: 'UTC'
+  }).format(date)
+  return `${formatted} UTC`
 }
 
 const getLogType = (message: string): string => {
