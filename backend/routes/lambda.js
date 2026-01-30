@@ -318,29 +318,18 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   const startTime = Number(query.startTime) || Date.now() - (24 * 60 * 60 * 1000);
   const endTime = Number(query.endTime) || Date.now();
   const search = (query.search || '').toString().trim();
-
-  // Support cursor-based pagination by 'before' timestamp.
-  // Client may pass `before` (epoch ms) to request logs strictly before that timestamp.
-  // We will request one page from CloudWatch with the provided `limit` and the
-  // interval [startTime, before], then return logs ordered from newest → oldest
-  // along with `nextBefore` to load older logs.
-  const pageLimit = Math.min(Math.max(Number(limit) || 100, 10), 1000);
-  const before = Number(query.before) || endTime;
   const nextToken = (query.nextToken || '').toString().trim() || undefined;
-  const pageEndTime = nextToken ? endTime : before;
 
   const summaryScope = (query.summaryScope || (summaryFlag ? 'full' : 'page')).toString().toLowerCase();
-
   const type = (query.type || 'relevant').toString().toLowerCase();
+
+  // AWS CloudWatch FilterLogEvents returns events in chronological order (oldest first)
+  // We'll use AWS's native nextToken for pagination - it's reliable and handles all edge cases
+  const pageLimit = Math.min(Math.max(Number(limit) || 100, 10), 1000);
   let resp;
   let eventsToProcess = [];
   let normalizedLogs = [];
   let relevantLogs = [];
-  let pageEndTimeLocal = pageEndTime;
-  let effectiveNextToken = nextToken;
-  let beforeCursor = before;
-  const maxPageHops = 5;
-  let pageHops = 0;
 
   const buildNormalizedLogs = (events) => (events || []).map(event => {
     const parsedReport = parseReportLine(event.message);
@@ -393,46 +382,25 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       Boolean(event.parsedReport);
   });
 
-  while (true) {
-    const cmd = new FilterLogEventsCommand({
-      logGroupName,
-      limit: pageLimit,
-      startTime,
-      endTime: pageEndTimeLocal,
-      filterPattern: search ? `?"${search}"` : undefined,
-      nextToken: effectiveNextToken
-    });
+  // Make a single request to CloudWatch Logs
+  const cmd = new FilterLogEventsCommand({
+    logGroupName,
+    limit: pageLimit,
+    startTime,
+    endTime,
+    filterPattern: search ? `?"${search}"` : undefined,
+    nextToken
+  });
 
-    try {
-      resp = await logsClient.send(cmd);
-    } catch (err) {
-      throw err;
-    }
-
-    eventsToProcess = resp.events || [];
-    normalizedLogs = buildNormalizedLogs(eventsToProcess);
-    relevantLogs = filterRelevantLogs(normalizedLogs);
-
-    const hasMoreToken = Boolean(resp.nextToken);
-
-    // Only hop backwards if we got no events at all AND we have no relevant logs yet AND it's not pagination
-    // This prevents skipping recent logs
-    const shouldHop = eventsToProcess.length === 0 && relevantLogs.length === 0 && !nextToken && pageHops < maxPageHops;
-
-    if (eventsToProcess.length > 0 || !shouldHop) {
-      break;
-    }
-
-    // Hop backwards in time to find older logs
-    if (hasMoreToken) {
-      effectiveNextToken = resp.nextToken;
-    } else {
-      // No more pages available, stop here
-      break;
-    }
-
-    pageHops += 1;
+  try {
+    resp = await logsClient.send(cmd);
+  } catch (err) {
+    throw err;
   }
+
+  eventsToProcess = resp.events || [];
+  normalizedLogs = buildNormalizedLogs(eventsToProcess);
+  relevantLogs = filterRelevantLogs(normalizedLogs);
 
   const sortedLogs = relevantLogs.sort((a, b) => {
     const timeDiff = (b.timestamp || 0) - (a.timestamp || 0);
@@ -575,15 +543,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     summaryTopMessages = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([message, count]) => ({ message, count }));
   }
 
-  // Determine nextBefore cursor for pagination: if we received a full page,
-  // the oldest event in this page is chronological[0] (since resp.events is chronological).
-  // To fetch older events next, client should pass nextBefore = oldestTimestamp - 1.
-  const chronological = eventsToProcess; // already oldest->newest
-  const nextBefore = (!resp.nextToken && chronological.length === pageLimit && chronological[0])
-    ? (chronological[0].timestamp - 1)
-    : null;
-
-  const nextTokenResponse = resp.nextToken ? resp.nextToken : null;
+  // Use AWS's native nextToken for pagination - it's the most reliable approach
+  const nextTokenResponse = resp.nextToken || null;
 
   return {
     logs: sortedLogs,
@@ -594,7 +555,7 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       avgDurationMs: avgDurationMs,
       timeouts: timeouts,
       startTime: timeRange.startTime ?? startTime,
-      endTime: timeRange.endTime ?? pageEndTime,
+      endTime: timeRange.endTime ?? endTime,
       topMessages: summaryTopMessages || undefined,
       filter: type,
       simplify: simplifyFlag
@@ -602,9 +563,8 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     filter: type,
     limit,
     startTime,
-    endTime: pageEndTimeLocal,
+    endTime,
     search,
-    nextBefore,
     nextToken: nextTokenResponse
   };
 };

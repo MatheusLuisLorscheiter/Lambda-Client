@@ -640,9 +640,7 @@ const metrics = ref<Metrics>({
 
 const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
-const nextBefore = ref<number | null>(null)
 const nextToken = ref<string | null>(null)
-const logEndTime = ref<number | null>(null)
 const isLoadingMore = ref(false)
 const aiSummary = ref<string | null>(null)
 const aiSummaryModel = ref<string | null>(null)
@@ -670,7 +668,7 @@ const costEstimate = ref<CostEstimate>({
 
 const rawMetricsData = ref<MetricDataResult[]>([])
 const fullscreenDocLink = ref<string | null>(null)
-const canLoadMore = computed(() => Boolean(nextToken.value || nextBefore.value))
+const canLoadMore = computed(() => Boolean(nextToken.value))
 
 // Chart data
 const padDatePart = (value: number) => String(value).padStart(2, '0')
@@ -939,23 +937,19 @@ const loadLogs = async (append = false) => {
 
     const days = parseInt(timePeriod.value)
     const startTime = Date.now() - (days * 24 * 60 * 60 * 1000)
+    const endTime = Date.now()
 
     if (!append) {
-      // reset pagination and always get the most recent logs
+      // Reset pagination for fresh load
       logs.value = []
-      nextBefore.value = null
       nextToken.value = null
-      // Always update to current time to get the latest logs
-      logEndTime.value = Date.now()
     }
 
     const limit = 100
-    // For fresh loads, always use current time; for pagination, use the stored cursor
-    const resolvedEndTime = append ? (logEndTime.value ?? Date.now()) : Date.now()
-    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${resolvedEndTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
-    if (append && nextBefore.value) {
-      params.push(`before=${nextBefore.value}`)
-    } else if (append && nextToken.value) {
+    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${endTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
+    
+    // Only add nextToken if we're appending (loading more)
+    if (append && nextToken.value) {
       params.push(`nextToken=${encodeURIComponent(nextToken.value)}`)
     }
 
@@ -965,17 +959,14 @@ const loadLogs = async (append = false) => {
 
     const data = await api.get<LogsResponse>(url)
 
-    // append or replace
+    // Append or replace
     if (append) {
       logs.value = mergeLogs(logs.value, data.logs)
     } else {
       logs.value = data.logs
-      // Store the endTime used for this load to maintain consistency for pagination
-      logEndTime.value = resolvedEndTime
     }
 
     logSummary.value = data.summary
-    nextBefore.value = data.nextBefore ?? null
     nextToken.value = data.nextToken ?? null
     restoreAiSummaryFromStorage()
     await fetchAiSummaryStatus(startTime)
@@ -987,7 +978,7 @@ const loadLogs = async (append = false) => {
 }
 
 const loadMoreLogs = async () => {
-  if (!nextBefore.value && !nextToken.value) return
+  if (!nextToken.value) return
   await loadLogs(true)
 }
 
