@@ -97,6 +97,17 @@ const buildFinalUserPrompt = ({ chunkSummaries }) => [
     chunkSummaries.join('\n\n')
 ].join('\n');
 
+const extractCompletionText = (response) => {
+    if (!response) return null;
+    const choice = response.choices?.[0];
+    if (!choice) return null;
+    if (typeof choice.message?.content === 'string') return choice.message.content.trim();
+    if (typeof choice.message?.text === 'string') return choice.message.text.trim();
+    if (typeof choice.text === 'string') return choice.text.trim();
+    if (typeof choice.content === 'string') return choice.content.trim();
+    return null;
+};
+
 const summarizeLogs = async ({ logs, summary, integration }) => {
     if (!logs?.length) {
         return {
@@ -127,7 +138,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                 max_completion_tokens: 800
             });
 
-            const content = response?.choices?.[0]?.message?.content?.trim();
+            const content = extractCompletionText(response);
             console.log(`[github-models] resumo gerado com sucesso`);
 
             return {
@@ -161,7 +172,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
                     max_completion_tokens: 300
                 });
 
-                const chunkContent = chunkResponse?.choices?.[0]?.message?.content?.trim() || 'Sem eventos relevantes.';
+                const chunkContent = extractCompletionText(chunkResponse) || 'Sem eventos relevantes.';
                 chunkSummaries.push(`Lote ${chunkIndex}:\n${chunkContent}`);
             } catch (chunkError) {
                 console.error(`[github-models] erro no chunk ${chunkIndex}:`, chunkError.message);
@@ -181,7 +192,7 @@ const summarizeLogs = async ({ logs, summary, integration }) => {
             max_completion_tokens: 800
         });
 
-        const finalContent = finalResponse?.choices?.[0]?.message?.content?.trim();
+        const finalContent = extractCompletionText(finalResponse);
         console.log(`[github-models] resumo final gerado com sucesso`);
 
         return {
