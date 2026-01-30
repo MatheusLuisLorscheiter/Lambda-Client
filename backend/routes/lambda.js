@@ -905,14 +905,14 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
     const summaryFlag = ['1', 'true', 'yes'].includes((req.query.summary || '').toString().toLowerCase());
 
-    // Build cache key with proper timestamp handling - round to nearest minute to allow some cache reuse
-    const endTimeParam = req.query.before || req.query.endTime;
-    const endTimeForCache = endTimeParam ? Math.floor(Number(endTimeParam) / 60000) * 60000 : Math.floor(Date.now() / 60000) * 60000;
-    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${endTimeForCache}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}:${req.query.summaryScope || 'auto'}`;
-    const cached = await redisClient.get(cacheKey);
-    if (cached) {
-      return res.json(JSON.parse(cached));
-    }
+    // Build cache key - cache for 20 seconds to balance freshness vs performance
+    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}:${req.query.summaryScope || 'auto'}`;
+
+    // Disable cache for now to ensure fresh data
+    // const cached = await redisClient.get(cacheKey);
+    // if (cached) {
+    //   return res.json(JSON.parse(cached));
+    // }
 
     const payload = await buildLogsPayload({
       integration,
@@ -921,8 +921,8 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
       summaryFlag
     });
 
-    // Cache for 30 seconds - balance between performance and freshness
-    await redisClient.set(cacheKey, JSON.stringify(payload), { EX: 30 });
+    // Cache disabled temporarily - can be re-enabled after testing
+    // await redisClient.set(cacheKey, JSON.stringify(payload), { EX: 20 });
 
     await logAudit({
       companyId: req.user.companyId,
