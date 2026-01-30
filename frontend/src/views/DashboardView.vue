@@ -316,7 +316,7 @@
                     v-model="simplifyLogs"
                     type="checkbox"
                     class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
-                    @change="loadLogs"
+                    @change="() => loadLogs()"
                   />
                   <span>Simplificar</span>
                 </label>
@@ -340,7 +340,7 @@
                 </span>
                 <select
                   v-model="logFilter"
-                  @change="loadLogs"
+                  @change="() => loadLogs()"
                   class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 >
                   <option value="relevant">Relevantes</option>
@@ -363,9 +363,9 @@
               <div class="bg-slate-50 rounded-lg p-3">
                 <p class="text-xs text-slate-500">Período analisado</p>
                 <p class="font-medium text-slate-700">
-                  {{ logSummary.startTime ? new Date(logSummary.startTime).toLocaleString() : '-' }}
+                  {{ logSummary.startTime ? formatLogTimestamp(logSummary.startTime) : '-' }}
                   →
-                  {{ logSummary.endTime ? new Date(logSummary.endTime).toLocaleString() : '-' }}
+                  {{ logSummary.endTime ? formatLogTimestamp(logSummary.endTime) : '-' }}
                 </p>
               </div>
               <div class="bg-slate-50 rounded-lg p-3">
@@ -394,7 +394,7 @@
           </div>
           <div class="max-h-96 overflow-y-auto">
             <ul class="divide-y divide-slate-100">
-              <li v-for="log in logs" :key="log.timestamp" class="px-6 py-4 hover:bg-slate-50 transition-colors">
+              <li v-for="(log, idx) in logs" :key="log.eventId || `${log.timestamp}-${idx}`" class="px-6 py-4 hover:bg-slate-50 transition-colors">
                 <div class="flex items-start space-x-3">
                   <span
                       :class="getDisplayTypeClass(log)"
@@ -405,7 +405,7 @@
                   <div class="flex-1 min-w-0">
                       <p class="text-sm text-slate-900 font-mono break-all">{{ getDisplayMessage(log) }}</p>
                     <div class="mt-1 flex items-center space-x-4 text-xs text-slate-500">
-                      <span>{{ new Date(log.timestamp).toLocaleString() }}</span>
+                      <span>{{ formatLogTimestamp(log.timestamp) }}</span>
                       <template v-if="log.parsedReport">
                         <span class="flex items-center">
                           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -434,6 +434,22 @@
                 Nenhum log encontrado para o período selecionado
               </li>
             </ul>
+            <div class="px-6 py-4 text-center" v-if="canLoadMore">
+              <button
+                @click="loadMoreLogs"
+                :disabled="isLoadingMore"
+                class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg v-if="isLoadingMore" class="animate-spin -ml-1 mr-2 h-4 w-4 text-slate-700" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Carregar mais
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -564,7 +580,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { Integration, LogEntry, Metrics, MetricDataResult, LogSummary, CostEstimate } from '@/types'
+import type { Integration, LogEntry, Metrics, MetricDataResult, LogSummary, CostEstimate, LogsResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import { Line, Bar } from 'vue-chartjs'
 import {
@@ -599,7 +615,7 @@ const api = useApi()
 const integrations = ref<Integration[]>([])
 const selectedIntegrationId = ref('')
 const timePeriod = ref('7')
-const logFilter = ref('relevant')
+const logFilter = ref('all')
 const isLoading = ref(false)
 const simplifyLogs = ref(false)
 const showSummary = ref(false)
@@ -624,6 +640,8 @@ const metrics = ref<Metrics>({
 
 const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
+const nextBefore = ref<number | null>(null)
+const isLoadingMore = ref(false)
 const aiSummary = ref<string | null>(null)
 const aiSummaryModel = ref<string | null>(null)
 const aiSummaryStatus = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
@@ -650,77 +668,72 @@ const costEstimate = ref<CostEstimate>({
 
 const rawMetricsData = ref<MetricDataResult[]>([])
 const fullscreenDocLink = ref<string | null>(null)
+const canLoadMore = computed(() => Boolean(nextBefore.value))
 
 // Chart data
-const toDayKey = (date: Date) => {
+const padDatePart = (value: number) => String(value).padStart(2, '0')
+
+const toLocalDateKey = (date: Date) => {
   const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
+  const month = padDatePart(date.getMonth() + 1)
+  const day = padDatePart(date.getDate())
   return `${year}-${month}-${day}`
 }
 
-const aggregateSeriesByDay = (timestamps: string[], values: number[], mode: 'sum' | 'avg') => {
-  const map = new Map<string, { date: Date; sum: number; count: number }>()
+const formatDateKey = (key: string) => {
+  const [year, month, day] = key.split('-')
+  if (!year || !month || !day) return key
+  return `${day}/${month}/${year}`
+}
 
-  timestamps.forEach((ts, index) => {
-    const value = values[index] ?? 0
+const aggregateSumByDay = (metric?: MetricDataResult) => {
+  const map = new Map<string, number>()
+  if (!metric?.Timestamps?.length) return map
+
+  metric.Timestamps.forEach((ts, i) => {
     const date = new Date(ts)
-    const dayKey = toDayKey(date)
-    const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    const entry = map.get(dayKey) || { date: normalizedDate, sum: 0, count: 0 }
+    const key = toLocalDateKey(date)
+    const value = metric.Values?.[i] ?? 0
+    map.set(key, (map.get(key) || 0) + value)
+  })
+
+  return map
+}
+
+const aggregateAverageByDay = (metric?: MetricDataResult) => {
+  const map = new Map<string, { sum: number; count: number }>()
+  if (!metric?.Timestamps?.length) return map
+
+  metric.Timestamps.forEach((ts, i) => {
+    const date = new Date(ts)
+    const key = toLocalDateKey(date)
+    const value = metric.Values?.[i]
+    if (value === undefined || value === null) return
+    const entry = map.get(key) || { sum: 0, count: 0 }
     entry.sum += value
     entry.count += 1
-    map.set(dayKey, entry)
+    map.set(key, entry)
   })
 
-  return Array.from(map.values())
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .map(entry => ({
-      date: entry.date,
-      value: mode === 'avg' ? entry.sum / Math.max(entry.count, 1) : entry.sum
-    }))
+  return map
 }
 
-const aggregateErrorRateByDay = (timestamps: string[], invocations: number[], errors: number[]) => {
-  const map = new Map<string, { date: Date; invocations: number; errors: number }>()
-
-  timestamps.forEach((ts, index) => {
-    const inv = invocations[index] ?? 0
-    const err = errors[index] ?? 0
-    const date = new Date(ts)
-    const dayKey = toDayKey(date)
-    const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    const entry = map.get(dayKey) || { date: normalizedDate, invocations: 0, errors: 0 }
-    entry.invocations += inv
-    entry.errors += err
-    map.set(dayKey, entry)
-  })
-
-  return Array.from(map.values())
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .map(entry => ({
-      date: entry.date,
-      rate: entry.invocations > 0 ? (entry.errors / entry.invocations) * 100 : 0
-    }))
-}
+const buildDayLabels = (keys: string[]) => keys.sort().map(formatDateKey)
 
 const invocationsChartData = computed(() => {
   const invocationsMetric = rawMetricsData.value.find(m => m.Id === 'invocations')
-  if (!invocationsMetric?.Timestamps?.length) {
+  const byDay = aggregateSumByDay(invocationsMetric)
+  if (byDay.size === 0) {
     return { labels: [], datasets: [] }
   }
 
-  const aggregatedData = aggregateSeriesByDay(
-    invocationsMetric.Timestamps,
-    invocationsMetric.Values || [],
-    'sum'
-  )
+  const keys = Array.from(byDay.keys()).sort()
 
   return {
-    labels: aggregatedData.map(d => d.date.toLocaleDateString()),
+    labels: buildDayLabels(keys),
     datasets: [{
       label: 'Invocações',
-      data: aggregatedData.map(d => d.value),
+      data: keys.map(key => byDay.get(key) || 0),
       borderColor: 'rgb(59, 130, 246)',
       backgroundColor: 'rgba(59, 130, 246, 0.1)',
       fill: true,
@@ -733,21 +746,26 @@ const errorRateChartData = computed(() => {
   const invocationsMetric = rawMetricsData.value.find(m => m.Id === 'invocations')
   const errorsMetric = rawMetricsData.value.find(m => m.Id === 'errors')
 
-  if (!invocationsMetric?.Timestamps?.length) {
+  const invocationsByDay = aggregateSumByDay(invocationsMetric)
+  if (invocationsByDay.size === 0) {
     return { labels: [], datasets: [] }
   }
 
-  const aggregatedData = aggregateErrorRateByDay(
-    invocationsMetric.Timestamps,
-    invocationsMetric.Values || [],
-    errorsMetric?.Values || []
-  )
+  const errorsByDay = aggregateSumByDay(errorsMetric)
+  const keys = Array.from(invocationsByDay.keys())
+    .concat(Array.from(errorsByDay.keys()))
+    .filter((value, index, self) => self.indexOf(value) === index)
+    .sort()
 
   return {
-    labels: aggregatedData.map(d => d.date.toLocaleDateString()),
+    labels: buildDayLabels(keys),
     datasets: [{
       label: 'Taxa de erro (%)',
-      data: aggregatedData.map(d => d.rate),
+      data: keys.map(key => {
+        const invocations = invocationsByDay.get(key) || 0
+        const errors = errorsByDay.get(key) || 0
+        return invocations > 0 ? (errors / invocations) * 100 : 0
+      }),
       borderColor: 'rgb(239, 68, 68)',
       backgroundColor: 'rgba(239, 68, 68, 0.1)',
       fill: true,
@@ -758,21 +776,22 @@ const errorRateChartData = computed(() => {
 
 const durationChartData = computed(() => {
   const durationMetric = rawMetricsData.value.find(m => m.Id === 'duration')
-  if (!durationMetric?.Timestamps?.length) {
+  const byDay = aggregateAverageByDay(durationMetric)
+  if (byDay.size === 0) {
     return { labels: [], datasets: [] }
   }
 
-  const aggregatedData = aggregateSeriesByDay(
-    durationMetric.Timestamps,
-    durationMetric.Values || [],
-    'avg'
-  )
+  const keys = Array.from(byDay.keys()).sort()
 
   return {
-    labels: aggregatedData.map(d => d.date.toLocaleDateString()),
+    labels: buildDayLabels(keys),
     datasets: [{
       label: 'Duração média (ms)',
-      data: aggregatedData.map(d => d.value),
+      data: keys.map(key => {
+        const entry = byDay.get(key)
+        if (!entry || entry.count === 0) return 0
+        return entry.sum / entry.count
+      }),
       backgroundColor: 'rgba(147, 51, 234, 0.8)',
       borderRadius: 4
     }]
@@ -887,7 +906,9 @@ const loadMetrics = async () => {
 
     const totalInvocations = invocationsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
     const totalErrors = errorsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
-    const avgDuration = durationMetric?.Values?.[0] || 0
+    const avgDuration = durationMetric?.Values?.length
+      ? durationMetric.Values.reduce((sum, value) => sum + value, 0) / durationMetric.Values.length
+      : 0
 
     metrics.value = {
       invocations: totalInvocations,
@@ -910,21 +931,55 @@ const loadMetrics = async () => {
   }
 }
 
-const loadLogs = async () => {
+const loadLogs = async (append = false) => {
   try {
+    if (!selectedIntegrationId.value) return
+
     const days = parseInt(timePeriod.value)
     const startTime = Date.now() - (days * 24 * 60 * 60 * 1000)
-    const data = await api.get<{ logs: LogEntry[], summary: LogSummary }>(
-      `/lambda/logs/${selectedIntegrationId.value}?type=${logFilter.value}&startTime=${startTime}&limit=100&simplify=${simplifyLogs.value ? '1' : '0'}&summary=1`
-    )
+    const endTime = Date.now()
 
-    logs.value = data.logs
+    if (!append) {
+      // Reset pagination for fresh load
+      logs.value = []
+      nextBefore.value = null
+    }
+
+    const limit = 100
+    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${endTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
+
+    // When appending, request older logs by passing before cursor
+    if (append && nextBefore.value) {
+      params.push(`before=${nextBefore.value}`)
+    }
+
+    const url = `/lambda/logs/${selectedIntegrationId.value}?${params.join('&')}`
+
+    if (append) isLoadingMore.value = true
+
+    const data = await api.get<LogsResponse>(url)
+
+    // Append or replace
+    if (append) {
+      logs.value = mergeLogs(logs.value, data.logs)
+    } else {
+      logs.value = data.logs
+    }
+
     logSummary.value = data.summary
+    nextBefore.value = data.nextBefore ?? null
     restoreAiSummaryFromStorage()
     await fetchAiSummaryStatus(startTime)
   } catch (error) {
     console.error('Falha ao carregar logs:', error)
+  } finally {
+    isLoadingMore.value = false
   }
+}
+
+const loadMoreLogs = async () => {
+  if (!nextBefore.value) return
+  await loadLogs(true)
 }
 
 const toggleSummary = () => {
@@ -1208,6 +1263,22 @@ const formatDuration = (ms: number): string => {
   return Math.round(ms) + 'ms'
 }
 
+const formatLogTimestamp = (timestamp?: number | null): string => {
+  if (!timestamp) return '-'
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZoneName: 'short'
+  }).format(date)
+}
+
 const getLogType = (message: string): string => {
   const msg = message.toLowerCase()
   if (msg.includes('error') || msg.includes('exception') || msg.includes('fail')) return 'ERRO'
@@ -1215,6 +1286,13 @@ const getLogType = (message: string): string => {
   if (msg.includes('start')) return 'INÍCIO'
   if (msg.includes('end')) return 'FIM'
   return 'INFO'
+}
+
+const getLogTypeFromEntry = (log: LogEntry): string => {
+  if (log.level === 'error') return 'ERRO'
+  if (log.level === 'warn') return 'ALERTA'
+  if (log.level === 'info') return 'INFO'
+  return getLogType(log.message)
 }
 
 const getDisplayMessage = (log: LogEntry): string => {
@@ -1228,7 +1306,7 @@ const getDisplayType = (log: LogEntry): string => {
   if (simplifyLogs.value && log.category) {
     return log.category
   }
-  return getLogType(log.message)
+  return getLogTypeFromEntry(log)
 }
 
 const getDisplayTypeClass = (log: LogEntry): string => {
@@ -1237,7 +1315,31 @@ const getDisplayTypeClass = (log: LogEntry): string => {
     if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
     return 'bg-blue-100 text-blue-800'
   }
-  return getLogTypeClass(log.message)
+  return getLogTypeClassFromEntry(log)
+}
+
+const getLogKey = (log: LogEntry): string => {
+  if (log.eventId) return `id:${log.eventId}`
+  return `ts:${log.timestamp}|msg:${log.message}`
+}
+
+const mergeLogs = (currentLogs: LogEntry[], newLogs: LogEntry[]) => {
+  if (!newLogs.length) return currentLogs
+  const existingKeys = new Set(currentLogs.map(getLogKey))
+  const merged = [...currentLogs]
+  for (const log of newLogs) {
+    const key = getLogKey(log)
+    if (existingKeys.has(key)) continue
+    existingKeys.add(key)
+    merged.push(log)
+  }
+  return merged.sort((a, b) => {
+    const timeDiff = (b.timestamp || 0) - (a.timestamp || 0)
+    if (timeDiff !== 0) return timeDiff
+    const ingestDiff = (b.ingestionTime || 0) - (a.ingestionTime || 0)
+    if (ingestDiff !== 0) return ingestDiff
+    return String(b.eventId || '').localeCompare(String(a.eventId || ''))
+  })
 }
 
 const getLogTypeClass = (message: string): string => {
@@ -1249,6 +1351,13 @@ const getLogTypeClass = (message: string): string => {
     case 'FIM': return 'bg-gray-100 text-gray-800'
     default: return 'bg-blue-100 text-blue-800'
   }
+}
+
+const getLogTypeClassFromEntry = (log: LogEntry): string => {
+  if (log.level === 'error') return 'bg-red-100 text-red-800'
+  if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
+  if (log.level === 'info') return 'bg-blue-100 text-blue-800'
+  return getLogTypeClass(log.message)
 }
 
 const handleLogout = async () => {
