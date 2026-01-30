@@ -68,53 +68,10 @@ const extractJsonPayload = (message) => {
   }
 };
 
-const ERROR_TERMS_REGEX = /\b(error|exception|fail(?:ed|ure)?|timeout)\b/i;
-
-const hasErrorIndicator = (value) => {
-  if (!value) return false;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value > 0;
-  if (typeof value === 'string') return value.trim().length > 0;
-  if (typeof value === 'object') return Object.keys(value).length > 0;
-  return false;
-};
-
-const detectStructuredError = (parsedJson) => {
-  if (!parsedJson || typeof parsedJson !== 'object') return false;
-
-  const levelCandidate = parsedJson.level || parsedJson.severity || parsedJson.data?.level || parsedJson.data?.severity;
-  if (typeof levelCandidate === 'string') {
-    const normalized = levelCandidate.toLowerCase();
-    if (['error', 'fatal', 'critical'].includes(normalized)) return true;
-  }
-
-  const errorValue = parsedJson.error ?? parsedJson.err ?? parsedJson.data?.error ?? parsedJson.data?.err;
-  if (hasErrorIndicator(errorValue)) return true;
-
-  const statusCode = parsedJson.status ?? parsedJson.statusCode ?? parsedJson.data?.status ?? parsedJson.data?.statusCode;
-  if (typeof statusCode === 'number' && statusCode >= 500) return true;
-
-  const messageFields = [parsedJson.message, parsedJson.msg, parsedJson.data?.message, parsedJson.data?.msg];
-  if (messageFields.some(val => typeof val === 'string' && ERROR_TERMS_REGEX.test(val))) return true;
-
-  return false;
-};
-
-const isErrorEvent = ({ message, parsedReport, parsedJson, simplified }) => {
-  if (simplified?.level === 'error') return true;
-  if (parsedReport?.status === 'timeout') return true;
-  if (detectStructuredError(parsedJson)) return true;
-  if (!parsedJson) {
-    return ERROR_TERMS_REGEX.test((message || '').toString());
-  }
-  return false;
-};
-
-const simplifyLogMessage = (message, parsedReport, parsedJsonOverride) => {
+const simplifyLogMessage = (message, parsedReport) => {
   const raw = (message || '').trim();
   const lower = raw.toLowerCase();
-  const parsedJson = parsedJsonOverride ?? extractJsonPayload(raw);
-  const structuredError = detectStructuredError(parsedJson);
+  const parsedJson = extractJsonPayload(raw);
 
   const result = {
     simplifiedMessage: null,
@@ -154,10 +111,6 @@ const simplifyLogMessage = (message, parsedReport, parsedJsonOverride) => {
   }
 
   if (parsedJson && typeof parsedJson.message === 'string') {
-    if (structuredError) {
-      result.level = 'error';
-      result.category = 'ERRO';
-    }
     const payload = parsedJson.data || {};
     const messageKey = parsedJson.message;
 
@@ -248,12 +201,12 @@ const simplifyLogMessage = (message, parsedReport, parsedJsonOverride) => {
       return result;
     }
 
-    result.category = result.category || 'INFO';
+    result.category = 'INFO';
     result.simplifiedMessage = messageKey;
     return result;
   }
 
-  if (structuredError || lower.includes('error') || lower.includes('exception') || lower.includes('fail') || lower.includes('timeout')) {
+  if (lower.includes('error') || lower.includes('exception') || lower.includes('fail') || lower.includes('timeout')) {
     result.category = 'ERRO';
     result.level = 'error';
   }
@@ -318,27 +271,24 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   const startTime = Number(query.startTime) || Date.now() - (24 * 60 * 60 * 1000);
   const endTime = Number(query.endTime) || Date.now();
   const search = (query.search || '').toString().trim();
-  const nextToken = (query.nextToken || '').toString().trim() || undefined;
 
-  const summaryScope = (query.summaryScope || (summaryFlag ? 'full' : 'page')).toString().toLowerCase();
+  const filterCommand = new FilterLogEventsCommand({
+    logGroupName,
+    limit,
+    startTime,
+    endTime,
+    filterPattern: search ? `?"${search}"` : undefined
+  });
+
+  const response = await logsClient.send(filterCommand);
+
   const type = (query.type || 'relevant').toString().toLowerCase();
 
-  // AWS CloudWatch FilterLogEvents returns events in chronological order (oldest first)
-  // We'll use AWS's native nextToken for pagination - it's reliable and handles all edge cases
-  const pageLimit = Math.min(Math.max(Number(limit) || 100, 10), 1000);
-  let resp;
-  let eventsToProcess = [];
-  let normalizedLogs = [];
-  let relevantLogs = [];
-
-  const buildNormalizedLogs = (events) => (events || []).map(event => {
+  const normalizedLogs = (response.events || []).map(event => {
     const parsedReport = parseReportLine(event.message);
-    const parsedJson = extractJsonPayload(event.message);
-    const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport, parsedJson) : null;
+    const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, parsedReport) : null;
 
     return {
-      eventId: event.eventId || null,
-      ingestionTime: event.ingestionTime || null,
       timestamp: event.timestamp,
       message: event.message,
       parsedReport,
@@ -348,67 +298,30 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     };
   });
 
-  const filterRelevantLogs = (events) => (events || []).filter(event => {
-    const message = event.message || '';
-    const messageLower = message.toLowerCase();
-    const isReportLine = /^report\b/i.test(message);
-    const parsedJson = extractJsonPayload(message);
+  const relevantLogs = normalizedLogs.filter(event => {
+    const message = (event.message || '').toLowerCase();
+    const isReportLine = /^report\b/i.test(event.message || '');
 
     if (type === 'error') {
-      return isErrorEvent({
-        message,
-        parsedReport: event.parsedReport,
-        parsedJson,
-        simplified: { level: event.level }
-      });
+      return message.includes('error') || message.includes('fail') || message.includes('exception');
     }
 
     if (type === 'report') {
-      return isReportLine || Boolean(event.parsedReport);
+      return isReportLine;
     }
 
     if (type === 'all') {
       return true;
     }
 
-    return isErrorEvent({
-      message,
-      parsedReport: event.parsedReport,
-      parsedJson,
-      simplified: { level: event.level }
-    }) ||
-      messageLower.includes('duration') ||
-      messageLower.includes('report') ||
+    return message.includes('error') ||
+      message.includes('duration') ||
+      message.includes('report') ||
+      message.includes('fail') ||
       Boolean(event.parsedReport);
   });
 
-  // Make a single request to CloudWatch Logs
-  const cmd = new FilterLogEventsCommand({
-    logGroupName,
-    limit: pageLimit,
-    startTime,
-    endTime,
-    filterPattern: search ? `?"${search}"` : undefined,
-    nextToken
-  });
-
-  try {
-    resp = await logsClient.send(cmd);
-  } catch (err) {
-    throw err;
-  }
-
-  eventsToProcess = resp.events || [];
-  normalizedLogs = buildNormalizedLogs(eventsToProcess);
-  relevantLogs = filterRelevantLogs(normalizedLogs);
-
-  const sortedLogs = relevantLogs.sort((a, b) => {
-    const timeDiff = (a.timestamp || 0) - (b.timestamp || 0);
-    if (timeDiff !== 0) return timeDiff;
-    const ingestDiff = (a.ingestionTime || 0) - (b.ingestionTime || 0);
-    if (ingestDiff !== 0) return ingestDiff;
-    return String(a.eventId || '').localeCompare(String(b.eventId || ''));
-  });
+  const sortedLogs = relevantLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
   const reportEvents = sortedLogs.filter(log => log.parsedReport);
   const durationSamples = reportEvents
@@ -424,139 +337,36 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
 
   const timeoutCount = reportEvents.filter(log => log.parsedReport?.status === 'timeout').length;
 
-  // Compute summary values. By default we compute summary for the current page.
-  // If summaryFlag is true, aggregate across all pages in the requested interval
-  // to provide an accurate total and top messages.
-  let totalCount = sortedLogs.length;
-  let reportCount = reportEvents.length;
-  let errorsCount = sortedLogs.filter(log => isErrorEvent({
-    message: log.message,
-    parsedReport: log.parsedReport,
-    parsedJson: extractJsonPayload(log.message),
-    simplified: { level: log.level }
-  })).length;
-  let avgDurationMs = durationSamples.length
-    ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
-    : null;
-  let timeouts = timeoutCount;
-  let summaryTopMessages = undefined;
-
-  if (summaryFlag && summaryScope !== 'full') {
-    const topMap = new Map();
-    for (const log of sortedLogs) {
-      const baseMessage = (log.simplifiedMessage ?? log.message ?? '').trim();
+  const topMessagesMap = new Map();
+  if (summaryFlag) {
+    sortedLogs.forEach(log => {
+      const baseMessage = log.simplifiedMessage || log.message || '';
       const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
-      if (trimmed) topMap.set(trimmed, (topMap.get(trimmed) || 0) + 1);
-    }
-    summaryTopMessages = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([message, count]) => ({ message, count }));
+      if (!trimmed) return;
+      topMessagesMap.set(trimmed, (topMessagesMap.get(trimmed) || 0) + 1);
+    });
   }
 
-  if (summaryFlag && summaryScope === 'full') {
-    // Paginate through all matching events to compute totals and top messages.
-    const aggPageLimit = 1000;
-    let aggNextToken = undefined;
-    const topMap = new Map();
-    let aggTotal = 0;
-    let aggReports = 0;
-    let aggErrors = 0;
-    let aggTimeouts = 0;
-    const aggDurations = [];
-    const maxAggregate = 100000; // safety cap
-
-    try {
-      do {
-        const aggCmd = new FilterLogEventsCommand({
-          logGroupName,
-          limit: aggPageLimit,
-          startTime,
-          endTime: endTime, // aggregate across the full requested interval, not the page-bound 'before'
-          filterPattern: search ? `?"${search}"` : undefined,
-          nextToken: aggNextToken
-        });
-
-        const aggResp = await logsClient.send(aggCmd);
-        const aggEvents = aggResp.events || [];
-
-        for (const event of aggEvents) {
-          const pr = parseReportLine(event.message);
-          const parsedJson = extractJsonPayload(event.message);
-          const simplified = simplifyFlag || summaryFlag ? simplifyLogMessage(event.message, pr, parsedJson) : null;
-
-          const messageLower = (event.message || '').toLowerCase();
-          const isReportLine = /^report\b/i.test(event.message || '');
-
-          // Determine relevant per type
-          let isRelevant = false;
-          if (type === 'error') {
-            isRelevant = isErrorEvent({
-              message: event.message,
-              parsedReport: pr,
-              parsedJson,
-              simplified
-            });
-          } else if (type === 'report') {
-            isRelevant = isReportLine;
-          } else if (type === 'all') {
-            isRelevant = true;
-          } else {
-            isRelevant = isErrorEvent({
-              message: event.message,
-              parsedReport: pr,
-              parsedJson,
-              simplified
-            }) || messageLower.includes('duration') || messageLower.includes('report') || Boolean(pr);
-          }
-
-          if (!isRelevant) continue;
-
-          aggTotal += 1;
-
-          if (pr) {
-            aggReports += 1;
-            if (typeof pr.durationMs === 'number') aggDurations.push(pr.durationMs);
-            if (pr.status === 'timeout') aggTimeouts += 1;
-          }
-
-          if (isErrorEvent({ message: event.message, parsedReport: pr, parsedJson, simplified })) {
-            aggErrors += 1;
-          }
-
-          const baseMessage = (simplified?.simplifiedMessage ?? event.message ?? '').trim();
-          const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
-          if (trimmed) topMap.set(trimmed, (topMap.get(trimmed) || 0) + 1);
-
-          if (aggTotal >= maxAggregate) break;
-        }
-
-        aggNextToken = aggResp.nextToken;
-        if (aggTotal >= maxAggregate) break;
-      } while (aggNextToken);
-    } catch (err) {
-      console.error('Failed to aggregate full summary for logs:', err && err.message ? err.message : err);
-    }
-
-    totalCount = aggTotal;
-    reportCount = aggReports;
-    errorsCount = aggErrors;
-    timeouts = aggTimeouts;
-    avgDurationMs = aggDurations.length ? aggDurations.reduce((s, v) => s + v, 0) / aggDurations.length : null;
-    summaryTopMessages = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([message, count]) => ({ message, count }));
-  }
-
-  // Use AWS's native nextToken for pagination - it's the most reliable approach
-  const nextTokenResponse = resp.nextToken || null;
+  const topMessages = summaryFlag
+    ? Array.from(topMessagesMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([message, count]) => ({ message, count }))
+    : undefined;
 
   return {
     logs: sortedLogs,
     summary: {
-      total: totalCount,
-      reports: reportCount,
-      errors: errorsCount,
-      avgDurationMs: avgDurationMs,
-      timeouts: timeouts,
-      startTime: timeRange.startTime ?? startTime,
-      endTime: timeRange.endTime ?? endTime,
-      topMessages: summaryTopMessages || undefined,
+      total: sortedLogs.length,
+      reports: reportEvents.length,
+      errors: sortedLogs.filter(log => log.level === 'error' || (log.message || '').toLowerCase().includes('error')).length,
+      avgDurationMs: durationSamples.length
+        ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
+        : null,
+      timeouts: timeoutCount,
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
+      topMessages,
       filter: type,
       simplify: simplifyFlag
     },
@@ -564,8 +374,7 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     limit,
     startTime,
     endTime,
-    search,
-    nextToken: nextTokenResponse
+    search
   };
 };
 
@@ -608,6 +417,7 @@ router.get('/integrations', authenticateToken, async (req, res) => {
     );
     return res.json({ integrations: result.rows });
   }
+
   if (req.user.role === 'client') {
     const result = await query(
       `SELECT integrations.id,
@@ -905,14 +715,11 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     const simplifyFlag = ['1', 'true', 'yes'].includes((req.query.simplify || '').toString().toLowerCase());
     const summaryFlag = ['1', 'true', 'yes'].includes((req.query.summary || '').toString().toLowerCase());
 
-    // Build cache key - cache for 20 seconds to balance freshness vs performance
-    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}:${req.query.summaryScope || 'auto'}`;
-
-    // Disable cache for now to ensure fresh data
-    // const cached = await redisClient.get(cacheKey);
-    // if (cached) {
-    //   return res.json(JSON.parse(cached));
-    // }
+    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}`;
+    const cached = await redisClient.get(cacheKey);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
 
     const payload = await buildLogsPayload({
       integration,
@@ -921,8 +728,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
       summaryFlag
     });
 
-    // Cache disabled temporarily - can be re-enabled after testing
-    // await redisClient.set(cacheKey, JSON.stringify(payload), { EX: 20 });
+    await redisClient.set(cacheKey, JSON.stringify(payload), { EX: 60 });
 
     await logAudit({
       companyId: req.user.companyId,
@@ -952,7 +758,7 @@ router.post('/logs/:integrationId/ai-summary/start', authenticateToken, async (r
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
 
@@ -1055,7 +861,7 @@ router.get('/logs/:integrationId/ai-summary/status', authenticateToken, async (r
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
     const cachedState = parseAiSummaryState(await redisClient.get(cacheKey));
 
@@ -1077,7 +883,7 @@ router.delete('/logs/:integrationId/ai-summary', authenticateToken, async (req, 
     await connectRedis();
 
     const simplifyFlag = true;
-    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o';
+    const model = process.env.GITHUB_MODEL || 'openai/gpt-4o-mini';
     const cacheKey = buildAiSummaryCacheKey({ integrationId, query: req.query, simplifyFlag, model });
 
     await redisClient.del(cacheKey);
