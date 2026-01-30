@@ -945,7 +945,7 @@ const loadLogs = async (append = false) => {
       nextBefore.value = null
     }
 
-    const limit = 100
+    const limit = 20
     const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${endTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
 
     // When appending, request older logs by passing before cursor

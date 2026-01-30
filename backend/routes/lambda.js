@@ -1,6 +1,6 @@
 const express = require('express');
 const { LambdaClient, ListFunctionsCommand } = require('@aws-sdk/client-lambda');
-const { CloudWatchLogsClient, FilterLogEventsCommand } = require('@aws-sdk/client-cloudwatch-logs');
+const { CloudWatchLogsClient, FilterLogEventsCommand, StartQueryCommand, GetQueryResultsCommand } = require('@aws-sdk/client-cloudwatch-logs');
 const { CloudWatchClient, GetMetricDataCommand } = require('@aws-sdk/client-cloudwatch');
 const { authenticateToken } = require('./auth');
 const { query } = require('../db');
@@ -303,6 +303,45 @@ const normalizeDocumentationLinks = (input) => {
   return normalized;
 };
 
+const escapeRegex = (value) => {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '\\/');
+};
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const runInsightsQuery = async ({ logsClient, logGroupName, startTime, endTime, queryString, maxWaitMs = 5000, pollIntervalMs = 250 }) => {
+  const startResp = await logsClient.send(new StartQueryCommand({
+    logGroupName,
+    startTime: Math.floor(startTime / 1000),
+    endTime: Math.floor(endTime / 1000),
+    queryString
+  }));
+
+  if (!startResp.queryId) {
+    throw new Error('Falha ao iniciar consulta de logs');
+  }
+
+  const startedAt = Date.now();
+  while (true) {
+    const resultResp = await logsClient.send(new GetQueryResultsCommand({ queryId: startResp.queryId }));
+    const status = resultResp.status;
+
+    if (status === 'Complete') {
+      return resultResp.results || [];
+    }
+
+    if (['Failed', 'Cancelled', 'Timeout'].includes(status)) {
+      throw new Error(`Consulta de logs falhou: ${status}`);
+    }
+
+    if (Date.now() - startedAt > maxWaitMs) {
+      throw new Error('Tempo limite ao consultar logs');
+    }
+
+    await sleep(pollIntervalMs);
+  }
+};
+
 const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag }) => {
   const logsClient = new CloudWatchLogsClient({
     region: integration.region,
@@ -314,18 +353,19 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
 
   const logGroupName = `/aws/lambda/${integration.function_name}`;
 
-  const limit = Math.min(Number(query.limit) || 100, 500);
+  const limit = Math.min(Number(query.limit) || 20, 20);
   const startTime = Number(query.startTime) || Date.now() - (24 * 60 * 60 * 1000);
   const endTime = Number(query.endTime) || Date.now();
   const search = (query.search || '').toString().trim();
-  const nextToken = (query.nextToken || '').toString().trim() || undefined;
+  const before = Number(query.before);
+  const effectiveEndTime = Number.isFinite(before) && before > 0 ? Math.min(endTime, before - 1) : endTime;
 
   const summaryScope = (query.summaryScope || (summaryFlag ? 'full' : 'page')).toString().toLowerCase();
   const type = (query.type || 'relevant').toString().toLowerCase();
 
   // AWS CloudWatch FilterLogEvents returns events in chronological order (oldest first)
   // We sort locally to show newest first in the UI.
-  const pageLimit = Math.min(Math.max(Number(limit) || 100, 10), 1000);
+  const pageLimit = Math.min(Math.max(Number(limit) || 20, 1), 20);
   let resp;
   let eventsToProcess = [];
   let normalizedLogs = [];
@@ -382,23 +422,64 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
       Boolean(event.parsedReport);
   });
 
-  // Make a single request to CloudWatch Logs
-  const cmd = new FilterLogEventsCommand({
-    logGroupName,
-    limit: pageLimit,
-    startTime,
-    endTime,
-    filterPattern: search ? `?"${search}"` : undefined,
-    nextToken
-  });
+  if (effectiveEndTime <= startTime) {
+    return {
+      logs: [],
+      summary: {
+        total: 0,
+        reports: 0,
+        errors: 0,
+        avgDurationMs: null,
+        timeouts: 0,
+        startTime: null,
+        endTime: null,
+        filter: type,
+        simplify: simplifyFlag
+      },
+      filter: type,
+      limit,
+      startTime,
+      endTime: effectiveEndTime,
+      search,
+      nextBefore: null,
+      nextToken: null
+    };
+  }
+
+  const insightsLimit = Math.min(Math.max(pageLimit * 5, pageLimit), 1000);
+  const queryParts = ['fields @timestamp, @message, @ingestionTime, @logStream, @ptr'];
+  if (search) {
+    queryParts.push(`| filter @message like /${escapeRegex(search)}/`);
+  }
+  queryParts.push('| sort @timestamp desc');
+  queryParts.push(`| limit ${insightsLimit}`);
+  const queryString = queryParts.join('\n');
 
   try {
-    resp = await logsClient.send(cmd);
+    const results = await runInsightsQuery({
+      logsClient,
+      logGroupName,
+      startTime,
+      endTime: effectiveEndTime,
+      queryString
+    });
+
+    eventsToProcess = results.map(fields => {
+      const map = new Map((fields || []).map(field => [field.field, field.value]));
+      const timestampValue = map.get('@timestamp');
+      const ingestionValue = map.get('@ingestionTime');
+
+      return {
+        eventId: map.get('@ptr') || map.get('@logStream') || null,
+        ingestionTime: ingestionValue ? Date.parse(ingestionValue) : null,
+        timestamp: timestampValue ? Date.parse(timestampValue) : null,
+        message: map.get('@message') || ''
+      };
+    }).filter(event => Number.isFinite(event.timestamp));
   } catch (err) {
     throw err;
   }
 
-  eventsToProcess = resp.events || [];
   normalizedLogs = buildNormalizedLogs(eventsToProcess);
   relevantLogs = filterRelevantLogs(normalizedLogs);
 
@@ -410,15 +491,17 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     return String(b.eventId || '').localeCompare(String(a.eventId || ''));
   });
 
-  const reportEvents = sortedLogs.filter(log => log.parsedReport);
+  const pagedLogs = sortedLogs.slice(0, pageLimit);
+
+  const reportEvents = pagedLogs.filter(log => log.parsedReport);
   const durationSamples = reportEvents
     .map(log => log.parsedReport.durationMs)
     .filter(value => typeof value === 'number');
 
-  const timeRange = sortedLogs.length
+  const timeRange = pagedLogs.length
     ? {
-      startTime: sortedLogs[sortedLogs.length - 1].timestamp,
-      endTime: sortedLogs[0].timestamp
+      startTime: pagedLogs[pagedLogs.length - 1].timestamp,
+      endTime: pagedLogs[0].timestamp
     }
     : { startTime: null, endTime: null };
 
@@ -427,9 +510,9 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   // Compute summary values. By default we compute summary for the current page.
   // If summaryFlag is true, aggregate across all pages in the requested interval
   // to provide an accurate total and top messages.
-  let totalCount = sortedLogs.length;
+  let totalCount = pagedLogs.length;
   let reportCount = reportEvents.length;
-  let errorsCount = sortedLogs.filter(log => isErrorEvent({
+  let errorsCount = pagedLogs.filter(log => isErrorEvent({
     message: log.message,
     parsedReport: log.parsedReport,
     parsedJson: extractJsonPayload(log.message),
@@ -443,7 +526,7 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
 
   if (summaryFlag && summaryScope !== 'full') {
     const topMap = new Map();
-    for (const log of sortedLogs) {
+    for (const log of pagedLogs) {
       const baseMessage = (log.simplifiedMessage ?? log.message ?? '').trim();
       const trimmed = baseMessage.length > 120 ? `${baseMessage.slice(0, 117)}...` : baseMessage;
       if (trimmed) topMap.set(trimmed, (topMap.get(trimmed) || 0) + 1);
@@ -543,11 +626,13 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     summaryTopMessages = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([message, count]) => ({ message, count }));
   }
 
-  // Use AWS's native nextToken for pagination - it's the most reliable approach
-  const nextTokenResponse = resp.nextToken || null;
+  const hasMore = relevantLogs.length > pageLimit || eventsToProcess.length >= insightsLimit;
+  const nextBefore = hasMore && pagedLogs.length
+    ? Math.max((pagedLogs[pagedLogs.length - 1].timestamp || effectiveEndTime) - 1, startTime)
+    : null;
 
   return {
-    logs: sortedLogs,
+    logs: pagedLogs,
     summary: {
       total: totalCount,
       reports: reportCount,
@@ -563,9 +648,10 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     filter: type,
     limit,
     startTime,
-    endTime,
+    endTime: effectiveEndTime,
     search,
-    nextToken: nextTokenResponse
+    nextBefore,
+    nextToken: null
   };
 };
 
@@ -906,7 +992,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     const summaryFlag = ['1', 'true', 'yes'].includes((req.query.summary || '').toString().toLowerCase());
 
     // Build cache key - cache for 20 seconds to balance freshness vs performance
-    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 100}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.nextToken || 'notoken'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}:${req.query.summaryScope || 'auto'}`;
+    const cacheKey = `logs:${integrationId}:${req.query.type || 'relevant'}:${req.query.limit || 20}:${req.query.startTime || 'default'}:${req.query.endTime || 'now'}:${req.query.before || 'nobefore'}:${req.query.search || ''}:${simplifyFlag ? 'simple' : 'raw'}:${summaryFlag ? 'summary' : 'nosummary'}:${req.query.summaryScope || 'auto'}`;
 
     // Disable cache for now to ensure fresh data
     // const cached = await redisClient.get(cacheKey);
