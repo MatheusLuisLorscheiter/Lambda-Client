@@ -403,11 +403,11 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   relevantLogs = filterRelevantLogs(normalizedLogs);
 
   const sortedLogs = relevantLogs.sort((a, b) => {
-    const timeDiff = (b.timestamp || 0) - (a.timestamp || 0);
+    const timeDiff = (a.timestamp || 0) - (b.timestamp || 0);
     if (timeDiff !== 0) return timeDiff;
-    const ingestDiff = (b.ingestionTime || 0) - (a.ingestionTime || 0);
+    const ingestDiff = (a.ingestionTime || 0) - (b.ingestionTime || 0);
     if (ingestDiff !== 0) return ingestDiff;
-    return String(b.eventId || '').localeCompare(String(a.eventId || ''));
+    return String(a.eventId || '').localeCompare(String(b.eventId || ''));
   });
 
   const reportEvents = sortedLogs.filter(log => log.parsedReport);
