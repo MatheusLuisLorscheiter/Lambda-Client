@@ -941,15 +941,17 @@ const loadLogs = async (append = false) => {
     const startTime = Date.now() - (days * 24 * 60 * 60 * 1000)
 
     if (!append) {
-      // reset pagination
+      // reset pagination and always get the most recent logs
       logs.value = []
       nextBefore.value = null
       nextToken.value = null
+      // Always update to current time to get the latest logs
       logEndTime.value = Date.now()
     }
 
     const limit = 100
-    const resolvedEndTime = logEndTime.value ?? Date.now()
+    // For fresh loads, always use current time; for pagination, use the stored cursor
+    const resolvedEndTime = append ? (logEndTime.value ?? Date.now()) : Date.now()
     const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${resolvedEndTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
     if (append && nextBefore.value) {
       params.push(`before=${nextBefore.value}`)
@@ -968,6 +970,8 @@ const loadLogs = async (append = false) => {
       logs.value = mergeLogs(logs.value, data.logs)
     } else {
       logs.value = data.logs
+      // Store the endTime used for this load to maintain consistency for pagination
+      logEndTime.value = resolvedEndTime
     }
 
     logSummary.value = data.summary
