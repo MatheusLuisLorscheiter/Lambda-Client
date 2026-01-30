@@ -23,7 +23,7 @@ const createChatCompletion = async ({ model, messages, maxTokens = 1000 }) => {
         body: JSON.stringify({
             model,
             messages,
-            max_tokens: maxTokens,
+            max_tokens: max_completion_tokens ?? maxTokens,
         }),
     });
 
