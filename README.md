@@ -1,210 +1,120 @@
-# Lambda Pulse - AWS Lambda Monitoring Platform
+# Lambda Client - Gerenciador de AWS Lambda
 
-A professional, real-time AWS Lambda monitoring platform for companies to track their clients' Lambda function performance, costs, and logs.
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)
+![Vue](https://img.shields.io/badge/vue-3.x-emerald.svg)
 
-## 🚀 Features
+**Lambda Client** é uma plataforma moderna e open-source para gerenciamento e monitoramento de funções AWS Lambda em tempo real. Desenvolvido com foco em performance e experiência do usuário, o projeto oferece uma interface intuitiva para acompanhar métricas, logs e invocações.
 
-### For Admins
-- **Integration Management**: Configure AWS Lambda functions with encrypted credentials
-- **Client Management**: Create client accounts with restricted access
-- **Audit Trail**: Complete activity logging for compliance and security
-- **Multi-tenant**: Support for multiple companies in a single deployment
+## 🚀 Tecnologias
 
-### For Clients
-- **Real-time Metrics**: Invocations, error rates, duration analytics
-- **Cost Estimation**: AWS Lambda pricing calculations based on actual usage
-- **Performance Charts**: Line and bar charts for trend analysis
-- **Log Filtering**: Search and filter logs by type (errors, reports, all)
+O projeto é estruturado como um monorepo contendo backend e frontend:
 
-## 🏗️ Architecture
+### Backend (`/backend`)
+- **Runtime**: Node.js
+- **Framework**: Express.js
+- **Banco de Dados**: PostgreSQL
+- **Cache**: Redis
+- **Infraestrutura**: AWS SDK (Lambda, CloudWatch, CloudWatch Logs)
+- **Email**: Resend
+- **Autenticação**: JWT & Bcrypt
 
-```
-├── backend/                 # Express.js API Server
-│   ├── routes/              # API endpoints (auth, lambda, audit)
-│   ├── db/                  # PostgreSQL schemas and queries
-│   ├── cache/               # Redis caching layer
-│   ├── security/            # AES-256 encryption for AWS credentials
-│   ├── audit/               # Activity logging
-│   └── email/               # Resend integration for password reset
-│
-├── frontend/                # Vue 3 + TypeScript SPA
-│   ├── src/
-│   │   ├── views/           # Page components (Dashboard, Admin, Auth)
-│   │   ├── stores/          # Pinia state management
-│   │   ├── composables/     # Reusable logic (useApi)
-│   │   ├── types/           # TypeScript interfaces
-│   │   └── assets/          # Styles and logos
-│   └── nixpacks.toml        # Easypanel deployment config
-```
+### Frontend (`/frontend`)
+- **Framework**: Vue 3
+- **Build Tool**: Vite
+- **Estilização**: Tailwind CSS v4
+- **State Management**: Pinia
+- **Router**: Vue Router
+- **Charts**: Chart.js
 
-## 📋 Prerequisites
+---
 
-- **Node.js** 20.x or 22.x
-- **PostgreSQL** 14+
-- **Redis** 6+
-- **Resend** account (for email)
-- **AWS IAM** credentials with CloudWatch/Lambda read access
+## 🛠️ Pré-requisitos
 
-## ⚙️ Environment Setup
+Antes de começar, certifique-se de ter instalado:
+- **Node.js** (v20 ou superior)
+- **Docker** (para rodar PostgreSQL e Redis localmente, se preferir)
+- **Conta AWS** com credenciais configuradas (para acesso às Lambdas)
 
-### Backend (`backend/.env`)
+---
 
-```bash
-# Server
-PORT=3000
-NODE_ENV=production
+## 📦 Instalação e Configuração
 
-# Database
-DATABASE_URL=postgresql://user:password@host:5432/lambda_client
+### 1. Backend
 
-# Redis
-REDIS_URL=redis://localhost:6379
+1.  Acesse a pasta do backend:
+    ```bash
+    cd backend
+    ```
 
-# JWT
-JWT_SECRET=your-secret-key
+2.  Instale as dependências:
+    ```bash
+    npm install
+    ```
 
-# Password Reset
-FRONTEND_BASE_URL=https://your-frontend-domain.com
+3.  Configure as variáveis de ambiente:
+    Copie o arquivo `.env.example` para `.env` e preencha com suas credenciais:
+    ```bash
+    cp .env.example .env
+    ```
 
-# Encryption (64 hex chars)
-ENCRYPTION_KEY=your-64-char-hex-key
+4.  Inicie o servidor de desenvolvimento:
+    ```bash
+    npm run dev
+    ```
 
-# Email (Resend)
-RESEND_API_KEY=re_your_api_key
-RESEND_FROM=Lambda Monitor <noreply@yourdomain.com>
-```
+### 2. Frontend
 
-### Frontend (`frontend/.env`)
+1.  Acesse a pasta do frontend:
+    ```bash
+    cd frontend
+    ```
 
-```bash
-VITE_API_BASE_URL=https://your-backend-domain.com
-```
+2.  Instale as dependências:
+    ```bash
+    npm install
+    ```
 
-## 🗄️ Database Setup
+3.  Configure as variáveis de ambiente:
+    Copie o arquivo `.env.example` para `.env`:
+    ```bash
+    cp .env.example .env
+    ```
 
-```bash
-# Connect to PostgreSQL and run:
-psql -d lambda_client -f backend/db/schema.sql
+4.  Inicie o servidor de desenvolvimento:
+    ```bash
+    npm run dev
+    ```
 
-# Create first admin user:
-cd backend
-node scripts/create-user.js - "admin@example.com" "SecurePassword123" admin
-```
+---
 
-## 🔐 AWS IAM Policy
+## ☁️ Implantação (Deployment)
 
-Create an IAM user with this minimal policy:
+Este projeto está configurado para ser implantado facilmente utilizando **Nixpacks**, que detecta automaticamente o ambiente e gera uma imagem OCI otimizada.
 
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "lambda:ListFunctions",
-                "lambda:GetFunction",
-                "cloudwatch:GetMetricData",
-                "logs:FilterLogEvents",
-                "logs:DescribeLogGroups"
-            ],
-            "Resource": "*"
-        }
-    ]
-}
-```
+- **Backend**: Configurado via `nixpacks.toml` para usar Node 20.
+- **Frontend**: Configurado via `nixpacks.toml` para buildar com Vite e servir os arquivos estáticos.
 
-## 🚀 Deployment (Easypanel + Nixpacks)
+---
 
-### Backend
+## 🤝 Contribuindo
 
-1. Create a new app in Easypanel
-2. Connect to your Git repository
-3. Set the root directory to `backend`
-4. Add environment variables
-5. Deploy (Nixpacks will auto-detect)
+Contribuições são bem-vindas! Se você tiver sugestões ou encontrar bugs:
 
-### Frontend
+1.  Faça um Fork do projeto.
+2.  Crie uma Branch para sua feature (`git checkout -b feature/MinhaFeature`).
+3.  Faça o Commit (`git commit -m 'Adicionando nova feature'`).
+4.  Faça o Push (`git push origin feature/MinhaFeature`).
+5.  Abra um Pull Request.
 
-1. Create a new app in Easypanel
-2. Connect to the same repository
-3. Set the root directory to `frontend`
-4. Add `VITE_API_BASE_URL` environment variable
-5. Deploy
+---
 
-### Nixpacks Configuration
+## 📄 Licença
 
-Both projects include `nixpacks.toml` for automatic build configuration:
+Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para mais detalhes.
 
-**Backend** - Runs `node server.js` with production dependencies only
-**Frontend** - Builds Vue app and serves with `serve`
+---
 
-## 🧪 Local Development
-
-```bash
-# Backend
-cd backend
-npm install
-cp .env.example .env  # Edit with your values
-npm run dev
-
-# Frontend (new terminal)
-cd frontend
-npm install
-cp .env.example .env  # Edit with your values
-npm run dev
-```
-
-## 📊 API Endpoints
-
-### Authentication
-- `POST /auth/login` - Client login (requires company)
-- `POST /auth/admin/login` - Admin login
-- `POST /auth/logout` - Logout
-- `POST /auth/password/forgot` - Request password reset
-- `POST /auth/password/reset` - Reset password
-- `GET /auth/me` - Get current user
-- `GET /auth/clients` - List client users (admin only)
-- `POST /auth/clients` - Create client user (admin only)
-
-### Lambda Integrations
-- `GET /lambda/integrations` - List user's integrations
-- `POST /lambda/integrations` - Create integration (admin only)
-- `DELETE /lambda/integrations/:id` - Delete integration (admin only)
-- `GET /lambda/functions/:integrationId` - List Lambda functions
-- `GET /lambda/metrics/:integrationId` - Get CloudWatch metrics
-- `GET /lambda/logs/:integrationId` - Get CloudWatch logs
-
-### Audit
-- `GET /audit/logs` - Get audit logs (admin only)
-
-## 🔒 Security Features
-
-- **JWT** with short-lived access tokens (15m)
-- **AES-256-GCM** encryption for AWS credentials at rest
-- **bcrypt** password hashing
-- **CORS** protection
-- **Audit logging** for all sensitive operations
-- **Redis caching** with TTL to prevent API abuse
-
-## 📝 Tech Stack
-
-### Backend
-- Express.js 5
-- PostgreSQL with `pg` driver
-- Redis for caching
-- AWS SDK v3 (Lambda, CloudWatch, CloudWatch Logs)
-- bcryptjs, jsonwebtoken
-- Resend for transactional emails
-
-### Frontend
-- Vue 3.5 with Composition API
-- TypeScript 5.9
-- Pinia 3 for state management
-- Vue Router 4
-- Chart.js 4 + vue-chartjs
-- Tailwind CSS 4
-
-## 📄 License
-
-MIT License - See LICENSE file for details.
+<p align="center">
+  Desenvolvido por <a href="https://github.com/MatheusLuisLorscheiter">Matheus Luis Lorscheiter</a>
+</p>

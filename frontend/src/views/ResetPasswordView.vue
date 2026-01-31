@@ -93,6 +93,15 @@
       >
         Chave Mestra Gestão
       </a>
+      <span class="mx-2">•</span>
+      <a
+        href="https://github.com/MatheusLuisLorscheiter/Lambda-Client"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="font-medium text-white/90 hover:text-white"
+      >
+        Open Source (GitHub)
+      </a>
     </footer>
   </div>
 </template>
