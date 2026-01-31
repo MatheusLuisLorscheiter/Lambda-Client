@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute } from 'vue-router'
 
@@ -43,15 +43,25 @@ const setUserDetails = () => {
   }
 }
 
+// State to track if widget is already initialized
+const isWidgetLoaded = ref(false)
+
 // Function to load the Chatwoot SDK
 const loadChatwoot = () => {
-  // If already loaded and available globally
+  // If we already initialized the widget in this session, just ensure user details are up to date
+  if (isWidgetLoaded.value) {
+    setUserDetails()
+    return
+  }
+
+  // If the SDK is globally available (e.g. from a previous mount or hard refresh)
   if (window.chatwootSDK || window.$chatwoot) {
     if (window.chatwootSDK) {
         window.chatwootSDK.run({
             websiteToken: WEBSITE_TOKEN,
             baseUrl: BASE_URL
         })
+        isWidgetLoaded.value = true
     }
     // Set user details after run
     setTimeout(setUserDetails, 1000) 
@@ -66,6 +76,7 @@ const loadChatwoot = () => {
       websiteToken: WEBSITE_TOKEN,
       baseUrl: BASE_URL
     })
+    isWidgetLoaded.value = true
     // Set user after loading
     setTimeout(setUserDetails, 1000)
   }
