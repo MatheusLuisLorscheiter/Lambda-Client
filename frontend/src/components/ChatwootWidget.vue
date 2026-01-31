@@ -26,15 +26,35 @@ const shouldRender = computed(() => {
   return true
 })
 
+// Function to set user details
+const setUserDetails = () => {
+  if (window.$chatwoot && auth.user) {
+    // Generate a unique identifier if possible, but email is often used directly or a hash
+    // The documentation mentions `setUser(identifier, { ... })`.
+    // If we have a user ID, we should use it.
+    const identifier = auth.user.id || auth.user.email
+    
+    window.$chatwoot.setUser(identifier, {
+      email: auth.user.email,
+      name: auth.user.name,
+      // You can add more properties here if needed, like company name
+      identifier_hash: '' // If using HMAC, add it here
+    })
+  }
+}
+
 // Function to load the Chatwoot SDK
 const loadChatwoot = () => {
-  if (window.chatwootSDK) {
-    // Already loaded, just ensuring it's visible or re-initialized if needed
-    // Chatwoot usually persists, but we can call run again if we want to ensure settings
-    window.chatwootSDK.run({
-      websiteToken: WEBSITE_TOKEN,
-      baseUrl: BASE_URL
-    })
+  // If already loaded and available globally
+  if (window.chatwootSDK || window.$chatwoot) {
+    if (window.chatwootSDK) {
+        window.chatwootSDK.run({
+            websiteToken: WEBSITE_TOKEN,
+            baseUrl: BASE_URL
+        })
+    }
+    // Set user details after run
+    setTimeout(setUserDetails, 1000) 
     return
   }
 
@@ -46,30 +66,30 @@ const loadChatwoot = () => {
       websiteToken: WEBSITE_TOKEN,
       baseUrl: BASE_URL
     })
+    // Set user after loading
+    setTimeout(setUserDetails, 1000)
   }
   document.body.appendChild(script)
 }
 
 // Watch for changes in shouldRender to load/hide widget
-// Note: Chatwoot SDK doesn't have a simple "destroy" method exposed easily in the snippet,
-// usually it hides itself if we wanted to, but for now we just load it when conditions are met.
-// If the user navigates to admin, the widget might persist unless we hide it via CSS or DOM,
-// but standard Chatwoot behavior is persistent.
-// However, to strictly follow "except in admin routes", we might want to hide it.
-// The SDK inserts a bubble. We can hide `.woot-widget-holder` if !shouldRender.
-
 watch(shouldRender, (newValue) => {
   if (newValue) {
     loadChatwoot()
-    // Ensure visible
     const holder = document.querySelector('.woot-widget-holder') as HTMLElement
     if (holder) holder.style.display = 'block'
   } else {
-    // Hide if present
     const holder = document.querySelector('.woot-widget-holder') as HTMLElement
     if (holder) holder.style.display = 'none'
   }
 }, { immediate: true })
+
+// Watch for user changes to update details if already loaded
+watch(() => auth.user, () => {
+  if (shouldRender.value) {
+    setUserDetails()
+  }
+}, { deep: true })
 
 onMounted(() => {
   if (shouldRender.value) {
@@ -82,6 +102,7 @@ onMounted(() => {
 declare global {
   interface Window {
     chatwootSDK: any;
+    $chatwoot: any;
   }
 }
 </script>
