@@ -1,10 +1,10 @@
-# Lambda Client - Gerenciador de AWS Lambda
+# Lambda Pulse - Gerenciador de AWS Lambda
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)
 ![Vue](https://img.shields.io/badge/vue-3.x-emerald.svg)
 
-**Lambda Client** é uma plataforma moderna e open-source para gerenciamento e monitoramento de funções AWS Lambda em tempo real. Desenvolvido com foco em performance e experiência do usuário, o projeto oferece uma interface intuitiva para acompanhar métricas, logs e invocações.
+**Lambda Pulse** é uma plataforma moderna e open-source para gerenciamento e monitoramento de funções AWS Lambda em tempo real. Desenvolvido com foco em performance e experiência do usuário, o projeto oferece uma interface intuitiva para acompanhar métricas, logs e invocações.
 
 ## 🚀 Tecnologias
 
