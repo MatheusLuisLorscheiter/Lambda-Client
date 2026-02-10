@@ -31,6 +31,11 @@ const shouldRender = computed(() => {
 
 // State to track if widget is already initialized
 const isWidgetLoaded = ref(false)
+const WIDGET_SCRIPT_ID = 'whatsapp-widget-sdk'
+const windowFlags = window as Window & {
+  __whatsAppWidgetInitialized?: boolean
+  __whatsAppWidgetReadyListenerAdded?: boolean
+}
 
 // Function to set user details
 const setUserDetails = () => {
@@ -49,10 +54,41 @@ const setUserDetails = () => {
 }
 
 // Function to load the WhatsApp Widget SDK
+const ensureWidgetScript = () => {
+  const existingScript = document.getElementById(WIDGET_SCRIPT_ID)
+  if (existingScript) return
+
+  const script = document.createElement('script')
+  script.id = WIDGET_SCRIPT_ID
+  script.src = `${BASE_URL}/widget.js`
+  script.async = true
+  script.onload = () => {
+    isWidgetLoaded.value = true
+  }
+  document.body.appendChild(script)
+}
+
+const addReadyListenerOnce = () => {
+  if (windowFlags.__whatsAppWidgetReadyListenerAdded) return
+  window.addEventListener('widget:ready', handleWidgetReady)
+  windowFlags.__whatsAppWidgetReadyListenerAdded = true
+}
+
 const loadWidget = () => {
   // If we already initialized the widget in this session, just ensure user details are up to date
   if (isWidgetLoaded.value) {
     setUserDetails()
+    return
+  }
+
+  // If widget was already initialized globally, just ensure script/listeners exist
+  if (windowFlags.__whatsAppWidgetInitialized) {
+    if (window.WhatsAppWidget) {
+      isWidgetLoaded.value = true
+      setUserDetails()
+    }
+    addReadyListenerOnce()
+    ensureWidgetScript()
     return
   }
 
@@ -72,6 +108,8 @@ const loadWidget = () => {
     baseUrl: BASE_URL
   }])
 
+  windowFlags.__whatsAppWidgetInitialized = true
+
   // If the SDK is globally available (e.g. from a previous mount or hard refresh)
   if (window.WhatsAppWidget) {
     isWidgetLoaded.value = true
@@ -79,17 +117,11 @@ const loadWidget = () => {
     return
   }
 
-  // Load the script dynamically
-  const script = document.createElement('script')
-  script.src = `${BASE_URL}/widget.js`
-  script.async = true
-  script.onload = () => {
-    isWidgetLoaded.value = true
-  }
-  document.body.appendChild(script)
+  // Load the script dynamically (if not already present)
+  ensureWidgetScript()
 
-  // Listen for widget:ready event to set user details
-  window.addEventListener('widget:ready', handleWidgetReady)
+  // Listen for widget:ready event to set user details (only once)
+  addReadyListenerOnce()
 }
 
 // Event handlers
@@ -126,15 +158,12 @@ watch(() => auth.user, () => {
   }
 }, { deep: true })
 
-onMounted(() => {
-  if (shouldRender.value) {
-    loadWidget()
-  }
-})
-
 // Cleanup event listeners on unmount
 onBeforeUnmount(() => {
   window.removeEventListener('widget:ready', handleWidgetReady)
+  if (windowFlags.__whatsAppWidgetReadyListenerAdded) {
+    windowFlags.__whatsAppWidgetReadyListenerAdded = false
+  }
 })
 </script>
 
@@ -157,6 +186,8 @@ declare global {
       setCustomAttributes: (attrs: Record<string, any>) => void
       reset: () => void
     }
+    __whatsAppWidgetInitialized?: boolean
+    __whatsAppWidgetReadyListenerAdded?: boolean
   }
 }
 </script>
