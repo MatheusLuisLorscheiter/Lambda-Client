@@ -38,11 +38,15 @@ const windowFlags = window as Window & {
 }
 
 // Function to set user details
+// The app's User model does not track a display name or phone number, so we derive
+// a readable name from the e-mail local-part instead of referencing fields that don't exist.
 const setUserDetails = () => {
   if (window.WhatsAppWidget && auth.user) {
+    const derivedName = auth.user.email ? auth.user.email.split('@')[0] : 'Usuário'
+
     window.WhatsAppWidget.setUser({
-      name: auth.user.name,
-      phone: auth.user.phone || ''
+      name: derivedName,
+      phone: ''
     })
 
     // Set custom attributes if needed

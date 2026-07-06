@@ -12,6 +12,15 @@ const resetTokenTtlMinutes = 30;
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
+const MIN_PASSWORD_LENGTH = 8;
+
+const getPasswordValidationError = (password) => {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`;
+  }
+  return null;
+};
+
 const createAccessToken = (user) => jwt.sign(
   { id: user.id, email: user.email, role: user.role, companyId: user.company_id },
   process.env.JWT_SECRET,
@@ -244,6 +253,11 @@ router.post('/clients', authenticateToken, async (req, res) => {
   const { email, password, companyId, companyName } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
+  }
+
+  const passwordError = getPasswordValidationError(password);
+  if (passwordError) {
+    return res.status(400).json({ error: passwordError });
   }
 
   let resolvedCompanyId = companyId ? Number(companyId) : null;
@@ -567,6 +581,11 @@ router.post('/password/reset', async (req, res) => {
     return res.status(400).json({ error: 'Token e nova senha são obrigatórios' });
   }
 
+  const passwordError = getPasswordValidationError(password);
+  if (passwordError) {
+    return res.status(400).json({ error: passwordError });
+  }
+
   const tokenHash = hashToken(token);
   const result = await query(
     `SELECT password_resets.id, password_resets.user_id, password_resets.expires_at, password_resets.used_at,
@@ -598,8 +617,21 @@ router.post('/password/reset', async (req, res) => {
 });
 
 // Get current user
-router.get('/me', authenticateToken, (req, res) => {
-  res.json({ user: req.user });
+router.get('/me', authenticateToken, async (req, res) => {
+  const result = await query(
+    `SELECT users.id, users.email, users.role, users.company_id AS "companyId", companies.name AS "companyName"
+     FROM users
+     LEFT JOIN companies ON companies.id = users.company_id
+     WHERE users.id = $1`,
+    [req.user.id]
+  );
+
+  const user = result.rows[0];
+  if (!user) {
+    return res.status(404).json({ error: 'Usuário não encontrado' });
+  }
+
+  res.json({ user });
 });
 
 module.exports = { router, authenticateToken };

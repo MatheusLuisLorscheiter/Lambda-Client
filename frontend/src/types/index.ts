@@ -69,6 +69,7 @@ export interface Metrics {
 export interface MetricsResponse {
   metrics: MetricDataResult[]
   functionName: string
+  costEstimate: CostEstimate | null
 }
 
 export interface CostEstimate {
@@ -80,7 +81,7 @@ export interface CostEstimate {
   currency: string
   period: string
   pricingRegion?: string
-  pricingSource?: 'selected' | 'fallback'
+  pricingSource?: 'standard' | 'fallback'
 }
 
 export interface ChartDataPoint {

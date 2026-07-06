@@ -172,7 +172,7 @@
           </div>
 
           <!-- Estimated Cost Card -->
-          <div v-if="showCostEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div v-if="showCostEstimate && costEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <div class="flex items-center">
               <div class="flex-shrink-0">
                 <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
@@ -187,8 +187,46 @@
                 <p class="text-xs text-slate-400">{{ costEstimate.period }}</p>
                 <p v-if="costEstimate.pricingRegion" class="text-xs text-slate-400">
                   Preço base: {{ costEstimate.pricingRegion }}
-                  <span v-if="costEstimate.pricingSource === 'fallback'">(fallback)</span>
+                  <span v-if="costEstimate.pricingSource === 'fallback'" class="text-amber-600 font-medium">
+                    (estimativa aproximada — região sem tabela de preço específica)
+                  </span>
                 </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Throttles & Concurrent Executions -->
+        <div v-if="showCards" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div class="flex items-center">
+              <div class="flex-shrink-0">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center" :class="metrics.throttles > 0 ? 'bg-amber-100' : 'bg-slate-100'">
+                  <svg class="w-6 h-6" :class="metrics.throttles > 0 ? 'text-amber-600' : 'text-slate-500'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+              </div>
+              <div class="ml-4 flex-1">
+                <p class="text-sm font-medium text-slate-500">Throttles (limitações)</p>
+                <p class="text-2xl font-bold text-slate-900">{{ formatNumber(metrics.throttles) }}</p>
+                <p class="text-xs text-slate-400">Invocações rejeitadas por limite de concorrência</p>
+              </div>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div class="flex items-center">
+              <div class="flex-shrink-0">
+                <div class="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
+                  <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-8a4 4 0 11-8 0 4 4 0 018 0zm6 3a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                </div>
+              </div>
+              <div class="ml-4 flex-1">
+                <p class="text-sm font-medium text-slate-500">Execuções simultâneas (pico)</p>
+                <p class="text-2xl font-bold text-slate-900">{{ formatNumber(metrics.concurrentExecutions) }}</p>
+                <p class="text-xs text-slate-400">Máximo de execuções em paralelo no período</p>
               </div>
             </div>
           </div>
@@ -231,7 +269,7 @@
         </div>
 
         <!-- Cost Breakdown -->
-        <div v-if="showCards && showCostEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div v-if="showCards && showCostEstimate && costEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <h3 class="text-lg font-semibold text-slate-900 mb-4">Detalhamento de custos</h3>
           <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div class="bg-slate-50 rounded-lg p-4">
@@ -269,7 +307,7 @@
                   class="w-full h-full pointer-events-none"
                   loading="lazy"
                   referrerpolicy="no-referrer"
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                  sandbox="allow-scripts allow-forms allow-popups"
                   title="Documentação"
                 ></iframe>
                 <div
@@ -326,6 +364,14 @@
                   class="inline-flex items-center px-3 py-1.5 text-xs border border-slate-300 rounded-lg text-slate-600 bg-white hover:bg-slate-50"
                 >
                   {{ showSummary ? 'Ocultar resumo' : 'Resumo' }}
+                </button>
+                <button
+                  type="button"
+                  @click="exportLogsCsv"
+                  :disabled="logs.length === 0"
+                  class="inline-flex items-center px-3 py-1.5 text-xs border border-slate-300 rounded-lg text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Exportar CSV
                 </button>
                 <button
                   type="button"
@@ -566,7 +612,7 @@
             class="w-full h-[calc(92vh-48px)]"
             loading="lazy"
             referrerpolicy="no-referrer"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+            sandbox="allow-scripts allow-forms allow-popups"
             title="Documentação em tela cheia"
           ></iframe>
         </div>
@@ -576,11 +622,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { Integration, LogEntry, Metrics, MetricDataResult, LogSummary, CostEstimate, LogsResponse } from '@/types'
+import type { Integration, LogEntry, Metrics, MetricDataResult, MetricsResponse, LogSummary, CostEstimate, LogsResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import { Line, Bar } from 'vue-chartjs'
 import {
@@ -612,16 +658,51 @@ const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
 
+// UI preferences are persisted per-browser so toggles/filters survive reloads.
+const UI_PREFS_STORAGE_KEY = 'dashboard-ui-preferences'
+
+interface DashboardUiPreferences {
+  timePeriod: string
+  logFilter: string
+  simplifyLogs: boolean
+  showCards: boolean
+  showDocs: boolean
+  showLogs: boolean
+}
+
+const readUiPreferences = (): Partial<DashboardUiPreferences> => {
+  try {
+    const raw = localStorage.getItem(UI_PREFS_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+const storedUiPreferences = readUiPreferences()
+
 const integrations = ref<Integration[]>([])
 const selectedIntegrationId = ref('')
-const timePeriod = ref('7')
-const logFilter = ref('all')
+const timePeriod = ref(storedUiPreferences.timePeriod ?? '7')
+const logFilter = ref(storedUiPreferences.logFilter ?? 'all')
 const isLoading = ref(false)
-const simplifyLogs = ref(false)
+const simplifyLogs = ref(storedUiPreferences.simplifyLogs ?? false)
 const showSummary = ref(false)
-const showCards = ref(true)
-const showDocs = ref(true)
-const showLogs = ref(true)
+const showCards = ref(storedUiPreferences.showCards ?? true)
+const showDocs = ref(storedUiPreferences.showDocs ?? true)
+const showLogs = ref(storedUiPreferences.showLogs ?? true)
+
+watch([timePeriod, logFilter, simplifyLogs, showCards, showDocs, showLogs], () => {
+  const preferences: DashboardUiPreferences = {
+    timePeriod: timePeriod.value,
+    logFilter: logFilter.value,
+    simplifyLogs: simplifyLogs.value,
+    showCards: showCards.value,
+    showDocs: showDocs.value,
+    showLogs: showLogs.value
+  }
+  localStorage.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(preferences))
+})
 
 const selectedIntegration = computed(() =>
   integrations.value.find(integration => String(integration.id) === String(selectedIntegrationId.value))
@@ -654,17 +735,7 @@ const aiSummaryCopied = ref(false)
 let aiSummaryPollTimeout: ReturnType<typeof setTimeout> | null = null
 const aiSummaryStoragePrefix = 'ai-summary'
 
-const costEstimate = ref<CostEstimate>({
-  totalInvocations: 0,
-  totalGBSeconds: 0,
-  requestCost: 0,
-  computeCost: 0,
-  totalCost: 0,
-  currency: 'USD',
-  period: 'Últimos 7 dias',
-  pricingRegion: 'us-east-2',
-  pricingSource: 'fallback'
-})
+const costEstimate = ref<CostEstimate | null>(null)
 
 const rawMetricsData = ref<MetricDataResult[]>([])
 const fullscreenDocLink = ref<string | null>(null)
@@ -894,7 +965,7 @@ const refreshData = () => {
 const loadMetrics = async () => {
   try {
     const days = parseInt(timePeriod.value)
-    const data = await api.get<{ metrics: MetricDataResult[], functionName: string }>(
+    const data = await api.get<MetricsResponse>(
       `/lambda/metrics/${selectedIntegrationId.value}?days=${days}`
     )
 
@@ -903,11 +974,17 @@ const loadMetrics = async () => {
     const invocationsMetric = data.metrics.find(m => m.Id === 'invocations')
     const errorsMetric = data.metrics.find(m => m.Id === 'errors')
     const durationMetric = data.metrics.find(m => m.Id === 'duration')
+    const throttlesMetric = data.metrics.find(m => m.Id === 'throttles')
+    const concurrentExecutionsMetric = data.metrics.find(m => m.Id === 'concurrentExecutions')
 
     const totalInvocations = invocationsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
     const totalErrors = errorsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
     const avgDuration = durationMetric?.Values?.length
       ? durationMetric.Values.reduce((sum, value) => sum + value, 0) / durationMetric.Values.length
+      : 0
+    const totalThrottles = throttlesMetric?.Values?.reduce((a, b) => a + b, 0) || 0
+    const maxConcurrentExecutions = concurrentExecutionsMetric?.Values?.length
+      ? Math.max(...concurrentExecutionsMetric.Values)
       : 0
 
     metrics.value = {
@@ -915,21 +992,17 @@ const loadMetrics = async () => {
       errors: totalErrors,
       duration: avgDuration,
       errorRate: totalInvocations > 0 ? (totalErrors / totalInvocations) * 100 : 0,
-      throttles: 0,
-      concurrentExecutions: 0
+      throttles: totalThrottles,
+      concurrentExecutions: maxConcurrentExecutions
     }
 
-    // Calculate cost estimate
-    calculateCostEstimate(
-      totalInvocations,
-      avgDuration,
-      selectedIntegration.value?.memoryMb ?? 128,
-      selectedIntegration.value?.region
-    )
+    // Cost estimate is calculated by the backend (single source of truth for pricing).
+    costEstimate.value = data.costEstimate
   } catch (error) {
     console.error('Falha ao carregar métricas:', error)
   }
 }
+
 
 const loadLogs = async (append = false) => {
   try {
@@ -1196,61 +1269,8 @@ const aiSummaryButtonLabel = computed(() => {
   return 'Resumo inteligente (Copilot)'
 })
 
-const lambdaPricingByRegion: Record<string, { requestPrice: number; gbSecondPrice: number }> = {
-  'us-east-1': { requestPrice: 0.20 / 1000000, gbSecondPrice: 0.0000166667 },
-  'us-east-2': { requestPrice: 0.20 / 1000000, gbSecondPrice: 0.0000166667 }
-}
-
-type PricingResolution = {
-  requestPrice: number
-  gbSecondPrice: number
-  pricingRegion: string
-  pricingSource: 'selected' | 'fallback'
-}
-
-const resolvePricing = (region?: string): PricingResolution => {
-  const normalizedRegion = (region || '').toLowerCase()
-  if (normalizedRegion && lambdaPricingByRegion[normalizedRegion]) {
-    return {
-      pricingRegion: normalizedRegion,
-      pricingSource: 'selected' as const,
-      ...lambdaPricingByRegion[normalizedRegion]
-    }
-  }
-
-  const fallback = lambdaPricingByRegion['us-east-2'] || { requestPrice: 0, gbSecondPrice: 0 }
-
-  return {
-    pricingRegion: 'us-east-2',
-    pricingSource: 'fallback' as const,
-    requestPrice: fallback.requestPrice,
-    gbSecondPrice: fallback.gbSecondPrice
-  }
-}
-
-const calculateCostEstimate = (invocations: number, avgDurationMs: number, memoryMb: number, region?: string) => {
-  const pricing = resolvePricing(region)
-  const memoryMB = memoryMb || 128
-
-  const avgDurationSeconds = avgDurationMs / 1000
-  const memoryGB = memoryMB / 1024
-  const totalGBSeconds = invocations * avgDurationSeconds * memoryGB
-
-  const requestCost = invocations * pricing.requestPrice
-  const computeCost = totalGBSeconds * pricing.gbSecondPrice
-
-  costEstimate.value = {
-    totalInvocations: invocations,
-    totalGBSeconds,
-    requestCost,
-    computeCost,
-    totalCost: requestCost + computeCost,
-    currency: 'USD',
-    period: `Últimos ${timePeriod.value} dias`,
-    pricingRegion: pricing.pricingRegion,
-    pricingSource: pricing.pricingSource
-  }
-}
+// Cost pricing table/calculation now lives on the backend (services/pricing.js) as the single
+// source of truth; the value arrives ready-to-display via GET /lambda/metrics/:id.
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
@@ -1360,6 +1380,43 @@ const getLogTypeClassFromEntry = (log: LogEntry): string => {
   return getLogTypeClass(log.message)
 }
 
+const csvEscape = (value: string): string => {
+  const normalized = value.replace(/"/g, '""')
+  return `"${normalized}"`
+}
+
+const exportLogsCsv = () => {
+  if (logs.value.length === 0) return
+
+  const header = ['Data/Hora', 'Tipo', 'Mensagem', 'Duração (ms)', 'Cobrado (ms)', 'Memória máx. (MB)']
+  const rows = logs.value.map(log => [
+    formatLogTimestamp(log.timestamp),
+    getDisplayType(log),
+    getDisplayMessage(log),
+    log.parsedReport?.durationMs?.toString() ?? '',
+    log.parsedReport?.billedDurationMs?.toString() ?? '',
+    log.parsedReport?.maxMemoryUsedMb?.toString() ?? ''
+  ])
+
+  const csvContent = [header, ...rows]
+    .map(row => row.map(cell => csvEscape(String(cell))).join(','))
+    .join('\r\n')
+
+  // Prepend a UTF-8 BOM so Excel opens accented pt-BR characters correctly.
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const integrationLabel = selectedIntegration.value?.functionName || selectedIntegrationId.value || 'logs'
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+
+  link.href = url
+  link.download = `logs-${integrationLabel}-${timestamp}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 const handleLogout = async () => {
   await auth.logout()
   router.push('/login')
@@ -1379,5 +1436,12 @@ onMounted(async () => {
     return
   }
   await fetchIntegrations()
+})
+
+onUnmounted(() => {
+  if (aiSummaryPollTimeout) {
+    clearTimeout(aiSummaryPollTimeout)
+    aiSummaryPollTimeout = null
+  }
 })
 </script>

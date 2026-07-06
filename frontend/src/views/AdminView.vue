@@ -289,7 +289,7 @@
                             class="w-full h-full"
                             loading="lazy"
                             referrerpolicy="no-referrer"
-                            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                            sandbox="allow-scripts allow-forms allow-popups"
                             title="Documentação"
                           ></iframe>
                         </div>
@@ -411,6 +411,16 @@
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     Testar
+                  </button>
+                  <button
+                    @click="openInvokeModal(integration)"
+                    class="inline-flex items-center px-3 py-2 border border-indigo-300 rounded-lg text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                  >
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Invocar
                   </button>
                   <button
                     @click="deleteIntegration(integration)"
@@ -869,7 +879,7 @@
                         class="w-full h-full"
                         loading="lazy"
                         referrerpolicy="no-referrer"
-                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                        sandbox="allow-scripts allow-forms allow-popups"
                         title="Documentação"
                       ></iframe>
                     </div>
@@ -901,6 +911,69 @@
                 {{ editModal.loading ? 'Salvando...' : 'Salvar alterações' }}
               </button>
             </div>
+          </form>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Invoke Test Modal -->
+    <transition name="fade">
+      <div v-if="invokeModal.visible" class="fixed inset-0 z-50 flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="closeInvokeModal"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl mx-4 p-6 max-h-[90vh] flex flex-col">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-lg font-semibold text-slate-900">Invocar função (teste)</h3>
+              <p class="mt-1 text-xs text-slate-500">
+                {{ invokeModal.integrationName }} — isso executa a função Lambda de verdade. Use com cuidado em funções com efeitos colaterais.
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="closeInvokeModal"
+              class="text-slate-400 hover:text-slate-600"
+              aria-label="Fechar"
+            >
+              ✕
+            </button>
+          </div>
+          <form class="mt-4 space-y-4 overflow-y-auto pr-1" @submit.prevent="submitInvoke">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Payload (JSON)</label>
+              <textarea
+                v-model="invokeModal.payload"
+                rows="6"
+                placeholder='{ "chave": "valor" }'
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
+              ></textarea>
+            </div>
+            <div class="flex justify-end space-x-3">
+              <button
+                type="button"
+                @click="closeInvokeModal"
+                class="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+              <button
+                type="submit"
+                :disabled="invokeModal.loading"
+                class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {{ invokeModal.loading ? 'Invocando...' : 'Invocar' }}
+              </button>
+            </div>
+            <div v-if="invokeModal.result" class="space-y-2">
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Resultado (status {{ invokeModal.result.statusCode }}<span v-if="invokeModal.result.functionError">, erro: {{ invokeModal.result.functionError }}</span>)
+              </p>
+              <pre class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 overflow-auto max-h-40">{{ invokeModal.result.payload }}</pre>
+              <details v-if="invokeModal.result.logTail" class="text-xs text-slate-500">
+                <summary class="cursor-pointer">Ver logs da execução</summary>
+                <pre class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3 overflow-auto max-h-40">{{ invokeModal.result.logTail }}</pre>
+              </details>
+            </div>
+            <p v-if="invokeModal.error" class="text-xs text-red-600">{{ invokeModal.error }}</p>
           </form>
         </div>
       </div>
@@ -1306,6 +1379,74 @@ const testIntegration = async (integration: Integration) => {
     showToast('error', `O teste da integração "${integration.name}" falhou. Verifique suas credenciais.`)
   } finally {
     testingId.value = null
+  }
+}
+
+interface InvokeResult {
+  statusCode: number
+  functionError: string | null
+  payload: string | null
+  logTail: string | null
+}
+
+const invokeModal = ref<{
+  visible: boolean
+  integrationId: number | null
+  integrationName: string
+  payload: string
+  loading: boolean
+  result: InvokeResult | null
+  error: string | null
+}>({
+  visible: false,
+  integrationId: null,
+  integrationName: '',
+  payload: '{}',
+  loading: false,
+  result: null,
+  error: null
+})
+
+const openInvokeModal = (integration: Integration) => {
+  invokeModal.value = {
+    visible: true,
+    integrationId: integration.id,
+    integrationName: `${integration.name} (${integration.functionName})`,
+    payload: '{}',
+    loading: false,
+    result: null,
+    error: null
+  }
+}
+
+const closeInvokeModal = () => {
+  invokeModal.value.visible = false
+}
+
+const submitInvoke = async () => {
+  if (!invokeModal.value.integrationId) return
+
+  let parsedPayload: unknown = {}
+  try {
+    parsedPayload = invokeModal.value.payload.trim() ? JSON.parse(invokeModal.value.payload) : {}
+  } catch {
+    invokeModal.value.error = 'Payload precisa ser um JSON válido'
+    return
+  }
+
+  invokeModal.value.loading = true
+  invokeModal.value.error = null
+  invokeModal.value.result = null
+
+  try {
+    const data = await api.post<InvokeResult>(`/lambda/invoke/${invokeModal.value.integrationId}`, {
+      payload: parsedPayload
+    })
+    invokeModal.value.result = data
+  } catch (error) {
+    invokeModal.value.error = error instanceof Error ? error.message : 'Falha ao invocar a função'
+  } finally {
+    invokeModal.value.loading = false
   }
 }
 
