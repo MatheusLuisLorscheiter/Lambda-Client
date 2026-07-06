@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute } from 'vue-router'
 
@@ -181,13 +181,13 @@ declare global {
         headerColor: string
       }
     }
-    WhatsAppWidgetQ: any[]
+    WhatsAppWidgetQ: unknown[]
     WhatsAppWidget: {
       open: () => void
       close: () => void
       toggle: () => void
       setUser: (user: { name: string; phone: string }) => void
-      setCustomAttributes: (attrs: Record<string, any>) => void
+      setCustomAttributes: (attrs: Record<string, unknown>) => void
       reset: () => void
     }
     __whatsAppWidgetInitialized?: boolean
