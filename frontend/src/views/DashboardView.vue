@@ -307,7 +307,7 @@
                   class="w-full h-full pointer-events-none"
                   loading="lazy"
                   referrerpolicy="no-referrer"
-                  sandbox="allow-scripts allow-forms allow-popups"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
                   title="Documentação"
                 ></iframe>
                 <div
@@ -373,17 +373,6 @@
                 >
                   Exportar CSV
                 </button>
-                <button
-                  type="button"
-                  @click="handleAiSummaryAction"
-                  :disabled="!selectedIntegrationId || aiSummaryStatus === 'running'"
-                  class="inline-flex items-center px-3 py-1.5 text-xs border border-indigo-200 rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {{ aiSummaryButtonLabel }}
-                </button>
-                <span v-if="aiSummaryStatus === 'error'" class="text-xs text-red-600">
-                  {{ aiSummaryError || 'Não foi possível gerar o resumo com o Copilot. Tente novamente com um filtro menor/menos logs.' }}
-                </span>
                 <select
                   v-model="logFilter"
                   @change="() => loadLogs()"
@@ -459,7 +448,7 @@
                           </svg>
                           {{ log.parsedReport.durationMs ?? '-' }} ms
                         </span>
-                        <span class="flex items-center">
+                        <span v-if="showCostEstimate" class="flex items-center">
                           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                           </svg>
@@ -524,64 +513,6 @@
       </a>
     </footer>
 
-    <!-- AI Summary Modal -->
-    <transition name="fade">
-      <div v-if="aiSummaryModalOpen" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-slate-900/70" @click="closeAiSummaryModal"></div>
-        <div class="relative w-[92vw] max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[85vh]">
-          <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-slate-50">
-            <div>
-              <h4 class="text-sm font-semibold text-slate-900">Resumo inteligente (Copilot)</h4>
-              <p v-if="aiSummaryModel" class="text-xs text-slate-500">Modelo: {{ aiSummaryModel }}</p>
-            </div>
-            <button
-              type="button"
-              @click="closeAiSummaryModal"
-              class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100"
-            >
-              Fechar
-            </button>
-          </div>
-          <div class="px-5 py-4 overflow-y-auto max-h-[70vh]">
-            <div v-if="aiSummary" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-wrap">
-              {{ aiSummary }}
-            </div>
-            <div v-else class="text-sm text-slate-500">
-              Resumo ainda não disponível.
-            </div>
-            <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p v-if="aiSummaryGeneratedAt" class="text-xs text-slate-400">
-                Gerado em {{ new Date(aiSummaryGeneratedAt).toLocaleString() }}
-              </p>
-              <div class="flex items-center gap-2">
-                <button
-                  v-if="aiSummary"
-                  type="button"
-                  @click="copyAiSummary"
-                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors"
-                >
-                  <svg v-if="!aiSummaryCopied" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  <svg v-else class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                  </svg>
-                  {{ aiSummaryCopied ? 'Copiado!' : 'Copiar resumo' }}
-                </button>
-                <button
-                  type="button"
-                  @click="clearAiSummary"
-                  class="inline-flex items-center px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
-                >
-                  Limpar resumo
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
     <!-- Documentation Fullscreen Modal -->
     <transition name="fade">
       <div v-if="fullscreenDocLink" class="fixed inset-0 z-50 flex items-center justify-center">
@@ -612,7 +543,7 @@
             class="w-full h-[calc(92vh-48px)]"
             loading="lazy"
             referrerpolicy="no-referrer"
-            sandbox="allow-scripts allow-forms allow-popups"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
             title="Documentação em tela cheia"
           ></iframe>
         </div>
@@ -622,7 +553,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
@@ -723,17 +654,6 @@ const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
 const nextBefore = ref<number | null>(null)
 const isLoadingMore = ref(false)
-const aiSummary = ref<string | null>(null)
-const aiSummaryModel = ref<string | null>(null)
-const aiSummaryStatus = ref<'idle' | 'running' | 'complete' | 'error'>('idle')
-const aiSummaryRequestedAt = ref<number | null>(null)
-const aiSummaryGeneratedAt = ref<number | null>(null)
-const aiSummaryModalOpen = ref(false)
-const aiSummaryError = ref<string | null>(null)
-const aiSummaryStartTime = ref<number | null>(null)
-const aiSummaryCopied = ref(false)
-let aiSummaryPollTimeout: ReturnType<typeof setTimeout> | null = null
-const aiSummaryStoragePrefix = 'ai-summary'
 
 const costEstimate = ref<CostEstimate | null>(null)
 
@@ -943,10 +863,6 @@ const fetchIntegrations = async () => {
 const loadData = async () => {
   if (!selectedIntegrationId.value) return
   isLoading.value = true
-  const restored = restoreAiSummaryFromStorage()
-  if (!restored) {
-    resetAiSummaryState()
-  }
 
   try {
     await Promise.all([
@@ -1013,8 +929,10 @@ const loadLogs = async (append = false) => {
     const endTime = Date.now()
 
     if (!append) {
-      // Reset pagination for fresh load
+      // Clear immediately (no loading indicator) so the empty-state message shows right away
+      // while the new page of logs/summary is fetched, instead of leaving stale data on screen.
       logs.value = []
+      logSummary.value = { total: 0, reports: 0, errors: 0, avgDurationMs: null }
       nextBefore.value = null
     }
 
@@ -1041,8 +959,6 @@ const loadLogs = async (append = false) => {
 
     logSummary.value = data.summary
     nextBefore.value = data.nextBefore ?? null
-    restoreAiSummaryFromStorage()
-    await fetchAiSummaryStatus(startTime)
   } catch (error) {
     console.error('Falha ao carregar logs:', error)
   } finally {
@@ -1061,213 +977,6 @@ const toggleSummary = () => {
     loadLogs()
   }
 }
-
-const resetAiSummaryState = () => {
-  aiSummaryStatus.value = 'idle'
-  aiSummary.value = null
-  aiSummaryModel.value = null
-  aiSummaryRequestedAt.value = null
-  aiSummaryGeneratedAt.value = null
-  aiSummaryStartTime.value = null
-  aiSummaryError.value = null
-  aiSummaryModalOpen.value = false
-  if (aiSummaryPollTimeout) {
-    clearTimeout(aiSummaryPollTimeout)
-    aiSummaryPollTimeout = null
-  }
-}
-
-const getAiSummaryStorageKey = () => {
-  if (!selectedIntegrationId.value) return null
-  return `${aiSummaryStoragePrefix}:${selectedIntegrationId.value}`
-}
-
-const readAiSummaryStorage = () => {
-  const key = getAiSummaryStorageKey()
-  if (!key) return null
-  const raw = localStorage.getItem(key)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as { startTime: number; type: string; limit: number; simplify: string }
-  } catch {
-    return null
-  }
-}
-
-const saveAiSummaryStorage = (params: { startTime: number; type: string; limit: number; simplify: string }) => {
-  const key = getAiSummaryStorageKey()
-  if (!key) return
-  localStorage.setItem(key, JSON.stringify(params))
-}
-
-const clearAiSummaryStorage = () => {
-  const key = getAiSummaryStorageKey()
-  if (!key) return
-  localStorage.removeItem(key)
-}
-
-const restoreAiSummaryFromStorage = () => {
-  const stored = readAiSummaryStorage()
-  if (!stored) return false
-
-  const simplifyFlag = simplifyLogs.value ? '1' : '0'
-  if (stored.type !== logFilter.value || stored.simplify !== simplifyFlag || stored.limit !== 100) {
-    clearAiSummaryStorage()
-    return false
-  }
-
-  aiSummaryStartTime.value = stored.startTime
-  if (aiSummaryStatus.value !== 'complete') {
-    aiSummaryStatus.value = 'running'
-  }
-  return true
-}
-
-const buildAiSummaryQuery = (startTimeOverride?: number) => {
-  const days = parseInt(timePeriod.value)
-  const startTime = startTimeOverride ?? aiSummaryStartTime.value ?? Date.now() - (days * 24 * 60 * 60 * 1000)
-
-  return {
-    startTime,
-    type: logFilter.value,
-    limit: 100,
-    simplify: simplifyLogs.value ? '1' : '0'
-  }
-}
-
-const fetchAiSummaryStatus = async (startTimeOverride?: number) => {
-  if (!selectedIntegrationId.value) return
-
-  if (startTimeOverride && !aiSummaryStartTime.value) {
-    aiSummaryStartTime.value = startTimeOverride
-  }
-
-  const params = buildAiSummaryQuery(startTimeOverride)
-
-  try {
-    const data = await api.get<{ status: string; summary?: string; model?: string; requestedAt?: number; generatedAt?: number; error?: string }>(
-      `/lambda/logs/${selectedIntegrationId.value}/ai-summary/status?type=${params.type}&startTime=${params.startTime}&limit=${params.limit}&simplify=${params.simplify}`
-    )
-
-    aiSummaryStatus.value = (data.status as typeof aiSummaryStatus.value) || 'idle'
-    aiSummary.value = data.summary || null
-    aiSummaryModel.value = data.model || null
-    aiSummaryRequestedAt.value = data.requestedAt || null
-    aiSummaryGeneratedAt.value = data.generatedAt || null
-    if (aiSummaryStatus.value === 'error') {
-      aiSummaryError.value = data.error || 'Não foi possível gerar o resumo com o Copilot. Tente novamente com um filtro menor/menos logs.'
-    } else {
-      aiSummaryError.value = data.error || null
-    }
-
-    if (aiSummaryStatus.value === 'idle') {
-      clearAiSummaryStorage()
-    }
-
-    if (aiSummaryStatus.value === 'running') {
-      scheduleAiSummaryPoll()
-    } else {
-      if (aiSummaryPollTimeout) {
-        clearTimeout(aiSummaryPollTimeout)
-        aiSummaryPollTimeout = null
-      }
-    }
-  } catch (error) {
-    console.error('Falha ao buscar status do resumo inteligente:', error)
-  }
-}
-
-const scheduleAiSummaryPoll = () => {
-  if (aiSummaryPollTimeout) {
-    clearTimeout(aiSummaryPollTimeout)
-  }
-  aiSummaryPollTimeout = setTimeout(() => fetchAiSummaryStatus(), 4000)
-}
-
-const startAiSummary = async () => {
-  if (!selectedIntegrationId.value) return
-
-  const params = buildAiSummaryQuery()
-
-  aiSummaryStartTime.value = params.startTime
-  saveAiSummaryStorage(params)
-
-  aiSummaryStatus.value = 'running'
-  aiSummaryError.value = null
-  scheduleAiSummaryPoll()
-
-  try {
-    const data = await api.post<{ status: string; summary?: string; model?: string; requestedAt?: number; generatedAt?: number; error?: string }>(
-      `/lambda/logs/${selectedIntegrationId.value}/ai-summary/start?type=${params.type}&startTime=${params.startTime}&limit=${params.limit}&simplify=${params.simplify}`
-    )
-
-    aiSummaryStatus.value = (data.status as typeof aiSummaryStatus.value) || 'running'
-    aiSummary.value = data.summary || null
-    aiSummaryModel.value = data.model || null
-    aiSummaryRequestedAt.value = data.requestedAt || null
-    aiSummaryGeneratedAt.value = data.generatedAt || null
-    aiSummaryError.value = data.error || null
-
-    if (aiSummaryStatus.value === 'running') {
-      scheduleAiSummaryPoll()
-    }
-  } catch (error) {
-    console.error('Falha ao iniciar resumo inteligente:', error)
-    aiSummaryStatus.value = 'error'
-    aiSummaryError.value = 'Não foi possível iniciar o resumo agora.'
-  }
-}
-
-const handleAiSummaryAction = async () => {
-  if (aiSummaryStatus.value === 'complete') {
-    aiSummaryModalOpen.value = true
-    return
-  }
-
-  await startAiSummary()
-}
-
-const closeAiSummaryModal = () => {
-  aiSummaryModalOpen.value = false
-}
-
-const clearAiSummary = async () => {
-  if (!selectedIntegrationId.value) return
-
-  const params = buildAiSummaryQuery()
-
-  try {
-    await api.del(
-      `/lambda/logs/${selectedIntegrationId.value}/ai-summary?type=${params.type}&startTime=${params.startTime}&limit=${params.limit}&simplify=${params.simplify}`
-    )
-  } catch (error) {
-    console.error('Falha ao limpar resumo inteligente:', error)
-  }
-
-  resetAiSummaryState()
-  clearAiSummaryStorage()
-}
-
-const copyAiSummary = async () => {
-  if (!aiSummary.value) return
-  
-  try {
-    await navigator.clipboard.writeText(aiSummary.value)
-    aiSummaryCopied.value = true
-    setTimeout(() => {
-      aiSummaryCopied.value = false
-    }, 2000)
-  } catch (error) {
-    console.error('Falha ao copiar resumo:', error)
-  }
-}
-
-const aiSummaryButtonLabel = computed(() => {
-  if (aiSummaryStatus.value === 'complete') return 'Visualizar resumo gerado'
-  if (aiSummaryStatus.value === 'running') return 'Gerando resumo...'
-  if (aiSummaryStatus.value === 'error') return 'Gerar resumo novamente'
-  return 'Resumo inteligente (Copilot)'
-})
 
 // Cost pricing table/calculation now lives on the backend (services/pricing.js) as the single
 // source of truth; the value arrives ready-to-display via GET /lambda/metrics/:id.
@@ -1436,12 +1145,5 @@ onMounted(async () => {
     return
   }
   await fetchIntegrations()
-})
-
-onUnmounted(() => {
-  if (aiSummaryPollTimeout) {
-    clearTimeout(aiSummaryPollTimeout)
-    aiSummaryPollTimeout = null
-  }
 })
 </script>

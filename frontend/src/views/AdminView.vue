@@ -289,7 +289,7 @@
                             class="w-full h-full"
                             loading="lazy"
                             referrerpolicy="no-referrer"
-                            sandbox="allow-scripts allow-forms allow-popups"
+                            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
                             title="Documentação"
                           ></iframe>
                         </div>
@@ -879,7 +879,7 @@
                         class="w-full h-full"
                         loading="lazy"
                         referrerpolicy="no-referrer"
-                        sandbox="allow-scripts allow-forms allow-popups"
+                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
                         title="Documentação"
                       ></iframe>
                     </div>
