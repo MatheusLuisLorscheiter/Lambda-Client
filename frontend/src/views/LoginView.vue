@@ -80,7 +80,31 @@
           {{ error }}
         </div>
 
-        <div class="text-sm text-center text-slate-500">
+        <div class="relative py-2">
+          <div class="absolute inset-0 flex items-center">
+            <span class="w-full border-t border-slate-200" />
+          </div>
+          <div class="relative flex justify-center text-xs uppercase">
+            <span class="bg-white px-2 text-slate-500">ou</span>
+          </div>
+        </div>
+
+        <div>
+          <button
+            type="button"
+            @click="loginWithSSO"
+            class="w-full flex justify-center items-center py-2.5 px-4 border border-slate-300 rounded-lg shadow-sm bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+          >
+            <svg class="w-4 h-4 mr-2 text-slate-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7 12H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 7V17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Entrar com Chave Mestra
+          </button>
+        </div>
+
+        <div class="text-sm text-center text-slate-500 mt-4">
           <RouterLink to="/admin/login" class="font-medium text-indigo-600 hover:text-indigo-500 transition-colors">Acesso admin</RouterLink>
         </div>
       </form>
@@ -252,6 +276,13 @@ const handleLogin = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const loginWithSSO = () => {
+  const clientId = import.meta.env.VITE_CHAVEMESTRA_CLIENT_ID || 'lambda-client'
+  const redirectUri = encodeURIComponent(`${window.location.origin}/sso/callback`)
+  const url = `${import.meta.env.VITE_CHAVEMESTRA_URL || 'http://localhost:3000'}/api/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`
+  window.location.href = url
 }
 </script>
 

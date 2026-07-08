@@ -29,6 +29,11 @@ const router = createRouter({
       component: () => import('../views/ResetPasswordView.vue')
     },
     {
+      path: '/sso/callback',
+      name: 'sso-callback',
+      component: () => import('../views/SsoCallbackView.vue')
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: () => import('../views/AdminView.vue'),

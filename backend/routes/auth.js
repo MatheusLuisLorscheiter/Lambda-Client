@@ -634,4 +634,84 @@ router.get('/me', authenticateToken, async (req, res) => {
   res.json({ user });
 });
 
+// SSO login via Chave Mestra
+router.post('/sso/chave-mestra', async (req, res) => {
+  const { code, redirectUri } = req.body;
+  
+  if (!code) {
+    return res.status(400).json({ error: 'Código de autorização é obrigatório' });
+  }
+
+  try {
+    // 1. Exchange code for token
+    const tokenResponse = await fetch(`${process.env.CHAVEMESTRA_URL}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        code,
+        client_id: process.env.CHAVEMESTRA_CLIENT_ID,
+        client_secret: process.env.CHAVEMESTRA_CLIENT_SECRET,
+        redirect_uri: redirectUri || `${process.env.FRONTEND_BASE_URL}/sso/callback`
+      })
+    });
+
+    if (!tokenResponse.ok) {
+      return res.status(401).json({ error: 'Falha na autenticação SSO' });
+    }
+
+    const { access_token } = await tokenResponse.json();
+
+    // 2. Get user info
+    const userInfoResponse = await fetch(`${process.env.CHAVEMESTRA_URL}/api/oauth/userinfo`, {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    if (!userInfoResponse.ok) {
+      return res.status(401).json({ error: 'Falha ao obter dados do usuário' });
+    }
+
+    const profile = await userInfoResponse.json();
+    const email = profile.email.toLowerCase();
+
+    // 3. Find user
+    const userResult = await query(
+      `SELECT users.id, users.email, users.role, users.company_id, users.is_active, companies.name AS company_name
+       FROM users
+       LEFT JOIN companies ON companies.id = users.company_id
+       WHERE LOWER(users.email) = $1`,
+      [email]
+    );
+
+    const user = userResult.rows[0];
+
+    if (!user) {
+      return res.status(401).json({ error: 'Conta não encontrada para este e-mail. Crie uma conta primeiro.' });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ error: 'Usuário inativo' });
+    }
+
+    const token = createAccessToken(user);
+
+    await logAudit({
+      companyId: user.company_id,
+      userId: user.id,
+      action: 'auth.login_sso',
+      metadata: { email: user.email, provider: 'chave-mestra' },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, role: user.role, companyId: user.company_id, companyName: user.company_name }
+    });
+  } catch (error) {
+    console.error('SSO Error:', error);
+    res.status(500).json({ error: 'Erro interno no SSO' });
+  }
+});
+
 module.exports = { router, authenticateToken };
