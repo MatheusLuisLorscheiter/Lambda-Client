@@ -281,7 +281,7 @@ const handleLogin = async () => {
 const loginWithSSO = () => {
   const clientId = import.meta.env.VITE_CHAVEMESTRA_CLIENT_ID || 'lambda-client'
   const redirectUri = encodeURIComponent(`${window.location.origin}/sso/callback`)
-  const url = `${import.meta.env.VITE_CHAVEMESTRA_URL || 'http://localhost:3000'}/api/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`
+  const url = `https://chavemestragestao.com.br/api/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`
   window.location.href = url
 }
 </script>

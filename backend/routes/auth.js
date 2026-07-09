@@ -644,7 +644,7 @@ router.post('/sso/chave-mestra', async (req, res) => {
 
   try {
     // 1. Exchange code for token
-    const tokenResponse = await fetch(`${process.env.CHAVEMESTRA_URL}/api/oauth/token`, {
+    const tokenResponse = await fetch(`https://chavemestragestao.com.br/api/oauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -663,7 +663,7 @@ router.post('/sso/chave-mestra', async (req, res) => {
     const { access_token } = await tokenResponse.json();
 
     // 2. Get user info
-    const userInfoResponse = await fetch(`${process.env.CHAVEMESTRA_URL}/api/oauth/userinfo`, {
+    const userInfoResponse = await fetch(`https://chavemestragestao.com.br/api/oauth/userinfo`, {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
