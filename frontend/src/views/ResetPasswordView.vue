@@ -111,7 +111,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import logoDark from '@/assets/logos/logo-dark.svg'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
 const route = useRoute()
 const router = useRouter()
 

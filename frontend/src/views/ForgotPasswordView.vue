@@ -163,7 +163,7 @@ import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import logoDark from '@/assets/logos/logo-dark.svg'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
 
 const company = ref('')
 const email = ref('')

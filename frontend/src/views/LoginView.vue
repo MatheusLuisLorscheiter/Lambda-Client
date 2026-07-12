@@ -231,7 +231,7 @@ const fetchCompaniesByEmail = async () => {
   companyLookup.value.companies = []
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/auth/companies/by-email`, {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/auth/companies/by-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: companyLookup.value.email })
@@ -280,8 +280,9 @@ const handleLogin = async () => {
 
 const loginWithSSO = () => {
   const clientId = import.meta.env.VITE_CHAVEMESTRA_CLIENT_ID || 'lambda-client'
+  const chaveMestraUrl = import.meta.env.VITE_CHAVEMESTRA_URL || 'https://chavemestragestao.com.br'
   const redirectUri = encodeURIComponent(`${window.location.origin}/sso/callback`)
-  const url = `https://chavemestragestao.com.br/api/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`
+  const url = `${chaveMestraUrl}/api/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`
   window.location.href = url
 }
 </script>
