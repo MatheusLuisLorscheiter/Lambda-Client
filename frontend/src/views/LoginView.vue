@@ -80,27 +80,17 @@
           {{ error }}
         </div>
 
-        <div class="relative py-2">
-          <div class="absolute inset-0 flex items-center">
-            <span class="w-full border-t border-slate-200" />
-          </div>
-          <div class="relative flex justify-center text-xs uppercase">
-            <span class="bg-white px-2 text-slate-500">ou</span>
-          </div>
-        </div>
-
-        <div>
+        <div class="flex justify-center pt-2">
           <button
             type="button"
             @click="loginWithSSO"
-            class="w-full flex justify-center items-center py-2.5 px-4 border border-slate-300 rounded-lg shadow-sm bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+            class="text-xs text-slate-500 hover:text-slate-900 flex items-center gap-1.5 transition-colors font-medium"
           >
-            <svg class="w-4 h-4 mr-2 text-slate-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M7 12H17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 7V17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/>
+              <circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>
             </svg>
-            Entrar com Chave Mestra
+            Partners
           </button>
         </div>
 
