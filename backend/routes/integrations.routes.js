@@ -1,11 +1,111 @@
 const express = require('express');
 const { authenticateToken } = require('./auth');
-const { query } = require('../db');
+const { pool, query } = require('../db');
 const { encrypt } = require('../security/crypto');
 const { logAudit } = require('../audit/logger');
 const { getIntegrationForUser, normalizeDocumentationLinks } = require('../services/integrations');
 
 const router = express.Router();
+const validProcessStatuses = new Set(['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused']);
+
+const processSelect = `
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object('id', process_items.id, 'title', process_items.title, 'status', process_items.status)
+        ORDER BY process_items.updated_at DESC
+      )
+      FROM process_integrations
+      JOIN process_items ON process_items.id = process_integrations.process_id
+      WHERE process_integrations.integration_id = integrations.id
+    ),
+    '[]'::json
+  ) AS processes
+`;
+
+const normalizeProcessIds = (processIds) => {
+  if (processIds === undefined) return undefined;
+  if (!Array.isArray(processIds)) throw new Error('Lista de processos inválida');
+
+  const normalized = [...new Set(processIds.map(Number))];
+  if (normalized.some(id => !Number.isInteger(id) || id <= 0)) {
+    throw new Error('Lista de processos inválida');
+  }
+  return normalized;
+};
+
+const syncIntegrationProcesses = async ({
+  db,
+  integrationId,
+  companyId,
+  processIds = [],
+  createProcess,
+  integrationName,
+  userId
+}) => {
+  const ids = [...processIds];
+
+  if (ids.length) {
+    const result = await db.query(
+      'SELECT id FROM process_items WHERE company_id = $1 AND id = ANY($2::int[])',
+      [companyId, ids]
+    );
+    if (result.rowCount !== ids.length) {
+      throw new Error('Um ou mais processos não pertencem à empresa selecionada');
+    }
+  }
+
+  if (createProcess?.enabled) {
+    const title = String(createProcess.title || `Implantação: ${integrationName}`).trim();
+    const description = String(
+      createProcess.description || `Processo de implantação e acompanhamento da automação ${integrationName}.`
+    ).trim();
+    const status = validProcessStatuses.has(createProcess.status) ? createProcess.status : 'in_progress';
+
+    if (!title || title.length > 160 || !description || description.length > 5000) {
+      throw new Error('Dados do novo processo são inválidos');
+    }
+
+    const created = await db.query(
+      `INSERT INTO process_items
+        (company_id, requested_by, title, description, category, status, priority, progress, latest_update)
+       VALUES ($1, $2, $3, $4, 'automation', $5, 'normal', $6, $7)
+       RETURNING id`,
+      [
+        companyId,
+        userId,
+        title,
+        description,
+        status,
+        status === 'delivered' ? 100 : 0,
+        status === 'delivered'
+          ? 'Automação vinculada e registrada como entregue.'
+          : 'Automação vinculada ao processo. Acompanhe aqui as próximas atualizações.'
+      ]
+    );
+    ids.push(created.rows[0].id);
+  }
+
+  await db.query('DELETE FROM process_integrations WHERE integration_id = $1', [integrationId]);
+  for (const processId of ids) {
+    await db.query(
+      `INSERT INTO process_integrations (process_id, integration_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [processId, integrationId]
+    );
+  }
+
+  const linked = await db.query(
+    `SELECT process_items.id, process_items.title, process_items.status
+       FROM process_integrations
+       JOIN process_items ON process_items.id = process_integrations.process_id
+      WHERE process_integrations.integration_id = $1
+      ORDER BY process_items.updated_at DESC`,
+    [integrationId]
+  );
+  return linked.rows;
+};
 
 // Get integrations for user
 router.get('/integrations', authenticateToken, async (req, res) => {
@@ -21,7 +121,8 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.company_id AS "companyId",
               companies.name AS "companyName",
               integrations.owner_user_id AS "userId",
-              integrations.client_user_id AS "clientId"
+              integrations.client_user_id AS "clientId",
+              ${processSelect}
        FROM integrations
        JOIN companies ON companies.id = integrations.company_id
        ORDER BY integrations.id DESC`
@@ -40,7 +141,8 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.company_id AS "companyId",
               companies.name AS "companyName",
               integrations.owner_user_id AS "userId",
-              integrations.client_user_id AS "clientId"
+              integrations.client_user_id AS "clientId",
+              ${processSelect}
        FROM integrations
        JOIN companies ON companies.id = integrations.company_id
        WHERE integrations.company_id = $1
@@ -59,7 +161,7 @@ router.post('/integrations', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
-  const { name, functionName, region, accessKeyId, secretAccessKey, memoryMb, companyId, showCostEstimate, documentationLinks } = req.body;
+  const { name, functionName, region, accessKeyId, secretAccessKey, memoryMb, companyId, showCostEstimate, documentationLinks, processIds, createProcess } = req.body;
 
   if (!name || !functionName || !region || !accessKeyId || !secretAccessKey) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
@@ -107,14 +209,41 @@ router.post('/integrations', authenticateToken, async (req, res) => {
 
   const encryptedAccessKey = encrypt(accessKeyId);
   const encryptedSecretKey = encrypt(secretAccessKey);
+  let resolvedProcessIds;
+  try {
+    resolvedProcessIds = normalizeProcessIds(processIds) || [];
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 
-  const result = await query(
-    `INSERT INTO integrations
-      (company_id, name, function_name, region, memory_mb, show_cost_estimate, documentation_links, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", show_cost_estimate AS "showCostEstimate", documentation_links AS "documentationLinks", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
-    [resolvedCompanyId, name, functionName, region, resolvedMemoryMb, resolvedShowCostEstimate, JSON.stringify(resolvedDocumentationLinks), encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
-  );
+  const client = await pool.connect();
+  let result;
+  let linkedProcesses;
+  try {
+    await client.query('BEGIN');
+    result = await client.query(
+      `INSERT INTO integrations
+        (company_id, name, function_name, region, memory_mb, show_cost_estimate, documentation_links, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", show_cost_estimate AS "showCostEstimate", documentation_links AS "documentationLinks", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
+      [resolvedCompanyId, name, functionName, region, resolvedMemoryMb, resolvedShowCostEstimate, JSON.stringify(resolvedDocumentationLinks), encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
+    );
+    linkedProcesses = await syncIntegrationProcesses({
+      db: client,
+      integrationId: result.rows[0].id,
+      companyId: resolvedCompanyId,
+      processIds: resolvedProcessIds,
+      createProcess,
+      integrationName: name,
+      userId: req.user.id
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(400).json({ error: error.message || 'Falha ao vincular processo' });
+  } finally {
+    client.release();
+  }
 
   const companyNameResult = await query('SELECT name FROM companies WHERE id = $1', [resolvedCompanyId]);
   const companyName = companyNameResult.rows[0]?.name || null;
@@ -130,7 +259,7 @@ router.post('/integrations', authenticateToken, async (req, res) => {
     userAgent: req.get('user-agent')
   });
 
-  res.json({ integration: { ...result.rows[0], companyName } });
+  res.json({ integration: { ...result.rows[0], companyName, processes: linkedProcesses } });
 });
 
 // Delete integration
@@ -177,7 +306,7 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
     return res.status(404).json({ error: 'Integração não encontrada' });
   }
 
-  const { name, memoryMb, showCostEstimate, companyId, documentationLinks } = req.body;
+  const { name, memoryMb, showCostEstimate, companyId, documentationLinks, processIds, createProcess } = req.body;
 
   const updates = {
     name: name !== undefined ? String(name).trim() : integration.name,
@@ -229,8 +358,24 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
     }
   }
 
-  const result = await query(
-    `UPDATE integrations
+  let resolvedProcessIds;
+  try {
+    resolvedProcessIds = normalizeProcessIds(processIds);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  if (updates.company_id !== integration.company_id && resolvedProcessIds === undefined) {
+    resolvedProcessIds = [];
+  }
+
+  const client = await pool.connect();
+  let result;
+  let linkedProcesses;
+  try {
+    await client.query('BEGIN');
+    result = await client.query(
+      `UPDATE integrations
         SET name = $1,
             memory_mb = $2,
             show_cost_estimate = $3,
@@ -247,8 +392,37 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
                 company_id AS "companyId",
                 owner_user_id AS "userId",
                 client_user_id AS "clientId"`,
-    [updates.name, updates.memory_mb, updates.show_cost_estimate, updates.company_id, JSON.stringify(updates.documentation_links || []), integrationId]
-  );
+      [updates.name, updates.memory_mb, updates.show_cost_estimate, updates.company_id, JSON.stringify(updates.documentation_links || []), integrationId]
+    );
+
+    if (resolvedProcessIds !== undefined || createProcess?.enabled) {
+      linkedProcesses = await syncIntegrationProcesses({
+        db: client,
+        integrationId,
+        companyId: updates.company_id,
+        processIds: resolvedProcessIds || [],
+        createProcess,
+        integrationName: updates.name,
+        userId: req.user.id
+      });
+    } else {
+      const currentLinks = await client.query(
+        `SELECT process_items.id, process_items.title, process_items.status
+           FROM process_integrations
+           JOIN process_items ON process_items.id = process_integrations.process_id
+          WHERE process_integrations.integration_id = $1
+          ORDER BY process_items.updated_at DESC`,
+        [integrationId]
+      );
+      linkedProcesses = currentLinks.rows;
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(400).json({ error: error.message || 'Falha ao vincular processo' });
+  } finally {
+    client.release();
+  }
 
   const companyNameResult = await query('SELECT name FROM companies WHERE id = $1', [updates.company_id]);
   const companyName = companyNameResult.rows[0]?.name || null;
@@ -270,7 +444,7 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
     userAgent: req.get('user-agent')
   });
 
-  res.json({ integration: { ...result.rows[0], companyName } });
+  res.json({ integration: { ...result.rows[0], companyName, processes: linkedProcesses } });
 });
 
 module.exports = router;

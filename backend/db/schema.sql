@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS process_items (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS process_integrations (
+  process_id INTEGER NOT NULL REFERENCES process_items(id) ON DELETE CASCADE,
+  integration_id INTEGER NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (process_id, integration_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integrations(owner_user_id);
@@ -91,3 +98,4 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_company ON audit_logs(company_id);
 CREATE INDEX IF NOT EXISTS idx_process_items_company ON process_items(company_id);
 CREATE INDEX IF NOT EXISTS idx_process_items_status ON process_items(company_id, status);
+CREATE INDEX IF NOT EXISTS idx_process_integrations_integration ON process_integrations(integration_id);

@@ -238,6 +238,7 @@
                   <label class="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
                   <select
                     v-model="newIntegration.companyId"
+                    @change="newIntegration.processIds = []"
                     required
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
                   >
@@ -246,6 +247,47 @@
                       {{ company.name }}
                     </option>
                   </select>
+                </div>
+                <div class="md:col-span-2 lg:col-span-3 rounded-lg border border-slate-200 bg-white p-4">
+                  <div>
+                    <h4 class="text-sm font-semibold text-slate-900">Processos relacionados</h4>
+                    <p class="mt-1 text-xs text-slate-500">
+                      Vincule esta automação à entrega que originou o desenvolvimento ou crie um novo processo.
+                    </p>
+                  </div>
+
+                  <div v-if="newIntegrationProcessOptions.length" class="mt-4 grid gap-2 md:grid-cols-2">
+                    <label
+                      v-for="process in newIntegrationProcessOptions"
+                      :key="process.id"
+                      class="flex items-start gap-3 rounded-md border border-slate-200 px-3 py-2.5 hover:bg-slate-50"
+                    >
+                      <input v-model="newIntegration.processIds" type="checkbox" :value="process.id" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600" />
+                      <span class="min-w-0">
+                        <span class="block truncate text-sm font-medium text-slate-800">{{ process.title }}</span>
+                        <span class="text-xs text-slate-500">{{ getProcessStatusLabel(process.status) }}</span>
+                      </span>
+                    </label>
+                  </div>
+                  <p v-else class="mt-3 text-sm text-slate-500">
+                    {{ newIntegration.companyId ? 'Esta empresa ainda não possui processos.' : 'Selecione uma empresa para ver os processos.' }}
+                  </p>
+
+                  <label class="mt-4 flex items-center gap-2 border-t border-slate-200 pt-4 text-sm font-medium text-slate-700">
+                    <input v-model="newIntegration.createProcess.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600" />
+                    Criar um novo processo a partir desta integração
+                  </label>
+                  <div v-if="newIntegration.createProcess.enabled" class="mt-3 grid gap-3 md:grid-cols-2">
+                    <input v-model="newIntegration.createProcess.title" maxlength="160" :placeholder="`Implantação: ${newIntegration.name || 'nome da integração'}`" class="rounded-md border border-slate-300 px-3 py-2.5 text-sm" />
+                    <select v-model="newIntegration.createProcess.status" class="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                      <option value="analysis">Em análise</option>
+                      <option value="queued">Na fila</option>
+                      <option value="in_progress">Em desenvolvimento</option>
+                      <option value="validation">Em validação</option>
+                      <option value="delivered">Entregue</option>
+                    </select>
+                    <textarea v-model="newIntegration.createProcess.description" rows="2" placeholder="Contexto da entrega e resultado esperado (opcional)" class="resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm md:col-span-2"></textarea>
+                  </div>
                 </div>
                 <div class="md:col-span-2 lg:col-span-3">
                   <div class="flex items-center justify-between mb-1">
@@ -784,7 +826,7 @@
     <transition name="fade">
       <div v-if="editModal.visible" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="absolute inset-0 bg-slate-900/50" @click="closeEditModal"></div>
-        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg mx-4 p-6 max-h-[90vh] flex flex-col">
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl mx-4 p-6 max-h-[90vh] flex flex-col">
           <div class="flex items-start justify-between">
             <h3 class="text-lg font-semibold text-slate-900">Editar integração</h3>
             <button
@@ -832,6 +874,7 @@
               <label class="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
               <select
                 v-model="editModal.form.companyId"
+                @change="editModal.form.processIds = []"
                 required
                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
               >
@@ -840,6 +883,33 @@
                   {{ company.name }}
                 </option>
               </select>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <h4 class="text-sm font-semibold text-slate-900">Processos relacionados</h4>
+              <p class="mt-1 text-xs text-slate-500">O cliente verá estas automações dentro dos detalhes de cada processo.</p>
+              <div v-if="editIntegrationProcessOptions.length" class="mt-3 space-y-2">
+                <label v-for="process in editIntegrationProcessOptions" :key="process.id" class="flex items-start gap-3 rounded-md border border-slate-200 px-3 py-2.5 hover:bg-slate-50">
+                  <input v-model="editModal.form.processIds" type="checkbox" :value="process.id" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600" />
+                  <span class="min-w-0">
+                    <span class="block truncate text-sm font-medium text-slate-800">{{ process.title }}</span>
+                    <span class="text-xs text-slate-500">{{ getProcessStatusLabel(process.status) }}</span>
+                  </span>
+                </label>
+              </div>
+              <p v-else class="mt-3 text-sm text-slate-500">Nenhum processo cadastrado para esta empresa.</p>
+
+              <label class="mt-4 flex items-center gap-2 border-t border-slate-200 pt-4 text-sm font-medium text-slate-700">
+                <input v-model="editModal.form.createProcess.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600" />
+                Criar outro processo vinculado
+              </label>
+              <div v-if="editModal.form.createProcess.enabled" class="mt-3 grid gap-3 md:grid-cols-2">
+                <input v-model="editModal.form.createProcess.title" maxlength="160" :placeholder="`Implantação: ${editModal.form.name}`" class="rounded-md border border-slate-300 px-3 py-2.5 text-sm" />
+                <select v-model="editModal.form.createProcess.status" class="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                  <option value="analysis">Em análise</option><option value="queued">Na fila</option>
+                  <option value="in_progress">Em desenvolvimento</option><option value="validation">Em validação</option><option value="delivered">Entregue</option>
+                </select>
+                <textarea v-model="editModal.form.createProcess.description" rows="2" placeholder="Contexto da entrega (opcional)" class="resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm md:col-span-2"></textarea>
+              </div>
             </div>
             <div>
               <div class="flex items-center justify-between mb-1">
@@ -1071,7 +1141,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { ClientUser, Integration, AuditLog, Company } from '@/types'
+import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import AdminProcessManager from '@/components/AdminProcessManager.vue'
 
@@ -1084,6 +1154,7 @@ const integrations = ref<Integration[]>([])
 const clients = ref<ClientUser[]>([])
 const companies = ref<Company[]>([])
 const auditLogs = ref<AuditLog[]>([])
+const processOptions = ref<ProcessItem[]>([])
 
 const integrationLoading = ref(false)
 const clientLoading = ref(false)
@@ -1097,6 +1168,13 @@ const newIntegration = ref({
   memoryMb: 128,
   showCostEstimate: true,
   documentationLinks: [] as string[],
+  processIds: [] as number[],
+  createProcess: {
+    enabled: false,
+    title: '',
+    description: '',
+    status: 'in_progress'
+  },
   companyId: null as number | null,
   accessKeyId: '',
   secretAccessKey: ''
@@ -1136,6 +1214,13 @@ interface EditIntegrationForm {
   showCostEstimate: boolean
   companyId: number | null
   documentationLinks?: string[]
+  processIds: number[]
+  createProcess: {
+    enabled: boolean
+    title: string
+    description: string
+    status: string
+  }
 }
 
 const toasts = ref<Toast[]>([])
@@ -1157,7 +1242,9 @@ const editModal = ref({
     name: '',
     memoryMb: 128,
     showCostEstimate: true,
-    companyId: null
+    companyId: null,
+    processIds: [],
+    createProcess: { enabled: false, title: '', description: '', status: 'in_progress' }
   } as EditIntegrationForm
 })
 
@@ -1166,6 +1253,22 @@ const showDocsPreview = ref(false)
 const newDocumentationLink = ref('')
 const editDocumentationLink = ref('')
 const showEditDocsPreview = ref(false)
+const newIntegrationProcessOptions = computed(() =>
+  processOptions.value.filter(process => process.companyId === Number(newIntegration.value.companyId))
+)
+const editIntegrationProcessOptions = computed(() =>
+  processOptions.value.filter(process => process.companyId === Number(editModal.value.form.companyId))
+)
+const getProcessStatusLabel = (status: ProcessStatus) => ({
+  requested: 'Recebida',
+  analysis: 'Em análise',
+  queued: 'Na fila',
+  in_progress: 'Em desenvolvimento',
+  validation: 'Em validação',
+  delivered: 'Entregue',
+  paused: 'Pausada',
+  cancelled: 'Cancelada'
+}[status])
 
 const integrationPolicyJson = `{
   "Version": "2012-10-17",
@@ -1344,6 +1447,15 @@ const fetchCompanies = async () => {
   }
 }
 
+const fetchProcesses = async () => {
+  try {
+    const data = await api.get<{ processes: ProcessItem[] }>('/processes')
+    processOptions.value = data.processes
+  } catch (error) {
+    console.error('Falha ao buscar processos:', error)
+  }
+}
+
 const fetchAuditLogs = async () => {
   try {
     const data = await api.get<{ logs: AuditLog[] }>('/audit/logs?limit=50')
@@ -1372,13 +1484,15 @@ const addIntegration = async () => {
       memoryMb: 128,
       showCostEstimate: true,
       documentationLinks: [],
+      processIds: [],
+      createProcess: { enabled: false, title: '', description: '', status: 'in_progress' },
       companyId: defaultCompanyId.value,
       accessKeyId: '',
       secretAccessKey: ''
     }
     newDocumentationLink.value = ''
     showDocsPreview.value = false
-    await fetchIntegrations()
+    await Promise.all([fetchIntegrations(), fetchProcesses()])
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao adicionar integração')
   } finally {
@@ -1493,7 +1607,9 @@ const openEditIntegration = (integration: Integration) => {
     memoryMb: integration.memoryMb || 128,
     showCostEstimate: integration.showCostEstimate !== false,
     companyId: integration.companyId ?? null,
-    documentationLinks: integration.documentationLinks ? [...integration.documentationLinks] : []
+    documentationLinks: integration.documentationLinks ? [...integration.documentationLinks] : [],
+    processIds: integration.processes?.map(process => process.id) || [],
+    createProcess: { enabled: false, title: '', description: '', status: 'in_progress' }
   }
 }
 
@@ -1506,7 +1622,9 @@ const closeEditModal = () => {
     memoryMb: 128,
     showCostEstimate: true,
     companyId: null,
-    documentationLinks: []
+    documentationLinks: [],
+    processIds: [],
+    createProcess: { enabled: false, title: '', description: '', status: 'in_progress' }
   }
   editDocumentationLink.value = ''
   showEditDocsPreview.value = false
@@ -1521,11 +1639,13 @@ const saveEditIntegration = async () => {
       memoryMb: Number(editModal.value.form.memoryMb) || 128,
       showCostEstimate: Boolean(editModal.value.form.showCostEstimate),
       companyId: editModal.value.form.companyId,
-      documentationLinks: editModal.value.form.documentationLinks
+      documentationLinks: editModal.value.form.documentationLinks,
+      processIds: editModal.value.form.processIds,
+      createProcess: editModal.value.form.createProcess
     })
 
     showToast('success', 'Integração atualizada com sucesso')
-    await fetchIntegrations()
+    await Promise.all([fetchIntegrations(), fetchProcesses()])
     closeEditModal()
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao atualizar integração')
@@ -1709,6 +1829,7 @@ onMounted(async () => {
   await Promise.all([
     fetchIntegrations(),
     fetchCompanies(),
+    fetchProcesses(),
     fetchClients(),
     fetchAuditLogs()
   ])

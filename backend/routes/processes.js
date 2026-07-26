@@ -30,7 +30,23 @@ const selectFields = `
   process_items.delivered_at AS "deliveredAt",
   process_items.latest_update AS "latestUpdate",
   process_items.created_at AS "createdAt",
-  process_items.updated_at AS "updatedAt"
+  process_items.updated_at AS "updatedAt",
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
+          'id', integrations.id,
+          'name', integrations.name,
+          'functionName', integrations.function_name
+        )
+        ORDER BY integrations.name
+      )
+      FROM process_integrations
+      JOIN integrations ON integrations.id = process_integrations.integration_id
+      WHERE process_integrations.process_id = process_items.id
+    ),
+    '[]'::json
+  ) AS integrations
 `;
 
 const getProcessItem = async (id) => {

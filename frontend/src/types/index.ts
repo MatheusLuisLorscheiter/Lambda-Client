@@ -12,6 +12,11 @@ export interface Integration {
   secretAccessKey?: string
   userId: number
   clientId?: number | null
+  processes?: Array<{
+    id: number
+    title: string
+    status: ProcessStatus
+  }>
 }
 
 export interface ClientUser {
@@ -60,6 +65,11 @@ export interface ProcessItem {
   latestUpdate: string | null
   createdAt: string
   updatedAt: string
+  integrations?: Array<{
+    id: number
+    name: string
+    functionName: string
+  }>
 }
 
 export interface ParsedReport {
