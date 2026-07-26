@@ -8,4 +8,4 @@ cmds = ['npm ci --omit=dev']
 cmds = ['echo "Skipping build"']
 
 [start]
-cmd = 'node server.js'
+cmd = 'npm start'

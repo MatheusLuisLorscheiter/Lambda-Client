@@ -29,6 +29,39 @@ export interface Company {
   createdAt?: string
 }
 
+export type ProcessStatus =
+  | 'requested'
+  | 'analysis'
+  | 'queued'
+  | 'in_progress'
+  | 'validation'
+  | 'delivered'
+  | 'paused'
+  | 'cancelled'
+
+export interface ProcessItem {
+  id: number
+  companyId: number
+  companyName: string
+  requestedBy: number | null
+  requestedByEmail: string | null
+  title: string
+  description: string
+  category: 'automation' | 'integration' | 'maintenance' | 'improvement' | 'support'
+  status: ProcessStatus
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  position: number | null
+  complexity: 'simple' | 'medium' | 'complex' | null
+  progress: number
+  estimateBusinessDays: number | null
+  plannedStart: string | null
+  dueDate: string | null
+  deliveredAt: string | null
+  latestUpdate: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ParsedReport {
   durationMs: number | null
   billedDurationMs: number | null

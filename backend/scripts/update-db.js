@@ -19,7 +19,6 @@ if (!fs.existsSync(schemaPath)) {
 
 const run = async () => {
     const sql = fs.readFileSync(schemaPath, 'utf8');
-    await pool.query(sql);
     const migrations = [
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS memory_mb INTEGER NOT NULL DEFAULT 128',
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS show_cost_estimate BOOLEAN NOT NULL DEFAULT TRUE',
@@ -31,12 +30,29 @@ const run = async () => {
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL'
     ];
 
-    for (const statement of migrations) {
-        await pool.query(statement);
-    }
+    const client = await pool.connect();
 
-    console.log('Schema aplicado com sucesso.');
-    await pool.end();
+    try {
+        await client.query('BEGIN');
+
+        // Evita que duas instâncias executem a migração ao mesmo tempo.
+        // O PostgreSQL libera o lock automaticamente ao finalizar a transação.
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('lambda-client-schema-migration'))");
+        await client.query(sql);
+
+        for (const statement of migrations) {
+            await client.query(statement);
+        }
+
+        await client.query('COMMIT');
+        console.log('Schema aplicado com sucesso.');
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+        await pool.end();
+    }
 };
 
 run().catch((error) => {

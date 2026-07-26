@@ -57,6 +57,31 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS process_items (
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'automation'
+    CHECK (category IN ('automation', 'integration', 'maintenance', 'improvement', 'support')),
+  status TEXT NOT NULL DEFAULT 'requested'
+    CHECK (status IN ('requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused', 'cancelled')),
+  priority TEXT NOT NULL DEFAULT 'normal'
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  position INTEGER,
+  complexity TEXT
+    CHECK (complexity IS NULL OR complexity IN ('simple', 'medium', 'complex')),
+  progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+  estimate_business_days INTEGER CHECK (estimate_business_days IS NULL OR estimate_business_days > 0),
+  planned_start DATE,
+  due_date DATE,
+  delivered_at TIMESTAMPTZ,
+  latest_update TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integrations(owner_user_id);
@@ -64,3 +89,5 @@ CREATE INDEX IF NOT EXISTS idx_integrations_client ON integrations(client_user_i
 CREATE INDEX IF NOT EXISTS idx_integrations_company ON integrations(company_id);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_company ON audit_logs(company_id);
+CREATE INDEX IF NOT EXISTS idx_process_items_company ON process_items(company_id);
+CREATE INDEX IF NOT EXISTS idx_process_items_status ON process_items(company_id, status);

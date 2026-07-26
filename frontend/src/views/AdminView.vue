@@ -115,6 +115,17 @@
               Clientes
             </button>
             <button
+              @click="activeTab = 'processes'"
+              :class="[
+                'px-6 py-4 text-sm font-medium border-b-2 transition-colors',
+                activeTab === 'processes'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              ]"
+            >
+              Processos
+            </button>
+            <button
               @click="activeTab = 'audit'"
               :class="[
                 'px-6 py-4 text-sm font-medium border-b-2 transition-colors',
@@ -444,6 +455,10 @@
         </div>
 
         <!-- Clients Tab -->
+        <div v-if="activeTab === 'processes'" class="p-6">
+          <AdminProcessManager :companies="companies" />
+        </div>
+
         <div v-if="activeTab === 'clients'" class="p-6">
           <!-- Add Company Form -->
           <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
@@ -1058,12 +1073,13 @@ import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
 import type { ClientUser, Integration, AuditLog, Company } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
+import AdminProcessManager from '@/components/AdminProcessManager.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
 
-const activeTab = ref<'integrations' | 'clients' | 'audit'>('integrations')
+const activeTab = ref<'integrations' | 'processes' | 'clients' | 'audit'>('integrations')
 const integrations = ref<Integration[]>([])
 const clients = ref<ClientUser[]>([])
 const companies = ref<Company[]>([])

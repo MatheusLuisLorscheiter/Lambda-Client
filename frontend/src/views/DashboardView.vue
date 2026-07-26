@@ -29,7 +29,36 @@
       </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 flex-1 w-full">
+    <main class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex-1 w-full">
+      <div class="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-2xl font-semibold tracking-tight text-slate-950">
+            {{ activeTab === 'overview' ? 'Visão geral' : activeTab === 'queue' ? 'Fila e entregas' : 'Automações' }}
+          </h2>
+          <p class="mt-1 text-sm text-slate-500">
+            {{ activeTab === 'overview' ? 'Acompanhe prioridades, progresso e próximos passos.' : activeTab === 'queue' ? 'Visibilidade completa das demandas da sua empresa.' : 'Saúde, volume e documentação das integrações ativas.' }}
+          </p>
+        </div>
+        <nav class="flex gap-1 overflow-x-auto" aria-label="Áreas do portal">
+          <button
+            v-for="tab in portalTabs"
+            :key="tab.value"
+            class="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition"
+            :class="activeTab === tab.value ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'"
+            @click="activeTab = tab.value"
+          >
+            {{ tab.label }}
+          </button>
+        </nav>
+      </div>
+
+      <ProcessPortal
+        v-if="activeTab !== 'automations'"
+        :mode="activeTab"
+        @open-queue="activeTab = 'queue'"
+      />
+
+      <div v-show="activeTab === 'automations'">
       <!-- Header -->
       <div class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
@@ -499,6 +528,7 @@
           Escolha uma função Lambda no seletor acima para ver métricas e logs.
         </p>
       </div>
+      </div>
     </main>
 
     <footer class="py-6 text-center text-xs text-slate-500">
@@ -559,6 +589,7 @@ import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
 import type { Integration, LogEntry, Metrics, MetricDataResult, MetricsResponse, LogSummary, CostEstimate, LogsResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
+import ProcessPortal from '@/components/ProcessPortal.vue'
 import { Line, Bar } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -588,6 +619,12 @@ ChartJS.register(
 const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
+const activeTab = ref<'overview' | 'queue' | 'automations'>('overview')
+const portalTabs = [
+  { value: 'overview' as const, label: 'Visão geral' },
+  { value: 'queue' as const, label: 'Fila e entregas' },
+  { value: 'automations' as const, label: 'Automações' }
+]
 
 // UI preferences are persisted per-browser so toggles/filters survive reloads.
 const UI_PREFS_STORAGE_KEY = 'dashboard-ui-preferences'
