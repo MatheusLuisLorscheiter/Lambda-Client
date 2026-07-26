@@ -439,6 +439,18 @@
                         {{ integration.companyName }}
                       </span>
                     </p>
+                    <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span
+                        v-for="process in integration.processes"
+                        :key="process.id"
+                        class="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
+                      >
+                        {{ process.title }} · {{ getProcessStatusLabel(process.status) }}
+                      </span>
+                      <span v-if="!integration.processes?.length" class="text-xs text-amber-700">
+                        Sem processo vinculado
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">

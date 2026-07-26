@@ -31,6 +31,11 @@
 
     <div class="overflow-hidden rounded-lg border border-slate-200">
       <div v-if="loading" class="p-10 text-center text-sm text-slate-500">Carregando demandas...</div>
+      <div v-else-if="loadError" class="p-10 text-center">
+        <p class="text-sm font-medium text-slate-800">Não foi possível carregar as demandas</p>
+        <p class="mt-1 text-sm text-slate-500">{{ loadError }}</p>
+        <button class="mt-3 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="fetchProcesses">Tentar novamente</button>
+      </div>
       <div v-else-if="filteredProcesses.length" class="divide-y divide-slate-100 bg-white">
         <button
           v-for="item in filteredProcesses"
@@ -45,6 +50,9 @@
             </div>
             <p class="mt-2 truncate font-medium text-slate-950">{{ item.title }}</p>
             <p class="mt-1 truncate text-sm text-slate-500">{{ item.latestUpdate || item.description }}</p>
+            <p v-if="item.integrations?.length" class="mt-1 text-xs font-medium text-indigo-600">
+              {{ item.integrations.length }} automação(ões) vinculada(s)
+            </p>
           </div>
           <div><p class="text-xs text-slate-400">Empresa</p><p class="mt-1 text-sm font-medium text-slate-700">{{ item.companyName }}</p></div>
           <div><p class="text-xs text-slate-400">Previsão</p><p class="mt-1 text-sm text-slate-700">{{ item.dueDate ? formatDate(item.dueDate) : 'A definir' }}</p></div>
@@ -111,7 +119,7 @@
                 </div>
                 <div>
                   <label class="mb-1.5 block text-sm font-medium text-slate-700">Posição na fila</label>
-                  <input v-model.number="editor.position" type="number" min="1" placeholder="Ex.: 2" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" />
+                  <input v-model.number="editor.position" type="number" min="1" :disabled="editor.status !== 'queued'" :placeholder="editor.status === 'queued' ? 'Automática' : 'Disponível ao entrar na fila'" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400" />
                 </div>
                 <div>
                   <label class="mb-1.5 block text-sm font-medium text-slate-700">Estimativa (dias úteis)</label>
@@ -131,8 +139,19 @@
                 <input v-model.number="editor.progress" type="range" min="0" max="100" step="5" class="w-full accent-indigo-600" />
               </div>
               <div>
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Atualização para o cliente</label>
+                <label class="mb-1.5 block text-sm font-medium text-slate-700">{{ editor.id ? 'Nova atualização para o cliente' : 'Atualização inicial para o cliente' }}</label>
                 <textarea v-model="editor.latestUpdate" rows="3" placeholder="Ex.: Integração com o Omie concluída; iniciamos os testes de duplicidade." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+                <p v-if="editor.id" class="mt-1 text-xs text-slate-400">Deixe em branco se estiver alterando apenas os dados da demanda.</p>
+              </div>
+              <div v-if="editor.updates.length">
+                <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Histórico recente</p>
+                <ol class="mt-3 space-y-3 border-l border-slate-200 pl-4">
+                  <li v-for="update in editor.updates.slice(0, 5)" :key="update.id" class="relative">
+                    <span class="absolute -left-[1.29rem] top-1.5 h-2 w-2 rounded-full bg-indigo-600 ring-4 ring-white"></span>
+                    <p class="text-sm text-slate-700">{{ update.message }}</p>
+                    <p class="mt-0.5 text-xs text-slate-400">{{ formatDateTime(update.createdAt) }}</p>
+                  </li>
+                </ol>
               </div>
               <p v-if="formError" class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ formError }}</p>
             </div>
@@ -161,13 +180,15 @@ const processes = ref<ProcessItem[]>([])
 const loading = ref(true)
 const saving = ref(false)
 const formError = ref('')
+const loadError = ref('')
 const companyFilter = ref('')
 const statusFilter = ref('')
 const editorOpen = ref(false)
 const emptyEditor = () => ({
   id: null as number | null, companyId: '', title: '', description: '', category: 'automation',
   status: 'requested' as ProcessStatus, priority: 'normal', complexity: '', position: null as number | null,
-  estimateBusinessDays: null as number | null, plannedStart: '', dueDate: '', progress: 0, latestUpdate: ''
+  estimateBusinessDays: null as number | null, plannedStart: '', dueDate: '', progress: 0, latestUpdate: '',
+  updates: [] as NonNullable<ProcessItem['updates']>
 })
 const editor = ref(emptyEditor())
 const statuses: Array<{ value: ProcessStatus; label: string }> = [
@@ -192,9 +213,17 @@ const statusClass = (status: ProcessStatus) => ({
   paused: 'bg-orange-100 text-orange-800', cancelled: 'bg-red-100 text-red-800'
 }[status])
 const formatDate = (date: string) => new Intl.DateTimeFormat('pt-BR').format(new Date(`${date}T12:00:00`))
+const formatDateTime = (date: string) => new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+}).format(new Date(date))
 const fetchProcesses = async () => {
   loading.value = true
-  try { processes.value = (await api.get<{ processes: ProcessItem[] }>('/processes')).processes }
+  loadError.value = ''
+  try {
+    processes.value = (await api.get<{ processes: ProcessItem[] }>('/processes')).processes
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Tente novamente em alguns instantes.'
+  }
   finally { loading.value = false }
 }
 const openCreate = () => { editor.value = emptyEditor(); editorOpen.value = true }
@@ -204,7 +233,7 @@ const openEdit = (item: ProcessItem) => {
     category: item.category, status: item.status, priority: item.priority, complexity: item.complexity || '',
     position: item.position, estimateBusinessDays: item.estimateBusinessDays,
     plannedStart: item.plannedStart?.slice(0, 10) || '', dueDate: item.dueDate?.slice(0, 10) || '',
-    progress: item.progress, latestUpdate: item.latestUpdate || ''
+    progress: item.progress, latestUpdate: '', updates: item.updates || []
   }
   editorOpen.value = true
 }
@@ -212,13 +241,14 @@ const closeEditor = () => { editorOpen.value = false; formError.value = '' }
 const saveProcess = async () => {
   saving.value = true
   formError.value = ''
-  const payload = {
+  const payload: Record<string, unknown> = {
     companyId: Number(editor.value.companyId), title: editor.value.title, description: editor.value.description,
     category: editor.value.category, status: editor.value.status, priority: editor.value.priority,
-    complexity: editor.value.complexity || null, position: editor.value.position || null,
+    complexity: editor.value.complexity || null, position: editor.value.status === 'queued' ? (editor.value.position || null) : null,
     estimateBusinessDays: editor.value.estimateBusinessDays || null, plannedStart: editor.value.plannedStart || null,
-    dueDate: editor.value.dueDate || null, progress: editor.value.progress, latestUpdate: editor.value.latestUpdate
+    dueDate: editor.value.dueDate || null, progress: editor.value.progress
   }
+  if (editor.value.latestUpdate.trim()) payload.latestUpdate = editor.value.latestUpdate.trim()
   try {
     if (editor.value.id) await api.patch(`/processes/${editor.value.id}`, payload)
     else await api.post('/processes', payload)

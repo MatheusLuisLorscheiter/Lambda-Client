@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('./auth');
-const { query } = require('../db');
+const { pool, query } = require('../db');
 const { logAudit } = require('../audit/logger');
 
 const router = express.Router();
@@ -9,6 +9,20 @@ const validCategories = new Set(['automation', 'integration', 'maintenance', 'im
 const validStatuses = new Set(['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused', 'cancelled']);
 const validPriorities = new Set(['low', 'normal', 'high', 'urgent']);
 const validComplexities = new Set(['simple', 'medium', 'complex']);
+
+const normalizeOptionalDate = (value, fieldLabel) => {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = String(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw new Error(`${fieldLabel} inválida`);
+  }
+  const [year, month, day] = normalized.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new Error(`${fieldLabel} inválida`);
+  }
+  return normalized;
+};
 
 const selectFields = `
   process_items.id,
@@ -44,9 +58,30 @@ const selectFields = `
       FROM process_integrations
       JOIN integrations ON integrations.id = process_integrations.integration_id
       WHERE process_integrations.process_id = process_items.id
+        AND integrations.company_id = process_items.company_id
     ),
     '[]'::json
-  ) AS integrations
+  ) AS integrations,
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
+          'id', ordered_updates.id,
+          'message', ordered_updates.message,
+          'createdAt', ordered_updates.created_at
+        )
+        ORDER BY ordered_updates.created_at DESC
+      )
+      FROM (
+        SELECT process_updates.id, process_updates.message, process_updates.created_at
+        FROM process_updates
+        WHERE process_updates.process_id = process_items.id
+        ORDER BY process_updates.created_at DESC
+        LIMIT 20
+      ) AS ordered_updates
+    ),
+    '[]'::json
+  ) AS updates
 `;
 
 const getProcessItem = async (id) => {
@@ -134,25 +169,106 @@ router.post('/', authenticateToken, async (req, res) => {
   const priority = req.user.role === 'admin' && validPriorities.has(req.body.priority)
     ? req.body.priority
     : 'normal';
+  const complexity = req.user.role === 'admin' && validComplexities.has(req.body.complexity)
+    ? req.body.complexity
+    : null;
 
-  const result = await query(
-    `INSERT INTO process_items
-      (company_id, requested_by, title, description, category, status, priority, latest_update)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id`,
-    [
-      companyId,
-      requestedBy,
-      title,
-      description,
-      category,
-      status,
-      priority,
-      status === 'requested' ? 'Solicitação recebida. A análise de viabilidade será iniciada em até 48h úteis.' : null
-    ]
-  );
+  let progress = 0;
+  let estimateBusinessDays = null;
+  let position = null;
+  let plannedStart = null;
+  let dueDate = null;
+  let latestUpdate = status === 'requested'
+    ? 'Solicitação recebida. A análise de viabilidade será iniciada em até 48h úteis.'
+    : null;
 
-  const item = await getProcessItem(result.rows[0].id);
+  if (req.user.role === 'admin') {
+    if (req.body.progress !== undefined && req.body.progress !== null) {
+      progress = Number(req.body.progress);
+      if (!Number.isInteger(progress) || progress < 0 || progress > 100) {
+        return res.status(400).json({ error: 'Progresso deve estar entre 0 e 100' });
+      }
+    }
+    if (status === 'delivered') progress = 100;
+
+    if (req.body.estimateBusinessDays !== undefined && req.body.estimateBusinessDays !== null && req.body.estimateBusinessDays !== '') {
+      estimateBusinessDays = Number(req.body.estimateBusinessDays);
+      if (!Number.isInteger(estimateBusinessDays) || estimateBusinessDays <= 0) {
+        return res.status(400).json({ error: 'Estimativa inválida' });
+      }
+    }
+
+    try {
+      plannedStart = normalizeOptionalDate(req.body.plannedStart, 'Data de início');
+      dueDate = normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega');
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    latestUpdate = String(req.body.latestUpdate || '').trim() || latestUpdate;
+
+    if (status === 'queued') {
+      if (req.body.position !== undefined && req.body.position !== null && req.body.position !== '') {
+        position = Number(req.body.position);
+        if (!Number.isInteger(position) || position <= 0) {
+          return res.status(400).json({ error: 'Posição inválida' });
+        }
+      } else {
+        const nextPosition = await query(
+          `SELECT COALESCE(MAX(position), 0) + 1 AS position
+             FROM process_items
+            WHERE company_id = $1 AND status = 'queued'`,
+          [companyId]
+        );
+        position = Number(nextPosition.rows[0].position);
+      }
+    }
+  }
+
+  const client = await pool.connect();
+  let processId;
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO process_items
+        (company_id, requested_by, title, description, category, status, priority, position,
+         complexity, progress, estimate_business_days, planned_start, due_date, delivered_at, latest_update)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       RETURNING id`,
+      [
+        companyId,
+        requestedBy,
+        title,
+        description,
+        category,
+        status,
+        priority,
+        position,
+        complexity,
+        progress,
+        estimateBusinessDays,
+        plannedStart,
+        dueDate,
+        status === 'delivered' ? new Date() : null,
+        latestUpdate
+      ]
+    );
+    processId = result.rows[0].id;
+    if (latestUpdate) {
+      await client.query(
+        'INSERT INTO process_updates (process_id, author_user_id, message) VALUES ($1, $2, $3)',
+        [processId, req.user.id, latestUpdate]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const item = await getProcessItem(processId);
   await logAudit({
     companyId,
     userId: req.user.id,
@@ -202,7 +318,24 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   if (req.body.status !== undefined) {
     if (!validStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status inválido' });
     add('status', req.body.status);
-    if (req.body.status === 'delivered') add('delivered_at', new Date());
+    if (req.body.status === 'delivered') {
+      add('delivered_at', existing.deliveredAt || new Date());
+      if (req.body.progress === undefined) add('progress', 100);
+    } else if (existing.status === 'delivered') {
+      add('delivered_at', null);
+    }
+
+    if (req.body.status === 'queued' && req.body.position === undefined && !existing.position) {
+      const nextPosition = await query(
+        `SELECT COALESCE(MAX(position), 0) + 1 AS position
+           FROM process_items
+          WHERE company_id = $1 AND status = 'queued' AND id <> $2`,
+        [existing.companyId, processId]
+      );
+      add('position', Number(nextPosition.rows[0].position));
+    } else if (req.body.status !== 'queued' && req.body.position === undefined) {
+      add('position', null);
+    }
   }
   if (req.body.priority !== undefined) {
     if (!validPriorities.has(req.body.priority)) return res.status(400).json({ error: 'Prioridade inválida' });
@@ -215,7 +348,7 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     add('complexity', req.body.complexity);
   }
   if (req.body.progress !== undefined) {
-    const progress = Number(req.body.progress);
+    const progress = req.body.status === 'delivered' ? 100 : Number(req.body.progress);
     if (!Number.isInteger(progress) || progress < 0 || progress > 100) {
       return res.status(400).json({ error: 'Progresso deve estar entre 0 e 100' });
     }
@@ -226,7 +359,8 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     if (position !== null && (!Number.isInteger(position) || position <= 0)) {
       return res.status(400).json({ error: 'Posição inválida' });
     }
-    add('position', position);
+    const effectiveStatus = req.body.status || existing.status;
+    add('position', effectiveStatus === 'queued' ? position : null);
   }
   if (req.body.estimateBusinessDays !== undefined) {
     const days = req.body.estimateBusinessDays === null ? null : Number(req.body.estimateBusinessDays);
@@ -235,9 +369,24 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     }
     add('estimate_business_days', days);
   }
-  if (req.body.plannedStart !== undefined) add('planned_start', req.body.plannedStart || null);
-  if (req.body.dueDate !== undefined) add('due_date', req.body.dueDate || null);
-  if (req.body.latestUpdate !== undefined) add('latest_update', String(req.body.latestUpdate || '').trim() || null);
+  if (req.body.plannedStart !== undefined) {
+    try {
+      add('planned_start', normalizeOptionalDate(req.body.plannedStart, 'Data de início'));
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+  if (req.body.dueDate !== undefined) {
+    try {
+      add('due_date', normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega'));
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+  const nextUpdateMessage = req.body.latestUpdate !== undefined
+    ? String(req.body.latestUpdate || '').trim() || null
+    : undefined;
+  if (nextUpdateMessage !== undefined) add('latest_update', nextUpdateMessage);
 
   if (!updates.length) {
     return res.status(400).json({ error: 'Nenhuma alteração informada' });
@@ -245,7 +394,23 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
 
   add('updated_at', new Date());
   values.push(processId);
-  await query(`UPDATE process_items SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`UPDATE process_items SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
+    if (nextUpdateMessage && nextUpdateMessage !== existing.latestUpdate) {
+      await client.query(
+        'INSERT INTO process_updates (process_id, author_user_id, message) VALUES ($1, $2, $3)',
+        [processId, req.user.id, nextUpdateMessage]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 
   const item = await getProcessItem(processId);
   await logAudit({

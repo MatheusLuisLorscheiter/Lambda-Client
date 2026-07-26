@@ -89,6 +89,14 @@ CREATE TABLE IF NOT EXISTS process_integrations (
   PRIMARY KEY (process_id, integration_id)
 );
 
+CREATE TABLE IF NOT EXISTS process_updates (
+  id SERIAL PRIMARY KEY,
+  process_id INTEGER NOT NULL REFERENCES process_items(id) ON DELETE CASCADE,
+  author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integrations(owner_user_id);
@@ -99,3 +107,4 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_company ON audit_logs(company_id);
 CREATE INDEX IF NOT EXISTS idx_process_items_company ON process_items(company_id);
 CREATE INDEX IF NOT EXISTS idx_process_items_status ON process_items(company_id, status);
 CREATE INDEX IF NOT EXISTS idx_process_integrations_integration ON process_integrations(integration_id);
+CREATE INDEX IF NOT EXISTS idx_process_updates_process ON process_updates(process_id, created_at DESC);

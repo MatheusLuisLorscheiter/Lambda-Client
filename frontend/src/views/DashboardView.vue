@@ -56,15 +56,16 @@
         v-if="activeTab !== 'automations'"
         :mode="activeTab"
         @open-queue="activeTab = 'queue'"
+        @open-automation="openAutomation"
       />
 
       <div v-show="activeTab === 'automations'">
       <!-- Header -->
       <div class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 class="text-2xl font-bold text-slate-900">Painel</h2>
+          <h2 class="text-2xl font-bold text-slate-900">Monitoramento técnico</h2>
           <p class="mt-1 text-sm text-slate-600">
-            Acompanhe o desempenho das suas funções Lambda
+            Consulte saúde, requisições, logs e documentação das automações ativas.
           </p>
         </div>
         <div class="mt-2 flex flex-wrap items-center gap-4">
@@ -888,7 +889,9 @@ const fetchIntegrations = async () => {
         const firstIntegration = integrations.value[0]
         if (firstIntegration) {
           selectedIntegrationId.value = String(firstIntegration.id)
-          await loadData()
+          if (activeTab.value === 'automations') {
+            await loadData()
+          }
         }
       }
     }
@@ -1175,6 +1178,17 @@ const openDocFullscreen = (link: string) => {
 const closeDocFullscreen = () => {
   fullscreenDocLink.value = null
 }
+
+const openAutomation = (integrationId: number) => {
+  selectedIntegrationId.value = String(integrationId)
+  activeTab.value = 'automations'
+}
+
+watch(activeTab, async (tab) => {
+  if (tab === 'automations' && selectedIntegrationId.value) {
+    await loadData()
+  }
+})
 
 onMounted(async () => {
   if (!auth.isAuthenticated || !auth.isClient) {

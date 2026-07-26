@@ -18,6 +18,7 @@ const processSelect = `
       FROM process_integrations
       JOIN process_items ON process_items.id = process_integrations.process_id
       WHERE process_integrations.integration_id = integrations.id
+        AND process_items.company_id = integrations.company_id
     ),
     '[]'::json
   ) AS processes
@@ -40,8 +41,7 @@ const syncIntegrationProcesses = async ({
   companyId,
   processIds = [],
   createProcess,
-  integrationName,
-  userId
+  integrationName
 }) => {
   const ids = [...processIds];
 
@@ -68,22 +68,31 @@ const syncIntegrationProcesses = async ({
 
     const created = await db.query(
       `INSERT INTO process_items
-        (company_id, requested_by, title, description, category, status, priority, progress, latest_update)
-       VALUES ($1, $2, $3, $4, 'automation', $5, 'normal', $6, $7)
+        (company_id, requested_by, title, description, category, status, priority, progress, latest_update, delivered_at)
+       VALUES ($1, $2, $3, $4, 'automation', $5, 'normal', $6, $7, $8)
        RETURNING id`,
       [
         companyId,
-        userId,
+        null,
         title,
         description,
         status,
         status === 'delivered' ? 100 : 0,
         status === 'delivered'
           ? 'Automação vinculada e registrada como entregue.'
-          : 'Automação vinculada ao processo. Acompanhe aqui as próximas atualizações.'
+          : 'Automação vinculada ao processo. Acompanhe aqui as próximas atualizações.',
+        status === 'delivered' ? new Date() : null
       ]
     );
-    ids.push(created.rows[0].id);
+    const createdProcessId = created.rows[0].id;
+    const initialUpdate = status === 'delivered'
+      ? 'Automação vinculada e registrada como entregue.'
+      : 'Automação vinculada ao processo. Acompanhe aqui as próximas atualizações.';
+    await db.query(
+      'INSERT INTO process_updates (process_id, author_user_id, message) VALUES ($1, $2, $3)',
+      [createdProcessId, null, initialUpdate]
+    );
+    ids.push(createdProcessId);
   }
 
   await db.query('DELETE FROM process_integrations WHERE integration_id = $1', [integrationId]);
@@ -234,8 +243,7 @@ router.post('/integrations', authenticateToken, async (req, res) => {
       companyId: resolvedCompanyId,
       processIds: resolvedProcessIds,
       createProcess,
-      integrationName: name,
-      userId: req.user.id
+      integrationName: name
     });
     await client.query('COMMIT');
   } catch (error) {
@@ -249,12 +257,22 @@ router.post('/integrations', authenticateToken, async (req, res) => {
   const companyName = companyNameResult.rows[0]?.name || null;
 
   await logAudit({
-    companyId: req.user.companyId,
+    companyId: resolvedCompanyId,
     userId: req.user.id,
     action: 'integration.create',
     resourceType: 'integration',
     resourceId: String(result.rows[0].id),
-    metadata: { name, functionName, region, memoryMb: resolvedMemoryMb, companyId: resolvedCompanyId, showCostEstimate: resolvedShowCostEstimate, documentationLinks: resolvedDocumentationLinks },
+    metadata: {
+      name,
+      functionName,
+      region,
+      memoryMb: resolvedMemoryMb,
+      companyId: resolvedCompanyId,
+      showCostEstimate: resolvedShowCostEstimate,
+      documentationLinks: resolvedDocumentationLinks,
+      linkedProcessIds: linkedProcesses.map(process => process.id),
+      processCreatedFromIntegration: Boolean(createProcess?.enabled)
+    },
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
   });
@@ -402,8 +420,7 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
         companyId: updates.company_id,
         processIds: resolvedProcessIds || [],
         createProcess,
-        integrationName: updates.name,
-        userId: req.user.id
+        integrationName: updates.name
       });
     } else {
       const currentLinks = await client.query(
@@ -428,7 +445,7 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
   const companyName = companyNameResult.rows[0]?.name || null;
 
   await logAudit({
-    companyId: req.user.companyId,
+    companyId: updates.company_id,
     userId: req.user.id,
     action: 'integration.update',
     resourceType: 'integration',
@@ -438,7 +455,9 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
       memoryMb: updates.memory_mb,
       showCostEstimate: updates.show_cost_estimate,
       companyId: updates.company_id,
-      documentationLinks: updates.documentation_links
+      documentationLinks: updates.documentation_links,
+      linkedProcessIds: linkedProcesses.map(process => process.id),
+      processCreatedFromIntegration: Boolean(createProcess?.enabled)
     },
     ipAddress: req.ip,
     userAgent: req.get('user-agent')

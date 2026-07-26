@@ -3,6 +3,13 @@
     <div v-if="loading" class="flex min-h-64 items-center justify-center text-sm text-slate-500">
       Carregando sua esteira de automações...
     </div>
+    <div v-else-if="loadError" class="flex min-h-64 flex-col items-center justify-center rounded-lg border border-slate-200 bg-white px-6 text-center">
+      <p class="font-medium text-slate-900">Não foi possível carregar sua esteira</p>
+      <p class="mt-1 text-sm text-slate-500">{{ loadError }}</p>
+      <button class="mt-4 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="fetchProcesses">
+        Tentar novamente
+      </button>
+    </div>
 
     <template v-else-if="mode === 'overview'">
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -209,13 +216,38 @@
             <button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Fechar" @click="selectedProcess = null">✕</button>
           </div>
           <div class="space-y-6 p-6">
+            <div v-if="!['paused', 'cancelled'].includes(selectedProcess.status)">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Etapa atual</p>
+              <ol class="mt-3 grid grid-cols-3 gap-y-3 sm:grid-cols-6">
+                <li v-for="(stage, index) in processStages" :key="stage.value" class="relative">
+                  <div class="flex items-center">
+                    <span
+                      class="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold"
+                      :class="stageIndex(selectedProcess.status) >= index ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-slate-400'"
+                    >
+                      {{ stageIndex(selectedProcess.status) > index ? '✓' : index + 1 }}
+                    </span>
+                    <span v-if="index < processStages.length - 1" class="h-px flex-1" :class="stageIndex(selectedProcess.status) > index ? 'bg-indigo-600' : 'bg-slate-200'"></span>
+                  </div>
+                  <p class="mt-1 pr-2 text-[10px] leading-4" :class="stageIndex(selectedProcess.status) === index ? 'font-semibold text-indigo-700' : 'text-slate-500'">
+                    {{ stage.label }}
+                  </p>
+                </li>
+              </ol>
+            </div>
             <div>
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Solicitação</p>
               <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{{ selectedProcess.description }}</p>
             </div>
-            <div v-if="selectedProcess.latestUpdate" class="rounded-md border border-indigo-100 bg-indigo-50 p-4">
-              <p class="text-xs font-medium uppercase tracking-wide text-indigo-600">Última atualização</p>
-              <p class="mt-2 text-sm leading-6 text-indigo-950">{{ selectedProcess.latestUpdate }}</p>
+            <div v-if="processUpdates(selectedProcess).length">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Atualizações</p>
+              <ol class="mt-3 space-y-4 border-l border-slate-200 pl-4">
+                <li v-for="update in processUpdates(selectedProcess)" :key="update.id" class="relative">
+                  <span class="absolute -left-[1.29rem] top-1.5 h-2 w-2 rounded-full bg-indigo-600 ring-4 ring-white"></span>
+                  <p class="text-sm leading-6 text-slate-700">{{ update.message }}</p>
+                  <p class="mt-1 text-xs text-slate-400">{{ formatDateTime(update.createdAt) }}</p>
+                </li>
+              </ol>
             </div>
             <dl class="grid grid-cols-2 gap-4 border-t border-slate-200 pt-5">
               <div><dt class="text-xs text-slate-400">Posição</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ selectedProcess.position ? `#${selectedProcess.position}` : '—' }}</dd></div>
@@ -223,6 +255,23 @@
               <div><dt class="text-xs text-slate-400">Complexidade</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ complexityLabel(selectedProcess.complexity) }}</dd></div>
               <div><dt class="text-xs text-slate-400">Solicitado em</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ formatDate(selectedProcess.createdAt) }}</dd></div>
             </dl>
+            <div v-if="selectedProcess.integrations?.length" class="border-t border-slate-200 pt-5">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Automações relacionadas</p>
+              <div class="mt-3 space-y-2">
+                <button
+                  v-for="integration in selectedProcess.integrations"
+                  :key="integration.id"
+                  class="flex w-full items-center justify-between rounded-md border border-slate-200 px-3 py-3 text-left hover:bg-slate-50"
+                  @click="openAutomation(integration.id)"
+                >
+                  <span>
+                    <span class="block text-sm font-medium text-slate-900">{{ integration.name }}</span>
+                    <span class="mt-0.5 block font-mono text-xs text-slate-500">{{ integration.functionName }}</span>
+                  </span>
+                  <span class="text-xs font-medium text-indigo-600">Ver monitoramento</span>
+                </button>
+              </div>
+            </div>
           </div>
         </aside>
       </div>
@@ -240,7 +289,7 @@ import { useApi } from '@/composables/useApi'
 import type { ProcessItem, ProcessStatus } from '@/types'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
-defineEmits<{ openQueue: [] }>()
+const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number] }>()
 
 const api = useApi()
 const processes = ref<ProcessItem[]>([])
@@ -251,6 +300,7 @@ const selectedProcess = ref<ProcessItem | null>(null)
 const submitting = ref(false)
 const requestError = ref('')
 const successMessage = ref('')
+const loadError = ref('')
 const requestForm = ref({ title: '', category: 'automation', description: '' })
 
 const activeStatuses: ProcessStatus[] = ['requested', 'analysis', 'queued', 'in_progress', 'validation', 'paused']
@@ -271,6 +321,14 @@ const workflowSteps = [
   { title: 'Fila técnica', description: 'A demanda aprovada recebe posição e previsão de execução.' },
   { title: 'Desenvolvimento e entrega', description: 'Acompanhe o progresso até a validação final.' }
 ]
+const processStages: Array<{ value: ProcessStatus; label: string }> = [
+  { value: 'requested', label: 'Recebida' },
+  { value: 'analysis', label: 'Análise' },
+  { value: 'queued', label: 'Fila' },
+  { value: 'in_progress', label: 'Desenvolvimento' },
+  { value: 'validation', label: 'Validação' },
+  { value: 'delivered', label: 'Entregue' }
+]
 
 const statusCount = (status: ProcessStatus) => processes.value.filter(item => item.status === status).length
 const statusLabel = (status: ProcessStatus) => ({
@@ -287,6 +345,17 @@ const categoryLabel = (category: ProcessItem['category']) => ({
 }[category])
 const complexityLabel = (complexity: ProcessItem['complexity']) => complexity ? ({ simple: 'Simples', medium: 'Média', complex: 'Complexa' }[complexity]) : 'Em análise'
 const formatDate = (date: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(date))
+const formatDateTime = (date: string) => new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+}).format(new Date(date))
+const stageIndex = (status: ProcessStatus) => processStages.findIndex(stage => stage.value === status)
+const processUpdates = (item: ProcessItem) => {
+  if (item.updates?.length) return item.updates
+  if (item.latestUpdate) {
+    return [{ id: -item.id, message: item.latestUpdate, createdAt: item.updatedAt }]
+  }
+  return []
+}
 const deliveryLabel = (item: ProcessItem) => {
   if (item.status === 'delivered' && item.deliveredAt) return formatDate(item.deliveredAt)
   if (item.dueDate) return formatDate(item.dueDate)
@@ -296,12 +365,19 @@ const deliveryLabel = (item: ProcessItem) => {
 
 const fetchProcesses = async () => {
   loading.value = true
+  loadError.value = ''
   try {
     const data = await api.get<{ processes: ProcessItem[] }>('/processes')
     processes.value = data.processes
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Tente novamente em alguns instantes.'
   } finally {
     loading.value = false
   }
+}
+const openAutomation = (integrationId: number) => {
+  selectedProcess.value = null
+  emit('openAutomation', integrationId)
 }
 const closeRequestModal = () => {
   requestModalOpen.value = false

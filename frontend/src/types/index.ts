@@ -70,6 +70,11 @@ export interface ProcessItem {
     name: string
     functionName: string
   }>
+  updates?: Array<{
+    id: number
+    message: string
+    createdAt: string
+  }>
 }
 
 export interface ParsedReport {

@@ -4,7 +4,7 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)
 ![Vue](https://img.shields.io/badge/vue-3.x-emerald.svg)
 
-**Lambda Pulse** é uma plataforma moderna e open-source para gerenciamento e monitoramento de funções AWS Lambda em tempo real. Desenvolvido com foco em performance e experiência do usuário, o projeto oferece uma interface intuitiva para acompanhar métricas, logs e invocações.
+**Lambda Pulse** é o portal de acompanhamento de automações da Chave Mestra. Clientes podem solicitar melhorias, acompanhar análise de viabilidade, posição na fila, desenvolvimento, validação e entregas, além de consultar métricas, logs e documentações das integrações ativas.
 
 ## 🚀 Tecnologias
 
@@ -63,6 +63,8 @@ Antes de começar, certifique-se de ter instalado:
     npm run dev
     ```
 
+    O comando aplica o schema do PostgreSQL automaticamente antes de iniciar o servidor.
+
 ### 2. Frontend
 
 1.  Acesse a pasta do frontend:
@@ -94,6 +96,20 @@ Este projeto está configurado para ser implantado facilmente utilizando **Nixpa
 
 - **Backend**: Configurado via `nixpacks.toml` para usar Node 20.
 - **Frontend**: Configurado via `nixpacks.toml` para buildar com Vite e servir os arquivos estáticos.
+
+No backend, o Nixpacks executa `npm start`. O ciclo `prestart` roda `npm run db:migrate`
+antes da API, dentro de uma transação protegida por advisory lock do PostgreSQL. Se a
+migração falhar, a API não inicia com um schema incompatível.
+
+## 🔄 Processos e automações
+
+- Solicitações de clientes entram como `Recebida`, com SLA de análise de até 48h úteis.
+- O administrador define complexidade, prioridade, posição, estimativa e atualização visível.
+- Uma automação pode estar ligada a vários processos e um processo pode reunir várias automações.
+- Na criação ou edição de uma integração, o administrador pode selecionar processos existentes
+  da mesma empresa ou criar um novo processo já vinculado.
+- O cliente acessa a automação relacionada diretamente pelos detalhes do processo.
+- Cada nova atualização administrativa é preservada em uma linha do tempo visível ao cliente.
 
 ---
 
