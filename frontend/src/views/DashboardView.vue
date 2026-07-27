@@ -1,1200 +1,212 @@
 <template>
-  <div class="min-h-screen bg-slate-50 flex flex-col">
-    <!-- Navigation -->
-    <nav class="bg-white shadow-sm border-b border-slate-200">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between h-16">
-          <div class="flex items-center space-x-3">
-            <img :src="logoDark" alt="Logo da empresa" class="h-8 w-auto" />
-            <div>
-              <h1 class="text-lg font-semibold text-slate-900">Lambda Pulse</h1>
-              <p class="text-xs text-slate-500">{{ auth.user?.companyName }}</p>
-            </div>
+  <div class="min-h-screen bg-slate-50 text-slate-900">
+    <nav class="border-b border-slate-200 bg-white">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div class="flex min-w-0 items-center gap-3">
+          <img :src="logoDark" alt="Lambda Pulse" class="h-8 w-auto" />
+          <div class="min-w-0">
+            <h1 class="text-base font-semibold leading-tight">Lambda Pulse</h1>
+            <p class="truncate text-xs text-slate-500">{{ auth.user?.companyName }}</p>
           </div>
-          <div class="flex items-center space-x-4">
-            <div class="text-right">
-              <p class="text-sm font-medium text-slate-900">{{ auth.user?.email }}</p>
-            </div>
-            <button
-              @click="handleLogout"
-              class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
-            >
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Sair
-            </button>
-          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <p class="hidden text-sm text-slate-500 sm:block">{{ auth.user?.email }}</p>
+          <button @click="handleLogout" class="inline-flex min-h-10 items-center rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Sair
+          </button>
         </div>
       </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex-1 w-full">
-      <div class="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 class="text-2xl font-semibold tracking-tight text-slate-950">
-            {{ activeTab === 'overview' ? 'Visão geral' : activeTab === 'queue' ? 'Fila e entregas' : 'Automações' }}
-          </h2>
-          <p class="mt-1 text-sm text-slate-500">
-            {{ activeTab === 'overview' ? 'Acompanhe prioridades, progresso e próximos passos.' : activeTab === 'queue' ? 'Visibilidade completa das demandas da sua empresa.' : 'Saúde, volume e documentação das integrações ativas.' }}
-          </p>
-        </div>
-        <nav class="flex gap-1 overflow-x-auto" aria-label="Áreas do portal">
-          <button
-            v-for="tab in portalTabs"
-            :key="tab.value"
-            class="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition"
-            :class="activeTab === tab.value ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'"
-            @click="activeTab = tab.value"
-          >
-            {{ tab.label }}
-          </button>
-        </nav>
-      </div>
-
-      <ProcessPortal
-        v-if="activeTab !== 'automations'"
-        :mode="activeTab"
-        @open-queue="activeTab = 'queue'"
-        @open-automation="openAutomation"
-      />
-
-      <div v-show="activeTab === 'automations'">
-      <!-- Header -->
-      <div class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 class="text-2xl font-bold text-slate-900">Monitoramento técnico</h2>
-          <p class="mt-1 text-sm text-slate-600">
-            Consulte saúde, requisições, logs e documentação das automações ativas.
-          </p>
-        </div>
-        <div class="mt-2 flex flex-wrap items-center gap-4">
-          <label class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
-            <span>Cards & Dashboards</span>
-            <span class="relative inline-flex h-6 w-11 items-center">
-              <input v-model="showCards" type="checkbox" class="peer sr-only" />
-              <span class="absolute inset-0 rounded-full bg-slate-200 transition peer-checked:bg-indigo-600"></span>
-              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
-            </span>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
-            <span>Documentações</span>
-            <span class="relative inline-flex h-6 w-11 items-center">
-              <input v-model="showDocs" type="checkbox" class="peer sr-only" />
-              <span class="absolute inset-0 rounded-full bg-slate-200 transition peer-checked:bg-indigo-600"></span>
-              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
-            </span>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
-            <span>Logs Recentes</span>
-            <span class="relative inline-flex h-6 w-11 items-center">
-              <input v-model="showLogs" type="checkbox" class="peer sr-only" />
-              <span class="absolute inset-0 rounded-full bg-slate-200 transition peer-checked:bg-indigo-600"></span>
-              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
-            </span>
-          </label>
-        </div>
-      </div>
-
-      <!-- Function Selector & Time Range -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <main class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <header class="mb-6 border-b border-slate-200 pb-5">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <label for="integration" class="block text-sm font-medium text-slate-700 mb-2">Função Lambda</label>
-            <select
-              v-model="selectedIntegrationId"
-              @change="loadData"
-              class="block w-full px-4 py-2.5 border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
-            >
-              <option value="">Selecione uma função...</option>
-              <option v-for="integration in integrations" :key="integration.id" :value="integration.id">
-                {{ integration.name }} ({{ integration.functionName }})
-              </option>
-            </select>
+            <h2 class="text-2xl font-semibold tracking-tight">{{ pageTitle }}</h2>
+            <p class="mt-1 text-sm text-slate-500">{{ pageDescription }}</p>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-2">Período</label>
-            <select
-              v-model="timePeriod"
-              @change="loadData"
-              class="block w-full px-4 py-2.5 border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
-            >
-              <option value="1">Últimas 24 horas</option>
-              <option value="7">Últimos 7 dias</option>
-              <option value="14">Últimos 14 dias</option>
-              <option value="30">Últimos 30 dias</option>
-            </select>
-          </div>
-          <div class="flex items-end">
-            <button
-              @click="refreshData"
-              :disabled="!selectedIntegrationId || isLoading"
-              class="w-full inline-flex justify-center items-center px-4 py-2.5 border border-transparent rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <svg v-if="isLoading" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Atualizar
+          <nav class="flex max-w-full gap-1 overflow-x-auto" aria-label="Áreas do portal">
+            <button v-for="tab in portalTabs" :key="tab.value" @click="activeTab = tab.value"
+              class="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors"
+              :class="activeTab === tab.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'">
+              {{ tab.label }}
             </button>
-          </div>
+          </nav>
         </div>
-      </div>
+      </header>
 
-      <div v-if="selectedIntegrationId" class="space-y-8">
-        <!-- Metrics Cards -->
-        <div v-if="showCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <!-- Invocations Card -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                  <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-              </div>
-              <div class="ml-4 flex-1">
-                <p class="text-sm font-medium text-slate-500">Total de invocações</p>
-                <p class="text-2xl font-bold text-slate-900">{{ formatNumber(metrics.invocations) }}</p>
-              </div>
-            </div>
-          </div>
+      <ProcessPortal v-if="activeTab === 'overview' || activeTab === 'queue'" :mode="activeTab" @open-queue="activeTab = 'queue'" @open-automation="openDashboard" />
 
-          <!-- Error Rate Card -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-12 h-12 rounded-xl flex items-center justify-center" :class="metrics.errorRate > 5 ? 'bg-red-100' : 'bg-green-100'">
-                  <svg class="w-6 h-6" :class="metrics.errorRate > 5 ? 'text-red-600' : 'text-green-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-              </div>
-              <div class="ml-4 flex-1">
-                <p class="text-sm font-medium text-slate-500">Taxa de erro</p>
-                <p class="text-2xl font-bold" :class="metrics.errorRate > 5 ? 'text-red-600' : 'text-slate-900'">
-                  {{ metrics.errorRate.toFixed(2) }}%
-                </p>
-                <p class="text-xs text-slate-400">{{ metrics.errors }} erros</p>
-              </div>
-            </div>
+      <section v-if="activeTab === 'dashboard'" class="space-y-6">
+        <div class="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
+          <div class="grid w-full gap-3 sm:grid-cols-2 lg:max-w-2xl">
+            <label class="block">
+              <span class="mb-1.5 block text-sm font-medium">Função Lambda</span>
+              <select v-model="selectedIntegrationId" @change="loadData" class="block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm focus:border-slate-900 focus:outline-none">
+                <option value="">Selecione uma função</option>
+                <option v-for="integration in integrations" :key="integration.id" :value="String(integration.id)">{{ integration.name }} · {{ integration.functionName }}</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-sm font-medium">Período</span>
+              <select v-model="timePeriod" @change="loadData" class="block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm focus:border-slate-900 focus:outline-none">
+                <option value="1">Últimas 24 horas</option><option value="7">Últimos 7 dias</option><option value="14">Últimos 14 dias</option><option value="30">Últimos 30 dias</option>
+              </select>
+            </label>
           </div>
-
-          <!-- Average Duration Card -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                  <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-              </div>
-              <div class="ml-4 flex-1">
-                <p class="text-sm font-medium text-slate-500">Duração média</p>
-                <p class="text-2xl font-bold text-slate-900">{{ formatDuration(metrics.duration) }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Estimated Cost Card -->
-          <div v-if="showCostEstimate && costEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
-                  <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-              </div>
-              <div class="ml-4 flex-1">
-                <p class="text-sm font-medium text-slate-500">Custo estimado</p>
-                <p class="text-2xl font-bold text-slate-900">${{ costEstimate.totalCost.toFixed(4) }}</p>
-                <p class="text-xs text-slate-400">{{ costEstimate.period }}</p>
-                <p v-if="costEstimate.pricingRegion" class="text-xs text-slate-400">
-                  Preço base: {{ costEstimate.pricingRegion }}
-                  <span v-if="costEstimate.pricingSource === 'fallback'" class="text-amber-600 font-medium">
-                    (estimativa aproximada — região sem tabela de preço específica)
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
+          <button @click="refreshData" :disabled="!selectedIntegrationId || isLoading" class="inline-flex min-h-11 items-center justify-center rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <span v-if="isLoading">Atualizando…</span><span v-else>Atualizar dados</span>
+          </button>
         </div>
 
-        <!-- Throttles & Concurrent Executions -->
-        <div v-if="showCards" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-12 h-12 rounded-xl flex items-center justify-center" :class="metrics.throttles > 0 ? 'bg-amber-100' : 'bg-slate-100'">
-                  <svg class="w-6 h-6" :class="metrics.throttles > 0 ? 'text-amber-600' : 'text-slate-500'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+        <div v-if="!selectedIntegrationId" class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+          <h3 class="font-semibold">Escolha uma função para começar</h3>
+          <p class="mt-1 text-sm text-slate-500">Você verá a saúde, os erros e os eventos recentes da automação selecionada.</p>
+        </div>
+
+        <template v-else>
+          <section class="rounded-lg border p-4 sm:p-5" :class="healthTone.container">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex items-start gap-3">
+                <span class="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" :class="healthTone.dot"></span>
+                <div>
+                  <p class="text-sm font-semibold" :class="healthTone.text">{{ healthLabel }}</p>
+                  <p class="mt-1 text-sm text-slate-600">{{ healthDescription }}</p>
                 </div>
               </div>
-              <div class="ml-4 flex-1">
-                <p class="text-sm font-medium text-slate-500">Throttles (limitações)</p>
-                <p class="text-2xl font-bold text-slate-900">{{ formatNumber(metrics.throttles) }}</p>
-                <p class="text-xs text-slate-400">Invocações rejeitadas por limite de concorrência</p>
-              </div>
+              <button v-if="metrics.errors > 0" @click="focusErrors" class="min-h-10 rounded-md border border-current px-3 text-sm font-medium" :class="healthTone.text">Ver erros recentes</button>
             </div>
-          </div>
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <div class="flex items-center">
-              <div class="flex-shrink-0">
-                <div class="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
-                  <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-8a4 4 0 11-8 0 4 4 0 018 0zm6 3a4 4 0 11-8 0 4 4 0 018 0z" />
-                  </svg>
-                </div>
-              </div>
-              <div class="ml-4 flex-1">
-                <p class="text-sm font-medium text-slate-500">Execuções simultâneas (pico)</p>
-                <p class="text-2xl font-bold text-slate-900">{{ formatNumber(metrics.concurrentExecutions) }}</p>
-                <p class="text-xs text-slate-400">Máximo de execuções em paralelo no período</p>
-              </div>
-            </div>
-          </div>
-        </div>
+          </section>
 
-        <!-- Charts Row -->
-        <div v-if="showCards" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <!-- Invocations Chart -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Invocações ao longo do tempo</h3>
-            <div class="h-64">
-              <Line v-if="invocationsChartData.labels.length > 0" :data="invocationsChartData" :options="lineChartOptions" />
-              <div v-else class="h-full flex items-center justify-center text-slate-400">
-                Sem dados
-              </div>
-            </div>
-          </div>
+          <section aria-label="Resumo do período" class="grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="bg-white p-4 sm:p-5"><p class="text-sm text-slate-500">Invocações</p><p class="mt-2 text-2xl font-semibold tracking-tight">{{ formatNumber(metrics.invocations) }}</p><p class="mt-1 text-xs text-slate-500">no período selecionado</p></div>
+            <div class="bg-white p-4 sm:p-5"><p class="text-sm text-slate-500">Taxa de erro</p><p class="mt-2 text-2xl font-semibold tracking-tight" :class="metrics.errors > 0 ? healthTone.text : ''">{{ metrics.errorRate.toFixed(2) }}%</p><p class="mt-1 text-xs text-slate-500">{{ formatNumber(metrics.errors) }} erro{{ metrics.errors === 1 ? '' : 's' }}</p></div>
+            <div class="bg-white p-4 sm:p-5"><p class="text-sm text-slate-500">Duração média</p><p class="mt-2 text-2xl font-semibold tracking-tight">{{ formatDuration(metrics.duration) }}</p><p class="mt-1 text-xs text-slate-500">por execução</p></div>
+            <div class="bg-white p-4 sm:p-5"><p class="text-sm text-slate-500">Limitações</p><p class="mt-2 text-2xl font-semibold tracking-tight" :class="metrics.throttles > 0 ? 'text-amber-700' : ''">{{ formatNumber(metrics.throttles) }}</p><p class="mt-1 text-xs text-slate-500">throttles identificados</p></div>
+          </section>
 
-          <!-- Error Rate Chart -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Taxa de erro ao longo do tempo</h3>
-            <div class="h-64">
-              <Line v-if="errorRateChartData.labels.length > 0" :data="errorRateChartData" :options="errorChartOptions" />
-              <div v-else class="h-full flex items-center justify-center text-slate-400">
-                Sem dados
-              </div>
+          <section class="grid gap-6 lg:grid-cols-2">
+            <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
+              <div class="mb-4 flex items-baseline justify-between gap-3"><h3 class="font-semibold">Volume de execuções</h3><span class="text-xs text-slate-500">{{ periodLabel }}</span></div>
+              <div class="h-64"><Line v-if="invocationsChartData.labels.length" :data="invocationsChartData" :options="lineChartOptions" /><EmptyChart v-else /></div>
             </div>
-          </div>
-        </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
+              <div class="mb-4 flex items-baseline justify-between gap-3"><h3 class="font-semibold">Evolução de erros</h3><span class="text-xs text-slate-500">quanto menor, melhor</span></div>
+              <div class="h-64"><Line v-if="errorRateChartData.labels.length" :data="errorRateChartData" :options="errorChartOptions" /><EmptyChart v-else /></div>
+            </div>
+          </section>
 
-        <!-- Duration Chart -->
-        <div v-if="showCards" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 class="text-lg font-semibold text-slate-900 mb-4">Duração média ao longo do tempo</h3>
-          <div class="h-64">
-            <Bar v-if="durationChartData.labels.length > 0" :data="durationChartData" :options="barChartOptions" />
-            <div v-else class="h-full flex items-center justify-center text-slate-400">
-              Sem dados
+          <section class="grid gap-6 lg:grid-cols-3">
+            <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5 lg:col-span-2">
+              <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 class="font-semibold">Eventos recentes</h3><p class="mt-1 text-sm text-slate-500">Priorize erros para entender o que exige atenção.</p></div><div class="flex gap-2"><select v-model="logFilter" @change="loadLogs()" class="min-h-10 rounded-md border border-slate-300 bg-white px-2 text-sm"><option value="relevant">Relevantes</option><option value="errors">Erros</option><option value="all">Todos</option></select><button @click="exportLogsCsv" :disabled="!logs.length" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Exportar</button></div></div>
+              <div id="recent-events" class="divide-y divide-slate-100 border-y border-slate-100">
+                <div v-if="!logs.length" class="py-10 text-center text-sm text-slate-500">Nenhum evento encontrado neste período.</div>
+                <article v-for="log in logs" :key="getLogKey(log)" class="flex gap-3 py-3">
+                  <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full" :class="getLogDotClass(log)"></span>
+                  <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="text-xs font-semibold uppercase tracking-wide" :class="getDisplayTextClass(log)">{{ getDisplayType(log) }}</span><span class="text-xs text-slate-400">{{ formatLogTimestamp(log.timestamp) }}</span></div><p class="mt-1 break-words font-mono text-sm text-slate-700">{{ getDisplayMessage(log) }}</p><p v-if="log.parsedReport?.durationMs" class="mt-1 text-xs text-slate-500">Duração: {{ formatDuration(log.parsedReport.durationMs) }}<span v-if="log.parsedReport.maxMemoryUsedMb"> · Memória máxima: {{ log.parsedReport.maxMemoryUsedMb }} MB</span></p></div>
+                </article>
+              </div>
+              <div class="mt-4 flex items-center justify-between gap-3"><label class="inline-flex items-center gap-2 text-sm text-slate-600"><input v-model="simplifyLogs" type="checkbox" class="rounded border-slate-300" @change="loadLogs()" /> Resumir mensagens técnicas</label><button v-if="canLoadMore" @click="loadMoreLogs" :disabled="isLoadingMore" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium disabled:opacity-50">{{ isLoadingMore ? 'Carregando…' : 'Carregar mais' }}</button></div>
             </div>
-          </div>
-        </div>
+            <aside class="space-y-4">
+              <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5"><h3 class="font-semibold">Diagnóstico do período</h3><dl class="mt-4 space-y-3 text-sm"><div class="flex justify-between gap-3"><dt class="text-slate-500">Eventos analisados</dt><dd class="font-medium">{{ formatNumber(logSummary.total) }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">Erros nos logs</dt><dd class="font-medium" :class="logSummary.errors ? 'text-red-700' : ''">{{ formatNumber(logSummary.errors) }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">Duração média registrada</dt><dd class="font-medium">{{ logSummary.avgDurationMs ? formatDuration(logSummary.avgDurationMs) : '—' }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">Pico simultâneo</dt><dd class="font-medium">{{ formatNumber(metrics.concurrentExecutions) }}</dd></div></dl></div>
+              <div v-if="showCostEstimate && costEstimate" class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5"><h3 class="font-semibold">Custo estimado</h3><p class="mt-2 text-2xl font-semibold">{{ formatCurrency(costEstimate.totalCost, costEstimate.currency) }}</p><p class="mt-1 text-sm text-slate-500">{{ costEstimate.period }}</p><p class="mt-4 text-xs text-slate-500">Estimativa baseada no uso da função e na tabela AWS para {{ costEstimate.pricingRegion || 'a região configurada' }}.</p></div>
+              <button v-if="selectedIntegration?.documentationLinks?.length" @click="activeTab = 'docs'" class="w-full rounded-lg border border-slate-200 bg-white p-4 text-left text-sm font-medium hover:bg-slate-50">Abrir documentações da função <span class="float-right">→</span></button>
+            </aside>
+          </section>
+        </template>
+      </section>
 
-        <!-- Cost Breakdown -->
-        <div v-if="showCards && showCostEstimate && costEstimate" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 class="text-lg font-semibold text-slate-900 mb-4">Detalhamento de custos</h3>
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div class="bg-slate-50 rounded-lg p-4">
-              <p class="text-sm text-slate-500">Total de invocações</p>
-              <p class="text-xl font-semibold text-slate-900">{{ formatNumber(costEstimate.totalInvocations) }}</p>
-            </div>
-            <div class="bg-slate-50 rounded-lg p-4">
-              <p class="text-sm text-slate-500">GB-segundos</p>
-              <p class="text-xl font-semibold text-slate-900">{{ costEstimate.totalGBSeconds.toFixed(2) }}</p>
-            </div>
-            <div class="bg-slate-50 rounded-lg p-4">
-              <p class="text-sm text-slate-500">Custo por requisição</p>
-              <p class="text-xl font-semibold text-slate-900">${{ costEstimate.requestCost.toFixed(6) }}</p>
-            </div>
-            <div class="bg-slate-50 rounded-lg p-4">
-              <p class="text-sm text-slate-500">Custo de computação</p>
-              <p class="text-xl font-semibold text-slate-900">${{ costEstimate.computeCost.toFixed(6) }}</p>
-            </div>
-          </div>
-          <p class="mt-4 text-xs text-slate-400">
-            * Os custos são estimados com base nos preços do AWS Lambda ({{ costEstimate.pricingRegion || 'us-east-2' }}):
-            $0.20/1M requisições + $0.0000166667/GB-segundo.
-            Os valores reais podem variar conforme a região e alterações nos preços da AWS.
-          </p>
-        </div>
-
-        <!-- Documentation Links -->
-        <div v-if="showDocs && selectedIntegration?.documentationLinks?.length" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 class="text-lg font-semibold text-slate-900 mb-4">Documentações</h3>
-          <div class="space-y-4">
-            <div v-for="(link, index) in selectedIntegration.documentationLinks" :key="`doc-${index}`" class="space-y-2">
-              <div class="relative w-full h-40 rounded-lg border border-slate-200 bg-slate-100 overflow-hidden">
-                <iframe
-                  :src="link"
-                  class="w-full h-full pointer-events-none"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
-                  title="Documentação"
-                ></iframe>
-                <div
-                  class="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[1px]"
-                >
-                  <button
-                    type="button"
-                    @click="openDocFullscreen(link)"
-                    class="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
-                  >
-                    Expandir
-                  </button>
-                </div>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  @click="openDocFullscreen(link)"
-                  class="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800"
-                >
-                  Tela cheia
-                </button>
-                <a
-                  :href="link"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
-                >
-                  Abrir em nova aba
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Logs Section -->
-        <div v-if="showLogs" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
-            <div class="flex items-center justify-between">
-              <h3 class="text-lg font-semibold text-slate-900">Logs recentes</h3>
-              <div class="flex items-center space-x-4">
-                <label class="inline-flex items-center text-xs text-slate-600 space-x-2">
-                  <input
-                    v-model="simplifyLogs"
-                    type="checkbox"
-                    class="h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
-                    @change="() => loadLogs()"
-                  />
-                  <span>Simplificar</span>
-                </label>
-                <button
-                  type="button"
-                  @click="toggleSummary"
-                  class="inline-flex items-center px-3 py-1.5 text-xs border border-slate-300 rounded-lg text-slate-600 bg-white hover:bg-slate-50"
-                >
-                  {{ showSummary ? 'Ocultar resumo' : 'Resumo' }}
-                </button>
-                <button
-                  type="button"
-                  @click="exportLogsCsv"
-                  :disabled="logs.length === 0"
-                  class="inline-flex items-center px-3 py-1.5 text-xs border border-slate-300 rounded-lg text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Exportar CSV
-                </button>
-                <select
-                  v-model="logFilter"
-                  @change="() => loadLogs()"
-                  class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                  <option value="relevant">Relevantes</option>
-                  <option value="error">Somente erros</option>
-                  <option value="report">Somente relatórios</option>
-                  <option value="all">Todos os logs</option>
-                </select>
-                <div class="text-sm text-slate-500">
-                  <span class="font-medium">{{ logSummary.total }}</span> logs
-                  <span class="mx-1">•</span>
-                  <span class="text-red-600 font-medium">{{ logSummary.errors }}</span> erros
-                  <span class="mx-1">•</span>
-                  Média <span class="font-medium">{{ logSummary.avgDurationMs ? Math.round(logSummary.avgDurationMs) : 0 }}</span> ms
-                </div>
-              </div>
-            </div>
-          </div>
-          <div v-if="showSummary" class="px-6 py-4 border-b border-slate-200 bg-white">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-slate-600">
-              <div class="bg-slate-50 rounded-lg p-3">
-                <p class="text-xs text-slate-500">Período analisado</p>
-                <p class="font-medium text-slate-700">
-                  {{ logSummary.startTime ? formatLogTimestamp(logSummary.startTime) : '-' }}
-                  →
-                  {{ logSummary.endTime ? formatLogTimestamp(logSummary.endTime) : '-' }}
-                </p>
-              </div>
-              <div class="bg-slate-50 rounded-lg p-3">
-                <p class="text-xs text-slate-500">Erros e timeouts</p>
-                <p class="font-medium text-slate-700">
-                  {{ logSummary.errors }} erro(s)
-                  <span class="mx-1">•</span>
-                  {{ logSummary.timeouts ?? 0 }} timeout(s)
-                </p>
-              </div>
-              <div class="bg-slate-50 rounded-lg p-3">
-                <p class="text-xs text-slate-500">Duração média</p>
-                <p class="font-medium text-slate-700">
-                  {{ logSummary.avgDurationMs ? Math.round(logSummary.avgDurationMs) : 0 }} ms
-                </p>
-              </div>
-            </div>
-            <div v-if="logSummary.topMessages?.length" class="mt-4">
-              <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Principais eventos</h4>
-              <ul class="mt-2 space-y-2">
-                <li v-for="item in logSummary.topMessages" :key="item.message" class="text-sm text-slate-700">
-                  <span class="font-semibold">{{ item.count }}x</span> — {{ item.message }}
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div class="max-h-96 overflow-y-auto">
-            <ul class="divide-y divide-slate-100">
-              <li v-for="(log, idx) in logs" :key="log.eventId || `${log.timestamp}-${idx}`" class="px-6 py-4 hover:bg-slate-50 transition-colors">
-                <div class="flex items-start space-x-3">
-                  <span
-                      :class="getDisplayTypeClass(log)"
-                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-0.5"
-                  >
-                      {{ getDisplayType(log) }}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                      <p class="text-sm text-slate-900 font-mono break-all">{{ getDisplayMessage(log) }}</p>
-                    <div class="mt-1 flex items-center space-x-4 text-xs text-slate-500">
-                      <span>{{ formatLogTimestamp(log.timestamp) }}</span>
-                      <template v-if="log.parsedReport">
-                        <span class="flex items-center">
-                          <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          {{ log.parsedReport.durationMs ?? '-' }} ms
-                        </span>
-                        <span v-if="showCostEstimate" class="flex items-center">
-                          <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                          </svg>
-                          Cobrado {{ log.parsedReport.billedDurationMs ?? '-' }} ms
-                        </span>
-                        <span class="flex items-center">
-                          <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                          </svg>
-                          {{ log.parsedReport.maxMemoryUsedMb ?? '-' }} MB
-                        </span>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-              </li>
-              <li v-if="logs.length === 0" class="px-6 py-8 text-center text-slate-500">
-                Nenhum log encontrado para o período selecionado
-              </li>
-            </ul>
-            <div class="px-6 py-4 text-center" v-if="canLoadMore">
-              <button
-                @click="loadMoreLogs"
-                :disabled="isLoadingMore"
-                class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <svg v-if="isLoadingMore" class="animate-spin -ml-1 mr-2 h-4 w-4 text-slate-700" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                Carregar mais
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Empty State -->
-      <div v-else class="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
-        <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        <h3 class="mt-4 text-lg font-medium text-slate-900">Selecione uma função Lambda</h3>
-        <p class="mt-2 text-sm text-slate-500">
-          Escolha uma função Lambda no seletor acima para ver métricas e logs.
-        </p>
-      </div>
-      </div>
+      <section v-if="activeTab === 'docs'" class="space-y-6">
+        <div class="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between"><label class="block w-full sm:max-w-md"><span class="mb-1.5 block text-sm font-medium">Função Lambda</span><select v-model="selectedIntegrationId" class="block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm"><option value="">Selecione uma função</option><option v-for="integration in integrations" :key="integration.id" :value="String(integration.id)">{{ integration.name }} · {{ integration.functionName }}</option></select></label><button v-if="selectedIntegrationId" @click="activeTab = 'dashboard'" class="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-medium">Voltar ao Dashboard</button></div>
+        <div v-if="!selectedIntegrationId" class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center"><h3 class="font-semibold">Selecione uma função</h3><p class="mt-1 text-sm text-slate-500">A documentação disponível aparecerá aqui.</p></div>
+        <div v-else-if="!selectedIntegration?.documentationLinks?.length" class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center"><h3 class="font-semibold">Sem documentação vinculada</h3><p class="mt-1 text-sm text-slate-500">Ainda não há links de documentação para esta função.</p></div>
+        <div v-else class="grid gap-4 md:grid-cols-2"><article v-for="(link, index) in selectedIntegration.documentationLinks" :key="link" class="rounded-lg border border-slate-200 bg-white p-5"><p class="text-sm font-medium">Documentação {{ index + 1 }}</p><p class="mt-2 break-all text-sm text-slate-500">{{ link }}</p><div class="mt-5 flex gap-2"><a :href="link" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-10 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-700">Abrir em nova aba</a><button @click="fullscreenDocLink = link" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium">Visualizar</button></div></article></div>
+      </section>
     </main>
 
-    <footer class="py-6 text-center text-xs text-slate-500">
-      Copyright {{ new Date().getFullYear() }} ©
-      <a
-        href="https://chavemestragestao.com.br/"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="font-medium text-slate-600 hover:text-slate-800"
-      >
-        Chave Mestra Gestão
-      </a>
-    </footer>
-
-    <!-- Documentation Fullscreen Modal -->
-    <transition name="fade">
-      <div v-if="fullscreenDocLink" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-slate-900/70" @click="closeDocFullscreen"></div>
-        <div class="relative w-[96vw] h-[92vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-            <span class="text-sm font-semibold text-slate-700">Documentação</span>
-            <div class="flex items-center gap-2">
-              <a
-                :href="fullscreenDocLink"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
-              >
-                Abrir em nova aba
-              </a>
-              <button
-                type="button"
-                @click="closeDocFullscreen"
-                class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-          <iframe
-            :src="fullscreenDocLink"
-            class="w-full h-[calc(92vh-48px)]"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
-            title="Documentação em tela cheia"
-          ></iframe>
-        </div>
-      </div>
-    </transition>
+    <div v-if="fullscreenDocLink" class="fixed inset-0 z-50 flex flex-col bg-white"><div class="flex min-h-14 items-center justify-between border-b border-slate-200 px-4"><p class="truncate text-sm font-medium">Visualização da documentação</p><div class="flex gap-2"><a :href="fullscreenDocLink" target="_blank" rel="noopener noreferrer" class="rounded-md border border-slate-300 px-3 py-2 text-sm">Abrir</a><button @click="fullscreenDocLink = null" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">Fechar</button></div></div><iframe :src="fullscreenDocLink" title="Documentação" class="min-h-0 flex-1" sandbox="allow-same-origin allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer"></iframe></div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { Integration, LogEntry, Metrics, MetricDataResult, MetricsResponse, LogSummary, CostEstimate, LogsResponse } from '@/types'
+import type { CostEstimate, Integration, LogEntry, LogSummary, MetricDataResult, Metrics, MetricsResponse, LogsResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import ProcessPortal from '@/components/ProcessPortal.vue'
-import { Line, Bar } from 'vue-chartjs'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js'
+import { Bar, Line } from 'vue-chartjs'
+import { BarElement, CategoryScale, Chart as ChartJS, Filler, Legend, LineElement, LinearScale, PointElement, Title, Tooltip } from 'chart.js'
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler)
 
+const EmptyChart = defineComponent({ setup: () => () => h('div', { class: 'flex h-full items-center justify-center text-sm text-slate-500' }, 'Sem dados para este período.') })
 const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
-const activeTab = ref<'overview' | 'queue' | 'automations'>('overview')
-const portalTabs = [
-  { value: 'overview' as const, label: 'Visão geral' },
-  { value: 'queue' as const, label: 'Fila e entregas' },
-  { value: 'automations' as const, label: 'Automações' }
-]
-
-// UI preferences are persisted per-browser so toggles/filters survive reloads.
-const UI_PREFS_STORAGE_KEY = 'dashboard-ui-preferences'
-
-interface DashboardUiPreferences {
-  timePeriod: string
-  logFilter: string
-  simplifyLogs: boolean
-  showCards: boolean
-  showDocs: boolean
-  showLogs: boolean
-}
-
-const readUiPreferences = (): Partial<DashboardUiPreferences> => {
-  try {
-    const raw = localStorage.getItem(UI_PREFS_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch {
-    return {}
-  }
-}
-
-const storedUiPreferences = readUiPreferences()
-
+const activeTab = ref<'overview' | 'queue' | 'dashboard' | 'docs'>('overview')
+const portalTabs = [{ value: 'overview' as const, label: 'Visão geral' }, { value: 'queue' as const, label: 'Fila e entregas' }, { value: 'dashboard' as const, label: 'Dashboard' }, { value: 'docs' as const, label: 'Documentações' }]
 const integrations = ref<Integration[]>([])
 const selectedIntegrationId = ref('')
-const timePeriod = ref(storedUiPreferences.timePeriod ?? '7')
-const logFilter = ref(storedUiPreferences.logFilter ?? 'all')
+const timePeriod = ref(localStorage.getItem('lambda-pulse-period') || '7')
+const logFilter = ref('relevant')
+const simplifyLogs = ref(false)
 const isLoading = ref(false)
-const simplifyLogs = ref(storedUiPreferences.simplifyLogs ?? false)
-const showSummary = ref(false)
-const showCards = ref(storedUiPreferences.showCards ?? true)
-const showDocs = ref(storedUiPreferences.showDocs ?? true)
-const showLogs = ref(storedUiPreferences.showLogs ?? true)
-
-watch([timePeriod, logFilter, simplifyLogs, showCards, showDocs, showLogs], () => {
-  const preferences: DashboardUiPreferences = {
-    timePeriod: timePeriod.value,
-    logFilter: logFilter.value,
-    simplifyLogs: simplifyLogs.value,
-    showCards: showCards.value,
-    showDocs: showDocs.value,
-    showLogs: showLogs.value
-  }
-  localStorage.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(preferences))
-})
-
-const selectedIntegration = computed(() =>
-  integrations.value.find(integration => String(integration.id) === String(selectedIntegrationId.value))
-)
-
-const showCostEstimate = computed(() => selectedIntegration.value?.showCostEstimate !== false)
-
-const metrics = ref<Metrics>({
-  invocations: 0,
-  errors: 0,
-  duration: 0,
-  errorRate: 0,
-  throttles: 0,
-  concurrentExecutions: 0
-})
-
+const isLoadingMore = ref(false)
+const fullscreenDocLink = ref<string | null>(null)
+const metrics = ref<Metrics>({ invocations: 0, errors: 0, duration: 0, errorRate: 0, throttles: 0, concurrentExecutions: 0 })
 const logs = ref<LogEntry[]>([])
 const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDurationMs: null })
-const nextBefore = ref<number | null>(null)
-const isLoadingMore = ref(false)
-
-const costEstimate = ref<CostEstimate | null>(null)
-
 const rawMetricsData = ref<MetricDataResult[]>([])
-const fullscreenDocLink = ref<string | null>(null)
+const costEstimate = ref<CostEstimate | null>(null)
+const nextBefore = ref<number | null>(null)
+
+const selectedIntegration = computed(() => integrations.value.find(item => String(item.id) === selectedIntegrationId.value))
+const showCostEstimate = computed(() => selectedIntegration.value?.showCostEstimate !== false)
 const canLoadMore = computed(() => Boolean(nextBefore.value))
+const periodLabel = computed(() => ({ '1': '24 horas', '7': '7 dias', '14': '14 dias', '30': '30 dias' })[timePeriod.value] || 'período selecionado')
+const pageTitle = computed(() => ({ overview: 'Visão geral', queue: 'Fila e entregas', dashboard: 'Dashboard', docs: 'Documentações' })[activeTab.value])
+const pageDescription = computed(() => ({ overview: 'Acompanhe prioridades, progresso e próximos passos.', queue: 'Visibilidade completa das demandas da sua empresa.', dashboard: 'Encontre erros, entenda o impacto e acompanhe sua automação em um só lugar.', docs: 'Acesse os materiais técnicos das suas automações.' })[activeTab.value])
+const healthLabel = computed(() => metrics.value.errors > 0 ? 'Atenção necessária' : metrics.value.throttles > 0 ? 'Há limitações de capacidade' : 'Operação estável')
+const healthDescription = computed(() => metrics.value.errors > 0 ? `${formatNumber(metrics.value.errors)} erro(s) foram identificados. Consulte os eventos recentes para investigar.` : metrics.value.throttles > 0 ? `${formatNumber(metrics.value.throttles)} execução(ões) encontrou(ram) limite de concorrência.` : 'Não identificamos erros ou limitações no período selecionado.')
+const healthTone = computed(() => metrics.value.errors > 0 ? { container: 'border-red-200 bg-red-50', dot: 'bg-red-600', text: 'text-red-800' } : metrics.value.throttles > 0 ? { container: 'border-amber-200 bg-amber-50', dot: 'bg-amber-500', text: 'text-amber-800' } : { container: 'border-emerald-200 bg-emerald-50', dot: 'bg-emerald-600', text: 'text-emerald-800' })
 
-// Chart data
-const padDatePart = (value: number) => String(value).padStart(2, '0')
+watch(timePeriod, value => localStorage.setItem('lambda-pulse-period', value))
+watch(activeTab, async tab => { if ((tab === 'dashboard' || tab === 'docs') && selectedIntegrationId.value && tab === 'dashboard') await loadData() })
 
-const toLocalDateKey = (date: Date) => {
-  const year = date.getFullYear()
-  const month = padDatePart(date.getMonth() + 1)
-  const day = padDatePart(date.getDate())
-  return `${year}-${month}-${day}`
+const aggregateByDay = (metric: MetricDataResult | undefined, mode: 'sum' | 'average') => {
+  const values = new Map<string, { sum: number; count: number }>()
+  metric?.Timestamps?.forEach((timestamp, index) => { const date = new Date(timestamp); const key = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`; const current = values.get(key) || { sum: 0, count: 0 }; current.sum += metric.Values?.[index] || 0; current.count += 1; values.set(key, current) })
+  return [...values.entries()].map(([label, item]) => ({ label, value: mode === 'sum' ? item.sum : item.sum / item.count }))
 }
-
-const formatDateKey = (key: string) => {
-  const [year, month, day] = key.split('-')
-  if (!year || !month || !day) return key
-  return `${day}/${month}/${year}`
-}
-
-const aggregateSumByDay = (metric?: MetricDataResult) => {
-  const map = new Map<string, number>()
-  if (!metric?.Timestamps?.length) return map
-
-  metric.Timestamps.forEach((ts, i) => {
-    const date = new Date(ts)
-    const key = toLocalDateKey(date)
-    const value = metric.Values?.[i] ?? 0
-    map.set(key, (map.get(key) || 0) + value)
-  })
-
-  return map
-}
-
-const aggregateAverageByDay = (metric?: MetricDataResult) => {
-  const map = new Map<string, { sum: number; count: number }>()
-  if (!metric?.Timestamps?.length) return map
-
-  metric.Timestamps.forEach((ts, i) => {
-    const date = new Date(ts)
-    const key = toLocalDateKey(date)
-    const value = metric.Values?.[i]
-    if (value === undefined || value === null) return
-    const entry = map.get(key) || { sum: 0, count: 0 }
-    entry.sum += value
-    entry.count += 1
-    map.set(key, entry)
-  })
-
-  return map
-}
-
-const buildDayLabels = (keys: string[]) => keys.sort().map(formatDateKey)
-
-const invocationsChartData = computed(() => {
-  const invocationsMetric = rawMetricsData.value.find(m => m.Id === 'invocations')
-  const byDay = aggregateSumByDay(invocationsMetric)
-  if (byDay.size === 0) {
-    return { labels: [], datasets: [] }
-  }
-
-  const keys = Array.from(byDay.keys()).sort()
-
-  return {
-    labels: buildDayLabels(keys),
-    datasets: [{
-      label: 'Invocações',
-      data: keys.map(key => byDay.get(key) || 0),
-      borderColor: 'rgb(59, 130, 246)',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      fill: true,
-      tension: 0.4
-    }]
-  }
-})
-
-const errorRateChartData = computed(() => {
-  const invocationsMetric = rawMetricsData.value.find(m => m.Id === 'invocations')
-  const errorsMetric = rawMetricsData.value.find(m => m.Id === 'errors')
-
-  const invocationsByDay = aggregateSumByDay(invocationsMetric)
-  if (invocationsByDay.size === 0) {
-    return { labels: [], datasets: [] }
-  }
-
-  const errorsByDay = aggregateSumByDay(errorsMetric)
-  const keys = Array.from(invocationsByDay.keys())
-    .concat(Array.from(errorsByDay.keys()))
-    .filter((value, index, self) => self.indexOf(value) === index)
-    .sort()
-
-  return {
-    labels: buildDayLabels(keys),
-    datasets: [{
-      label: 'Taxa de erro (%)',
-      data: keys.map(key => {
-        const invocations = invocationsByDay.get(key) || 0
-        const errors = errorsByDay.get(key) || 0
-        return invocations > 0 ? (errors / invocations) * 100 : 0
-      }),
-      borderColor: 'rgb(239, 68, 68)',
-      backgroundColor: 'rgba(239, 68, 68, 0.1)',
-      fill: true,
-      tension: 0.4
-    }]
-  }
-})
-
-const durationChartData = computed(() => {
-  const durationMetric = rawMetricsData.value.find(m => m.Id === 'duration')
-  const byDay = aggregateAverageByDay(durationMetric)
-  if (byDay.size === 0) {
-    return { labels: [], datasets: [] }
-  }
-
-  const keys = Array.from(byDay.keys()).sort()
-
-  return {
-    labels: buildDayLabels(keys),
-    datasets: [{
-      label: 'Duração média (ms)',
-      data: keys.map(key => {
-        const entry = byDay.get(key)
-        if (!entry || entry.count === 0) return 0
-        return entry.sum / entry.count
-      }),
-      backgroundColor: 'rgba(147, 51, 234, 0.8)',
-      borderRadius: 4
-    }]
-  }
-})
-
-const lineChartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false }
-  },
-  scales: {
-    y: {
-      beginAtZero: true,
-      grid: { color: 'rgba(0,0,0,0.05)' }
-    },
-    x: {
-      grid: { display: false }
-    }
-  }
-}
-
-const errorChartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false }
-  },
-  scales: {
-    y: {
-      beginAtZero: true,
-      max: 100,
-      grid: { color: 'rgba(0,0,0,0.05)' }
-    },
-    x: {
-      grid: { display: false }
-    }
-  }
-}
-
-const barChartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false }
-  },
-  scales: {
-    y: {
-      beginAtZero: true,
-      grid: { color: 'rgba(0,0,0,0.05)' }
-    },
-    x: {
-      grid: { display: false }
-    }
-  }
-}
-
-const fetchIntegrations = async () => {
-  try {
-    const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations')
-    integrations.value = data.integrations
-    if (integrations.value.length > 0) {
-      const hasSelected = integrations.value.some(integration => String(integration.id) === String(selectedIntegrationId.value))
-      if (!selectedIntegrationId.value || !hasSelected) {
-        const firstIntegration = integrations.value[0]
-        if (firstIntegration) {
-          selectedIntegrationId.value = String(firstIntegration.id)
-          if (activeTab.value === 'automations') {
-            await loadData()
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Falha ao buscar integrações:', error)
-  }
-}
-
-const loadData = async () => {
-  if (!selectedIntegrationId.value) return
-  isLoading.value = true
-
-  try {
-    await Promise.all([
-      loadMetrics(),
-      loadLogs()
-    ])
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const refreshData = () => {
-  loadData()
-}
-
-const loadMetrics = async () => {
-  try {
-    const days = parseInt(timePeriod.value)
-    const data = await api.get<MetricsResponse>(
-      `/lambda/metrics/${selectedIntegrationId.value}?days=${days}`
-    )
-
-    rawMetricsData.value = data.metrics
-
-    const invocationsMetric = data.metrics.find(m => m.Id === 'invocations')
-    const errorsMetric = data.metrics.find(m => m.Id === 'errors')
-    const durationMetric = data.metrics.find(m => m.Id === 'duration')
-    const throttlesMetric = data.metrics.find(m => m.Id === 'throttles')
-    const concurrentExecutionsMetric = data.metrics.find(m => m.Id === 'concurrentExecutions')
-
-    const totalInvocations = invocationsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
-    const totalErrors = errorsMetric?.Values?.reduce((a, b) => a + b, 0) || 0
-    const avgDuration = durationMetric?.Values?.length
-      ? durationMetric.Values.reduce((sum, value) => sum + value, 0) / durationMetric.Values.length
-      : 0
-    const totalThrottles = throttlesMetric?.Values?.reduce((a, b) => a + b, 0) || 0
-    const maxConcurrentExecutions = concurrentExecutionsMetric?.Values?.length
-      ? Math.max(...concurrentExecutionsMetric.Values)
-      : 0
-
-    metrics.value = {
-      invocations: totalInvocations,
-      errors: totalErrors,
-      duration: avgDuration,
-      errorRate: totalInvocations > 0 ? (totalErrors / totalInvocations) * 100 : 0,
-      throttles: totalThrottles,
-      concurrentExecutions: maxConcurrentExecutions
-    }
-
-    // Cost estimate is calculated by the backend (single source of truth for pricing).
-    costEstimate.value = data.costEstimate
-  } catch (error) {
-    console.error('Falha ao carregar métricas:', error)
-  }
-}
-
-
-const loadLogs = async (append = false) => {
-  try {
-    if (!selectedIntegrationId.value) return
-
-    const days = parseInt(timePeriod.value)
-    const startTime = Date.now() - (days * 24 * 60 * 60 * 1000)
-    const endTime = Date.now()
-
-    if (!append) {
-      // Clear immediately (no loading indicator) so the empty-state message shows right away
-      // while the new page of logs/summary is fetched, instead of leaving stale data on screen.
-      logs.value = []
-      logSummary.value = { total: 0, reports: 0, errors: 0, avgDurationMs: null }
-      nextBefore.value = null
-    }
-
-    const limit = 20
-    const params = [`type=${logFilter.value}`, `startTime=${startTime}`, `endTime=${endTime}`, `limit=${limit}`, `simplify=${simplifyLogs.value ? '1' : '0'}`, `summary=1`, 'summaryScope=page']
-
-    // When appending, request older logs by passing before cursor
-    if (append && nextBefore.value) {
-      params.push(`before=${nextBefore.value}`)
-    }
-
-    const url = `/lambda/logs/${selectedIntegrationId.value}?${params.join('&')}`
-
-    if (append) isLoadingMore.value = true
-
-    const data = await api.get<LogsResponse>(url)
-
-    // Append or replace
-    if (append) {
-      logs.value = mergeLogs(logs.value, data.logs)
-    } else {
-      logs.value = data.logs
-    }
-
-    logSummary.value = data.summary
-    nextBefore.value = data.nextBefore ?? null
-  } catch (error) {
-    console.error('Falha ao carregar logs:', error)
-  } finally {
-    isLoadingMore.value = false
-  }
-}
-
-const loadMoreLogs = async () => {
-  if (!nextBefore.value) return
-  await loadLogs(true)
-}
-
-const toggleSummary = () => {
-  showSummary.value = !showSummary.value
-  if (showSummary.value) {
-    loadLogs()
-  }
-}
-
-// Cost pricing table/calculation now lives on the backend (services/pricing.js) as the single
-// source of truth; the value arrives ready-to-display via GET /lambda/metrics/:id.
-
-const formatNumber = (num: number): string => {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
-  return num.toString()
-}
-
-const formatDuration = (ms: number): string => {
-  if (ms >= 1000) return (ms / 1000).toFixed(2) + 's'
-  return Math.round(ms) + 'ms'
-}
-
-const formatLogTimestamp = (timestamp?: number | null): string => {
-  if (!timestamp) return '-'
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZoneName: 'short'
-  }).format(date)
-}
-
-const getLogType = (message: string): string => {
-  const msg = message.toLowerCase()
-  if (msg.includes('error') || msg.includes('exception') || msg.includes('fail')) return 'ERRO'
-  if (msg.includes('report')) return 'RELATÓRIO'
-  if (msg.includes('start')) return 'INÍCIO'
-  if (msg.includes('end')) return 'FIM'
-  return 'INFO'
-}
-
-const getLogTypeFromEntry = (log: LogEntry): string => {
-  if (log.level === 'error') return 'ERRO'
-  if (log.level === 'warn') return 'ALERTA'
-  if (log.level === 'info') return 'INFO'
-  return getLogType(log.message)
-}
-
-const getDisplayMessage = (log: LogEntry): string => {
-  if (simplifyLogs.value && log.simplifiedMessage) {
-    return log.simplifiedMessage
-  }
-  return log.message
-}
-
-const getDisplayType = (log: LogEntry): string => {
-  if (simplifyLogs.value && log.category) {
-    return log.category
-  }
-  return getLogTypeFromEntry(log)
-}
-
-const getDisplayTypeClass = (log: LogEntry): string => {
-  if (simplifyLogs.value && log.level) {
-    if (log.level === 'error') return 'bg-red-100 text-red-800'
-    if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
-    return 'bg-blue-100 text-blue-800'
-  }
-  return getLogTypeClassFromEntry(log)
-}
-
-const getLogKey = (log: LogEntry): string => {
-  if (log.eventId) return `id:${log.eventId}`
-  return `ts:${log.timestamp}|msg:${log.message}`
-}
-
-const mergeLogs = (currentLogs: LogEntry[], newLogs: LogEntry[]) => {
-  if (!newLogs.length) return currentLogs
-  const existingKeys = new Set(currentLogs.map(getLogKey))
-  const merged = [...currentLogs]
-  for (const log of newLogs) {
-    const key = getLogKey(log)
-    if (existingKeys.has(key)) continue
-    existingKeys.add(key)
-    merged.push(log)
-  }
-  return merged.sort((a, b) => {
-    const timeDiff = (b.timestamp || 0) - (a.timestamp || 0)
-    if (timeDiff !== 0) return timeDiff
-    const ingestDiff = (b.ingestionTime || 0) - (a.ingestionTime || 0)
-    if (ingestDiff !== 0) return ingestDiff
-    return String(b.eventId || '').localeCompare(String(a.eventId || ''))
-  })
-}
-
-const getLogTypeClass = (message: string): string => {
-  const type = getLogType(message)
-  switch (type) {
-    case 'ERRO': return 'bg-red-100 text-red-800'
-    case 'RELATÓRIO': return 'bg-purple-100 text-purple-800'
-    case 'INÍCIO': return 'bg-green-100 text-green-800'
-    case 'FIM': return 'bg-gray-100 text-gray-800'
-    default: return 'bg-blue-100 text-blue-800'
-  }
-}
-
-const getLogTypeClassFromEntry = (log: LogEntry): string => {
-  if (log.level === 'error') return 'bg-red-100 text-red-800'
-  if (log.level === 'warn') return 'bg-amber-100 text-amber-800'
-  if (log.level === 'info') return 'bg-blue-100 text-blue-800'
-  return getLogTypeClass(log.message)
-}
-
-const csvEscape = (value: string): string => {
-  const normalized = value.replace(/"/g, '""')
-  return `"${normalized}"`
-}
-
-const exportLogsCsv = () => {
-  if (logs.value.length === 0) return
-
-  const header = ['Data/Hora', 'Tipo', 'Mensagem', 'Duração (ms)', 'Cobrado (ms)', 'Memória máx. (MB)']
-  const rows = logs.value.map(log => [
-    formatLogTimestamp(log.timestamp),
-    getDisplayType(log),
-    getDisplayMessage(log),
-    log.parsedReport?.durationMs?.toString() ?? '',
-    log.parsedReport?.billedDurationMs?.toString() ?? '',
-    log.parsedReport?.maxMemoryUsedMb?.toString() ?? ''
-  ])
-
-  const csvContent = [header, ...rows]
-    .map(row => row.map(cell => csvEscape(String(cell))).join(','))
-    .join('\r\n')
-
-  // Prepend a UTF-8 BOM so Excel opens accented pt-BR characters correctly.
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  const integrationLabel = selectedIntegration.value?.functionName || selectedIntegrationId.value || 'logs'
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-
-  link.href = url
-  link.download = `logs-${integrationLabel}-${timestamp}.csv`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
-const handleLogout = async () => {
-  await auth.logout()
-  router.push('/login')
-}
-
-const openDocFullscreen = (link: string) => {
-  fullscreenDocLink.value = link
-}
-
-const closeDocFullscreen = () => {
-  fullscreenDocLink.value = null
-}
-
-const openAutomation = (integrationId: number) => {
-  selectedIntegrationId.value = String(integrationId)
-  activeTab.value = 'automations'
-}
-
-watch(activeTab, async (tab) => {
-  if (tab === 'automations' && selectedIntegrationId.value) {
-    await loadData()
-  }
-})
-
-onMounted(async () => {
-  if (!auth.isAuthenticated || !auth.isClient) {
-    router.push('/login')
-    return
-  }
-  await fetchIntegrations()
-})
+const chartData = (id: string, color: string) => { const data = aggregateByDay(rawMetricsData.value.find(metric => metric.Id === id), id === 'duration' ? 'average' : 'sum'); return { labels: data.map(item => item.label), datasets: [{ data: data.map(item => item.value), borderColor: color, backgroundColor: `${color}22`, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 2 }] } }
+const invocationsChartData = computed(() => chartData('invocations', '#2563eb'))
+const errorRateChartData = computed(() => { const calls = aggregateByDay(rawMetricsData.value.find(metric => metric.Id === 'invocations'), 'sum'); const errors = new Map(aggregateByDay(rawMetricsData.value.find(metric => metric.Id === 'errors'), 'sum').map(item => [item.label, item.value])); return { labels: calls.map(item => item.label), datasets: [{ data: calls.map(item => item.value ? ((errors.get(item.label) || 0) / item.value) * 100 : 0), borderColor: '#dc2626', backgroundColor: '#dc262622', fill: true, tension: 0.3, borderWidth: 2, pointRadius: 2 }] } })
+const lineChartOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#e2e8f0' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b' } } } }
+const errorChartOptions = { ...lineChartOptions, scales: { ...lineChartOptions.scales, y: { ...lineChartOptions.scales.y, max: 100 } } }
+
+async function fetchIntegrations() { try { const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations'); integrations.value = data.integrations; if (!selectedIntegrationId.value && data.integrations[0]) selectedIntegrationId.value = String(data.integrations[0].id) } catch (error) { console.error('Falha ao buscar integrações:', error) } }
+async function loadData() { if (!selectedIntegrationId.value) return; isLoading.value = true; try { await Promise.all([loadMetrics(), loadLogs()]) } finally { isLoading.value = false } }
+async function loadMetrics() { try { const data = await api.get<MetricsResponse>(`/lambda/metrics/${selectedIntegrationId.value}?days=${timePeriod.value}`); rawMetricsData.value = data.metrics; const sum = (id: string) => data.metrics.find(item => item.Id === id)?.Values?.reduce((total, value) => total + value, 0) || 0; const durationValues = data.metrics.find(item => item.Id === 'duration')?.Values || []; const invocations = sum('invocations'); const errors = sum('errors'); metrics.value = { invocations, errors, duration: durationValues.length ? durationValues.reduce((total, value) => total + value, 0) / durationValues.length : 0, errorRate: invocations ? errors / invocations * 100 : 0, throttles: sum('throttles'), concurrentExecutions: Math.max(0, ...(data.metrics.find(item => item.Id === 'concurrentExecutions')?.Values || [])) }; costEstimate.value = data.costEstimate } catch (error) { console.error('Falha ao carregar métricas:', error) } }
+async function loadLogs(append = false) { if (!selectedIntegrationId.value) return; if (!append) { logs.value = []; nextBefore.value = null }; try { if (append) isLoadingMore.value = true; const endTime = Date.now(); const startTime = endTime - Number(timePeriod.value) * 86400000; const params = new URLSearchParams({ type: logFilter.value, startTime: String(startTime), endTime: String(endTime), limit: '20', simplify: simplifyLogs.value ? '1' : '0', summary: '1', summaryScope: 'page' }); if (append && nextBefore.value) params.set('before', String(nextBefore.value)); const data = await api.get<LogsResponse>(`/lambda/logs/${selectedIntegrationId.value}?${params}`); logs.value = append ? mergeLogs(logs.value, data.logs) : data.logs; logSummary.value = data.summary; nextBefore.value = data.nextBefore ?? null } catch (error) { console.error('Falha ao carregar logs:', error) } finally { isLoadingMore.value = false } }
+function refreshData() { void loadData() }
+function loadMoreLogs() { void loadLogs(true) }
+function openDashboard(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'dashboard' }
+function focusErrors() { logFilter.value = 'errors'; void loadLogs(); document.getElementById('recent-events')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+function formatNumber(value: number) { return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1, notation: value >= 10000 ? 'compact' : 'standard' }).format(value) }
+function formatDuration(value: number) { return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms` }
+function formatCurrency(value: number, currency: string) { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 4 }).format(value) }
+function formatLogTimestamp(timestamp?: number | null) { return timestamp ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp)) : '—' }
+function getLogType(log: LogEntry) { if (log.level === 'error' || /error|exception|fail/i.test(log.message)) return 'Erro'; if (log.level === 'warn') return 'Alerta'; if (/report/i.test(log.message)) return 'Relatório'; return 'Info' }
+function getDisplayType(log: LogEntry) { return simplifyLogs.value && log.category ? log.category : getLogType(log) }
+function getDisplayMessage(log: LogEntry) { return simplifyLogs.value && log.simplifiedMessage ? log.simplifiedMessage : log.message }
+function getLogDotClass(log: LogEntry) { return getLogType(log) === 'Erro' ? 'bg-red-600' : getLogType(log) === 'Alerta' ? 'bg-amber-500' : 'bg-slate-400' }
+function getDisplayTextClass(log: LogEntry) { return getLogType(log) === 'Erro' ? 'text-red-700' : getLogType(log) === 'Alerta' ? 'text-amber-700' : 'text-slate-500' }
+function getLogKey(log: LogEntry) { return log.eventId ? `id:${log.eventId}` : `${log.timestamp}-${log.message}` }
+function mergeLogs(current: LogEntry[], incoming: LogEntry[]) { const values = new Map(current.map(log => [getLogKey(log), log])); incoming.forEach(log => values.set(getLogKey(log), log)); return [...values.values()].sort((a, b) => b.timestamp - a.timestamp) }
+function exportLogsCsv() { if (!logs.value.length) return; const rows = [['Data/Hora', 'Tipo', 'Mensagem', 'Duração (ms)'], ...logs.value.map(log => [formatLogTimestamp(log.timestamp), getDisplayType(log), getDisplayMessage(log), String(log.parsedReport?.durationMs || '')])]; const csv = '\uFEFF' + rows.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(',')).join('\r\n'); const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `logs-${selectedIntegration.value?.functionName || 'lambda'}.csv`; link.click(); URL.revokeObjectURL(url) }
+async function handleLogout() { await auth.logout(); await router.push('/login') }
+onMounted(async () => { if (!auth.isAuthenticated || !auth.isClient) { await router.push('/login'); return }; await fetchIntegrations() })
 </script>
