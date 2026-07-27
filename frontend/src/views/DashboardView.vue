@@ -85,7 +85,7 @@
             <div class="bg-white p-4 sm:p-5"><p class="text-sm text-slate-500">Limitações</p><p class="mt-2 text-2xl font-semibold tracking-tight" :class="metrics.throttles > 0 ? 'text-amber-700' : ''">{{ formatNumber(metrics.throttles) }}</p><p class="mt-1 text-xs text-slate-500">throttles identificados</p></div>
           </section>
 
-          <section class="grid gap-6 lg:grid-cols-2">
+          <section class="grid gap-6 xl:grid-cols-3">
             <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
               <div class="mb-4 flex items-baseline justify-between gap-3"><h3 class="font-semibold">Volume de execuções</h3><span class="text-xs text-slate-500">{{ periodLabel }}</span></div>
               <div class="h-64"><Line v-if="invocationsChartData.labels.length" :data="invocationsChartData" :options="lineChartOptions" /><EmptyChart v-else /></div>
@@ -94,19 +94,25 @@
               <div class="mb-4 flex items-baseline justify-between gap-3"><h3 class="font-semibold">Evolução de erros</h3><span class="text-xs text-slate-500">quanto menor, melhor</span></div>
               <div class="h-64"><Line v-if="errorRateChartData.labels.length" :data="errorRateChartData" :options="errorChartOptions" /><EmptyChart v-else /></div>
             </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
+              <div class="mb-4 flex items-baseline justify-between gap-3"><h3 class="font-semibold">Duração média</h3><span class="text-xs text-slate-500">por execução</span></div>
+              <div class="h-64"><Bar v-if="durationChartData.labels.length" :data="durationChartData" :options="durationChartOptions" /><EmptyChart v-else /></div>
+            </div>
           </section>
 
           <section class="grid gap-6 lg:grid-cols-3">
             <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5 lg:col-span-2">
-              <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 class="font-semibold">Eventos recentes</h3><p class="mt-1 text-sm text-slate-500">Priorize erros para entender o que exige atenção.</p></div><div class="flex gap-2"><select v-model="logFilter" @change="loadLogs()" class="min-h-10 rounded-md border border-slate-300 bg-white px-2 text-sm"><option value="relevant">Relevantes</option><option value="errors">Erros</option><option value="all">Todos</option></select><button @click="exportLogsCsv" :disabled="!logs.length" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Exportar</button></div></div>
+              <div class="mb-4 flex flex-col gap-3"><div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"><div><h3 class="font-semibold">Eventos recentes</h3><p class="mt-1 text-sm text-slate-500">Logs do CloudWatch para investigação. Os filtros são exatos.</p></div><p v-if="lastLogsUpdatedAt" class="text-xs text-slate-500">Atualizado às {{ lastLogsUpdatedAt }}</p></div><div class="flex flex-col gap-2 sm:flex-row"><input v-model="logSearch" @keyup.enter="refreshLogs" type="search" placeholder="Buscar texto nos logs" class="min-h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-sm focus:border-slate-900 focus:outline-none" /><select v-model="logFilter" @change="refreshLogs" :disabled="isLogsLoading" class="min-h-10 rounded-md border border-slate-300 bg-white px-2 text-sm disabled:opacity-50"><option value="relevant">Relevantes</option><option value="error">Somente erros</option><option value="report">Somente relatórios</option><option value="all">Todos</option></select><button @click="refreshLogs" :disabled="isLogsLoading" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">{{ isLogsLoading ? 'Filtrando…' : 'Filtrar' }}</button><button @click="exportLogsCsv" :disabled="!logs.length || isLogsLoading" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Exportar</button></div></div>
               <div id="recent-events" class="divide-y divide-slate-100 border-y border-slate-100">
-                <div v-if="!logs.length" class="py-10 text-center text-sm text-slate-500">Nenhum evento encontrado neste período.</div>
+                <div v-if="isLogsLoading" class="space-y-3 py-5" aria-live="polite"><div v-for="index in 4" :key="index" class="h-12 animate-pulse rounded bg-slate-100"></div><p class="text-center text-sm text-slate-500">Consultando eventos no CloudWatch…</p></div>
+                <div v-else-if="logsError" class="py-10 text-center"><p class="text-sm font-medium text-red-700">Não foi possível carregar os eventos.</p><p class="mt-1 text-sm text-slate-500">{{ logsError }}</p><button @click="refreshLogs" class="mt-4 min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium">Tentar novamente</button></div>
+                <div v-else-if="!logs.length" class="py-10 text-center text-sm text-slate-500">Nenhum evento corresponde a este filtro e período.</div>
                 <article v-for="log in logs" :key="getLogKey(log)" class="flex gap-3 py-3">
                   <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full" :class="getLogDotClass(log)"></span>
                   <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="text-xs font-semibold uppercase tracking-wide" :class="getDisplayTextClass(log)">{{ getDisplayType(log) }}</span><span class="text-xs text-slate-400">{{ formatLogTimestamp(log.timestamp) }}</span></div><p class="mt-1 break-words font-mono text-sm text-slate-700">{{ getDisplayMessage(log) }}</p><p v-if="log.parsedReport?.durationMs" class="mt-1 text-xs text-slate-500">Duração: {{ formatDuration(log.parsedReport.durationMs) }}<span v-if="log.parsedReport.maxMemoryUsedMb"> · Memória máxima: {{ log.parsedReport.maxMemoryUsedMb }} MB</span></p></div>
                 </article>
               </div>
-              <div class="mt-4 flex items-center justify-between gap-3"><label class="inline-flex items-center gap-2 text-sm text-slate-600"><input v-model="simplifyLogs" type="checkbox" class="rounded border-slate-300" @change="loadLogs()" /> Resumir mensagens técnicas</label><button v-if="canLoadMore" @click="loadMoreLogs" :disabled="isLoadingMore" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium disabled:opacity-50">{{ isLoadingMore ? 'Carregando…' : 'Carregar mais' }}</button></div>
+              <div class="mt-4 flex items-center justify-between gap-3"><label class="inline-flex items-center gap-2 text-sm text-slate-600"><input v-model="simplifyLogs" type="checkbox" class="rounded border-slate-300" @change="refreshLogs" :disabled="isLogsLoading" /> Resumir mensagens técnicas</label><button v-if="canLoadMore" @click="loadMoreLogs" :disabled="isLoadingMore || isLogsLoading" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium disabled:opacity-50">{{ isLoadingMore ? 'Carregando…' : 'Carregar mais' }}</button></div>
             </div>
             <aside class="space-y-4">
               <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-5"><h3 class="font-semibold">Diagnóstico do período</h3><dl class="mt-4 space-y-3 text-sm"><div class="flex justify-between gap-3"><dt class="text-slate-500">Eventos analisados</dt><dd class="font-medium">{{ formatNumber(logSummary.total) }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">Erros nos logs</dt><dd class="font-medium" :class="logSummary.errors ? 'text-red-700' : ''">{{ formatNumber(logSummary.errors) }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">Duração média registrada</dt><dd class="font-medium">{{ logSummary.avgDurationMs ? formatDuration(logSummary.avgDurationMs) : '—' }}</dd></div><div class="flex justify-between gap-3"><dt class="text-slate-500">Pico simultâneo</dt><dd class="font-medium">{{ formatNumber(metrics.concurrentExecutions) }}</dd></div></dl></div>
@@ -152,9 +158,12 @@ const integrations = ref<Integration[]>([])
 const selectedIntegrationId = ref('')
 const timePeriod = ref(localStorage.getItem('lambda-pulse-period') || '7')
 const logFilter = ref('relevant')
+const logSearch = ref('')
 const simplifyLogs = ref(false)
 const isLoading = ref(false)
+const isLogsLoading = ref(false)
 const isLoadingMore = ref(false)
+const logsError = ref('')
 const fullscreenDocLink = ref<string | null>(null)
 const metrics = ref<Metrics>({ invocations: 0, errors: 0, duration: 0, errorRate: 0, throttles: 0, concurrentExecutions: 0 })
 const logs = ref<LogEntry[]>([])
@@ -162,6 +171,8 @@ const logSummary = ref<LogSummary>({ total: 0, reports: 0, errors: 0, avgDuratio
 const rawMetricsData = ref<MetricDataResult[]>([])
 const costEstimate = ref<CostEstimate | null>(null)
 const nextBefore = ref<number | null>(null)
+const lastLogsUpdatedAt = ref('')
+let activeLogsRequest = 0
 
 const selectedIntegration = computed(() => integrations.value.find(item => String(item.id) === selectedIntegrationId.value))
 const showCostEstimate = computed(() => selectedIntegration.value?.showCostEstimate !== false)
@@ -176,22 +187,56 @@ const healthTone = computed(() => metrics.value.errors > 0 ? { container: 'borde
 watch(timePeriod, value => localStorage.setItem('lambda-pulse-period', value))
 watch(activeTab, async tab => { if ((tab === 'dashboard' || tab === 'docs') && selectedIntegrationId.value && tab === 'dashboard') await loadData() })
 
-const aggregateByDay = (metric: MetricDataResult | undefined, mode: 'sum' | 'average') => {
-  const values = new Map<string, { sum: number; count: number }>()
-  metric?.Timestamps?.forEach((timestamp, index) => { const date = new Date(timestamp); const key = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`; const current = values.get(key) || { sum: 0, count: 0 }; current.sum += metric.Values?.[index] || 0; current.count += 1; values.set(key, current) })
-  return [...values.entries()].map(([label, item]) => ({ label, value: mode === 'sum' ? item.sum : item.sum / item.count }))
+type MetricBucket = { timestamp: number; sum: number; count: number }
+
+const chartBucketTimestamp = (timestamp: string) => {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return 0
+  return timePeriod.value === '1'
+    ? new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()).getTime()
+    : new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
-const chartData = (id: string, color: string) => { const data = aggregateByDay(rawMetricsData.value.find(metric => metric.Id === id), id === 'duration' ? 'average' : 'sum'); return { labels: data.map(item => item.label), datasets: [{ data: data.map(item => item.value), borderColor: color, backgroundColor: `${color}22`, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 2 }] } }
-const invocationsChartData = computed(() => chartData('invocations', '#2563eb'))
-const errorRateChartData = computed(() => { const calls = aggregateByDay(rawMetricsData.value.find(metric => metric.Id === 'invocations'), 'sum'); const errors = new Map(aggregateByDay(rawMetricsData.value.find(metric => metric.Id === 'errors'), 'sum').map(item => [item.label, item.value])); return { labels: calls.map(item => item.label), datasets: [{ data: calls.map(item => item.value ? ((errors.get(item.label) || 0) / item.value) * 100 : 0), borderColor: '#dc2626', backgroundColor: '#dc262622', fill: true, tension: 0.3, borderWidth: 2, pointRadius: 2 }] } })
-const lineChartOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#e2e8f0' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b' } } } }
-const errorChartOptions = { ...lineChartOptions, scales: { ...lineChartOptions.scales, y: { ...lineChartOptions.scales.y, max: 100 } } }
+
+const metricBuckets = (metricId: string) => {
+  const metric = rawMetricsData.value.find(item => item.Id === metricId)
+  const buckets = new Map<number, MetricBucket>()
+  metric?.Timestamps?.forEach((timestamp, index) => {
+    const bucketTimestamp = chartBucketTimestamp(timestamp)
+    if (!bucketTimestamp) return
+    const bucket = buckets.get(bucketTimestamp) || { timestamp: bucketTimestamp, sum: 0, count: 0 }
+    bucket.sum += metric.Values?.[index] || 0
+    bucket.count += 1
+    buckets.set(bucketTimestamp, bucket)
+  })
+  return [...buckets.values()].sort((left, right) => left.timestamp - right.timestamp)
+}
+
+const formatChartLabel = (timestamp: number) => new Intl.DateTimeFormat('pt-BR', timePeriod.value === '1'
+  ? { hour: '2-digit', minute: '2-digit' }
+  : { day: '2-digit', month: '2-digit' }).format(new Date(timestamp))
+
+const lineDataset = (values: number[], color: string) => ({ data: values, borderColor: color, backgroundColor: `${color}18`, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5 })
+const invocationsChartData = computed(() => { const buckets = metricBuckets('invocations'); return { labels: buckets.map(item => formatChartLabel(item.timestamp)), datasets: [lineDataset(buckets.map(item => item.sum), '#2563eb')] } })
+const errorRateChartData = computed(() => { const calls = metricBuckets('invocations'); const errors = new Map(metricBuckets('errors').map(item => [item.timestamp, item.sum])); return { labels: calls.map(item => formatChartLabel(item.timestamp)), datasets: [lineDataset(calls.map(item => item.sum ? ((errors.get(item.timestamp) || 0) / item.sum) * 100 : 0), '#dc2626')] } })
+const durationChartData = computed(() => { const duration = new Map(metricBuckets('durationSum').map(item => [item.timestamp, item.sum])); const samples = metricBuckets('durationSampleCount'); return { labels: samples.map(item => formatChartLabel(item.timestamp)), datasets: [{ data: samples.map(item => item.sum ? (duration.get(item.timestamp) || 0) / item.sum : 0), backgroundColor: '#7c3aed', borderRadius: 4, maxBarThickness: 28 }] } })
+const commonChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index' as const, intersect: false },
+  onHover: (_event: unknown, elements: unknown[], chart: { canvas: { style: { cursor: string } } }) => { chart.canvas.style.cursor = elements.length ? 'pointer' : 'default' },
+  plugins: { legend: { display: false }, tooltip: { enabled: true, displayColors: false, padding: 10, backgroundColor: '#0f172a', titleColor: '#ffffff', bodyColor: '#ffffff' } },
+  scales: { y: { beginAtZero: true, grid: { color: '#e2e8f0' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0, autoSkip: true } } }
+}
+const lineChartOptions = { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: any) => ` ${formatNumber(context.parsed.y || 0)} invocações` } } } }
+const errorChartOptions = { ...commonChartOptions, scales: { ...commonChartOptions.scales, y: { ...commonChartOptions.scales.y, max: 100, ticks: { color: '#64748b', callback: (value: string | number) => `${value}%` } } }, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: any) => ` ${(context.parsed.y || 0).toFixed(2)}% de erros` } } } }
+const durationChartOptions = { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: any) => ` ${formatDuration(context.parsed.y || 0)}` } } } }
 
 async function fetchIntegrations() { try { const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations'); integrations.value = data.integrations; if (!selectedIntegrationId.value && data.integrations[0]) selectedIntegrationId.value = String(data.integrations[0].id) } catch (error) { console.error('Falha ao buscar integrações:', error) } }
 async function loadData() { if (!selectedIntegrationId.value) return; isLoading.value = true; try { await Promise.all([loadMetrics(), loadLogs()]) } finally { isLoading.value = false } }
-async function loadMetrics() { try { const data = await api.get<MetricsResponse>(`/lambda/metrics/${selectedIntegrationId.value}?days=${timePeriod.value}`); rawMetricsData.value = data.metrics; const sum = (id: string) => data.metrics.find(item => item.Id === id)?.Values?.reduce((total, value) => total + value, 0) || 0; const durationValues = data.metrics.find(item => item.Id === 'duration')?.Values || []; const invocations = sum('invocations'); const errors = sum('errors'); metrics.value = { invocations, errors, duration: durationValues.length ? durationValues.reduce((total, value) => total + value, 0) / durationValues.length : 0, errorRate: invocations ? errors / invocations * 100 : 0, throttles: sum('throttles'), concurrentExecutions: Math.max(0, ...(data.metrics.find(item => item.Id === 'concurrentExecutions')?.Values || [])) }; costEstimate.value = data.costEstimate } catch (error) { console.error('Falha ao carregar métricas:', error) } }
-async function loadLogs(append = false) { if (!selectedIntegrationId.value) return; if (!append) { logs.value = []; nextBefore.value = null }; try { if (append) isLoadingMore.value = true; const endTime = Date.now(); const startTime = endTime - Number(timePeriod.value) * 86400000; const params = new URLSearchParams({ type: logFilter.value, startTime: String(startTime), endTime: String(endTime), limit: '20', simplify: simplifyLogs.value ? '1' : '0', summary: '1', summaryScope: 'page' }); if (append && nextBefore.value) params.set('before', String(nextBefore.value)); const data = await api.get<LogsResponse>(`/lambda/logs/${selectedIntegrationId.value}?${params}`); logs.value = append ? mergeLogs(logs.value, data.logs) : data.logs; logSummary.value = data.summary; nextBefore.value = data.nextBefore ?? null } catch (error) { console.error('Falha ao carregar logs:', error) } finally { isLoadingMore.value = false } }
+async function loadMetrics() { try { const period = timePeriod.value === '1' ? 300 : 3600; const data = await api.get<MetricsResponse>(`/lambda/metrics/${selectedIntegrationId.value}?days=${timePeriod.value}&period=${period}`); rawMetricsData.value = data.metrics; const sum = (id: string) => data.metrics.find(item => item.Id === id)?.Values?.reduce((total, value) => total + value, 0) || 0; const invocations = sum('invocations'); const errors = sum('errors'); const durationSamples = sum('durationSampleCount'); metrics.value = { invocations, errors, duration: durationSamples ? sum('durationSum') / durationSamples : 0, errorRate: invocations ? errors / invocations * 100 : 0, throttles: sum('throttles'), concurrentExecutions: Math.max(0, ...(data.metrics.find(item => item.Id === 'concurrentExecutions')?.Values || [])) }; costEstimate.value = data.costEstimate } catch (error) { console.error('Falha ao carregar métricas:', error) } }
+async function loadLogs(append = false) { if (!selectedIntegrationId.value) return; const requestId = ++activeLogsRequest; if (!append) { isLogsLoading.value = true; logsError.value = ''; logs.value = []; nextBefore.value = null } else { isLoadingMore.value = true }; try { const endTime = Date.now(); const startTime = endTime - Number(timePeriod.value) * 86400000; const params = new URLSearchParams({ type: logFilter.value, startTime: String(startTime), endTime: String(endTime), limit: '20', simplify: simplifyLogs.value ? '1' : '0', summary: '1', summaryScope: 'page' }); if (logSearch.value.trim()) params.set('search', logSearch.value.trim()); if (append && nextBefore.value) params.set('before', String(nextBefore.value)); const data = await api.get<LogsResponse>(`/lambda/logs/${selectedIntegrationId.value}?${params}`); if (requestId !== activeLogsRequest) return; logs.value = append ? mergeLogs(logs.value, data.logs) : data.logs; logSummary.value = data.summary; nextBefore.value = data.nextBefore ?? null; lastLogsUpdatedAt.value = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()) } catch (error) { if (requestId === activeLogsRequest) { if (!append) logsError.value = error instanceof Error ? error.message : 'Erro inesperado ao consultar o CloudWatch.'; console.error('Falha ao carregar logs:', error) } } finally { if (requestId === activeLogsRequest) { isLogsLoading.value = false; isLoadingMore.value = false } } }
 function refreshData() { void loadData() }
+function refreshLogs() { void loadLogs() }
 function loadMoreLogs() { void loadLogs(true) }
 function openDashboard(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'dashboard' }
 function focusErrors() { logFilter.value = 'errors'; void loadLogs(); document.getElementById('recent-events')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }

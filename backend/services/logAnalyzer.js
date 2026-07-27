@@ -290,7 +290,18 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   const effectiveEndTime = Number.isFinite(before) && before > 0 ? Math.min(endTime, before - 1) : endTime;
 
   const summaryScope = (query.summaryScope || (summaryFlag ? 'full' : 'page')).toString().toLowerCase();
-  const type = (query.type || 'relevant').toString().toLowerCase();
+  const requestedType = (query.type || 'relevant').toString().toLowerCase();
+  // Keep the endpoint forgiving for existing clients, but never let an unknown
+  // value silently behave like the "relevant" filter. That previously made a
+  // request for `errors` include REPORT events.
+  const typeAliases = { errors: 'error', reports: 'report' };
+  const type = typeAliases[requestedType] || requestedType;
+  const validTypes = new Set(['all', 'relevant', 'error', 'report']);
+  if (!validTypes.has(type)) {
+    const error = new Error('Filtro de logs inválido. Use all, relevant, error ou report.');
+    error.statusCode = 400;
+    throw error;
+  }
 
   // AWS CloudWatch FilterLogEvents returns events in chronological order (oldest first)
   // We sort locally to show newest first in the UI.
@@ -374,7 +385,12 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
     };
   }
 
-  const insightsLimit = Math.min(Math.max(pageLimit * 5, pageLimit), 1000);
+  // Semantic filters (especially `error`) can be sparse. Inspect a wider
+  // CloudWatch window before declaring it empty; otherwise a busy function
+  // could show no errors simply because its latest 100 events were informational.
+  const insightsLimit = type === 'error'
+    ? 1000
+    : Math.min(Math.max(pageLimit * 5, pageLimit), 1000);
   const queryParts = ['fields @timestamp, @message, @ingestionTime, @logStream, @ptr'];
   if (search) {
     queryParts.push(`| filter @message like /${escapeRegex(search)}/`);
@@ -551,8 +567,11 @@ const buildLogsPayload = async ({ integration, query, simplifyFlag, summaryFlag 
   }
 
   const hasMore = relevantLogs.length > pageLimit || eventsToProcess.length >= insightsLimit;
-  const nextBefore = hasMore && pagedLogs.length
-    ? Math.max((pagedLogs[pagedLogs.length - 1].timestamp || effectiveEndTime) - 1, startTime)
+  const oldestScannedTimestamp = eventsToProcess[eventsToProcess.length - 1]?.timestamp;
+  // Keep pagination available even when this batch contains no matching
+  // semantic events. The next batch may still contain the requested errors.
+  const nextBefore = hasMore
+    ? Math.max(((pagedLogs[pagedLogs.length - 1]?.timestamp || oldestScannedTimestamp || effectiveEndTime) - 1), startTime)
     : null;
 
   return {

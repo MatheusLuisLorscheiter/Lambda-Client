@@ -134,15 +134,20 @@ const handleWidgetReady = () => {
   setUserDetails()
 }
 
-// Function to show/hide widget
+// The SDK renders these elements directly in <body>. Do not use a broad class
+// selector here: it can select the button and overwrite its required
+// `display: flex` with `block`, which offsets the WhatsApp icon in Tailwind apps.
 const showWidget = () => {
-  const holder = document.querySelector('.whatsapp-widget-holder, [class*="whatsapp-widget"]') as HTMLElement
-  if (holder) holder.style.display = 'block'
+  const button = document.getElementById('whatsapp-widget-button')
+  if (button) button.style.display = 'flex'
 }
 
 const hideWidget = () => {
-  const holder = document.querySelector('.whatsapp-widget-holder, [class*="whatsapp-widget"]') as HTMLElement
-  if (holder) holder.style.display = 'none'
+  const button = document.getElementById('whatsapp-widget-button')
+  const chat = document.getElementById('whatsapp-widget-chat')
+
+  if (button) button.style.display = 'none'
+  if (chat) chat.style.display = 'none'
 }
 
 // Watch for changes in shouldRender to load/hide widget

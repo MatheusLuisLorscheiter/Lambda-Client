@@ -61,8 +61,15 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
   try {
     await connectRedis();
 
-    const period = Number(req.query.period) || 3600;
-    const days = Number(req.query.days) || 7;
+    const requestedPeriod = Number(req.query.period);
+    const requestedDays = Number(req.query.days);
+    const days = [1, 7, 14, 30].includes(requestedDays) ? requestedDays : 7;
+    // Lambda publishes standard metrics in one-minute intervals. The allowed
+    // periods preserve that granularity for short windows and prevent needless
+    // CloudWatch datapoints for longer periods.
+    const period = [60, 300, 900, 3600, 21600].includes(requestedPeriod)
+      ? requestedPeriod
+      : (days === 1 ? 300 : 3600);
     const cacheKey = `metrics:${integrationId}:${period}:${days}`;
     const cached = await redisClient.get(cacheKey);
     if (cached) {
@@ -101,7 +108,7 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
           }
         },
         {
-          Id: 'duration',
+          Id: 'durationSum',
           MetricStat: {
             Metric: {
               Namespace: 'AWS/Lambda',
@@ -109,7 +116,19 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
               Dimensions: [{ Name: 'FunctionName', Value: integration.function_name }]
             },
             Period: period,
-            Stat: 'Average'
+            Stat: 'Sum'
+          }
+        },
+        {
+          Id: 'durationSampleCount',
+          MetricStat: {
+            Metric: {
+              Namespace: 'AWS/Lambda',
+              MetricName: 'Duration',
+              Dimensions: [{ Name: 'FunctionName', Value: integration.function_name }]
+            },
+            Period: period,
+            Stat: 'SampleCount'
           }
         },
         {
@@ -138,19 +157,21 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
         }
       ],
       StartTime: new Date(Date.now() - (days * 24 * 60 * 60 * 1000)),
-      EndTime: new Date()
+      EndTime: new Date(),
+      ScanBy: 'TimestampAscending'
     });
 
     const response = await cloudwatchClient.send(invocationsCommand);
     const metricResults = response.MetricDataResults || [];
 
     const invocationsMetric = metricResults.find(m => m.Id === 'invocations');
-    const durationMetric = metricResults.find(m => m.Id === 'duration');
+    const durationSumMetric = metricResults.find(m => m.Id === 'durationSum');
+    const durationSampleCountMetric = metricResults.find(m => m.Id === 'durationSampleCount');
 
     const totalInvocations = (invocationsMetric?.Values || []).reduce((sum, value) => sum + value, 0);
-    const avgDuration = durationMetric?.Values?.length
-      ? durationMetric.Values.reduce((sum, value) => sum + value, 0) / durationMetric.Values.length
-      : 0;
+    const totalDuration = (durationSumMetric?.Values || []).reduce((sum, value) => sum + value, 0);
+    const durationSamples = (durationSampleCountMetric?.Values || []).reduce((sum, value) => sum + value, 0);
+    const avgDuration = durationSamples > 0 ? totalDuration / durationSamples : 0;
 
     const costEstimate = integration.show_cost_estimate
       ? calculateCostEstimate({

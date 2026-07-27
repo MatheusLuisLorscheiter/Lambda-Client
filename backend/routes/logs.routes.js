@@ -42,7 +42,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     });
     res.json(payload);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
