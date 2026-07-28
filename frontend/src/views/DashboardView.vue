@@ -129,7 +129,7 @@
         <template v-else>
           <section>
             <div class="mb-4"><h3 class="font-semibold text-slate-950">Mapeamento de dados</h3><p class="mt-1 text-sm text-slate-500">Consulte o de-para publicado, regras de transformação, obrigatoriedade e valores padrão.</p></div>
-            <MappingWorkspace :integration-id="Number(selectedIntegrationId)" />
+            <MappingWorkspace :integration-id="Number(selectedIntegrationId)" :initial-mapping-set-id="selectedMappingSetId" />
           </section>
           <section class="border-t border-slate-200 pt-6">
             <div class="mb-4"><h3 class="font-semibold text-slate-950">Materiais de apoio</h3><p class="mt-1 text-sm text-slate-500">Guias, especificações e documentos vinculados à automação.</p></div>
@@ -163,6 +163,7 @@ const EmptyChart = defineComponent({ setup: () => () => h('div', { class: 'flex 
 const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
+const selectedMappingSetId = ref<number | null>(null)
 const activeTab = ref<'overview' | 'queue' | 'dashboard' | 'docs'>('overview')
 const portalTabs = [{ value: 'overview' as const, label: 'Visão geral' }, { value: 'queue' as const, label: 'Fila e entregas' }, { value: 'dashboard' as const, label: 'Dashboard' }, { value: 'docs' as const, label: 'Documentações' }]
 const integrations = ref<Integration[]>([])
@@ -252,7 +253,7 @@ function refreshData() { void loadData() }
 function refreshLogs() { void loadLogs() }
 function loadMoreLogs() { void loadLogs(true) }
 function openDashboard(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'dashboard' }
-function openMapping(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'docs' }
+function openMapping(id: number, mappingSetId?: number) { selectedIntegrationId.value = String(id); selectedMappingSetId.value = mappingSetId || null; activeTab.value = 'docs' }
 function focusErrors() { logFilter.value = 'errors'; void loadLogs(); document.getElementById('recent-events')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 function formatNumber(value: number) { return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1, notation: value >= 10000 ? 'compact' : 'standard' }).format(value) }
 function formatDuration(value: number) { return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms` }

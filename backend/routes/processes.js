@@ -158,6 +158,43 @@ const selectFields = `
     (
       SELECT json_agg(
         json_build_object(
+          'id', mapping_sets.id,
+          'integrationId', mapping_sets.integration_id,
+          'name', mapping_sets.name,
+          'sourceSystem', mapping_sets.source_system,
+          'targetSystem', mapping_sets.target_system,
+          'version', mapping_sets.version,
+          'revision', mapping_sets.revision,
+          'status', mapping_sets.status,
+          'pendingCount', (
+            SELECT COUNT(*)::int
+              FROM integration_mapping_entries mapping_entries
+             WHERE mapping_entries.mapping_set_id = mapping_sets.id
+               AND mapping_entries.mapping_status IN ('pending', 'attention')
+          ),
+          'hasUnreviewedClientChanges', (
+            mapping_sets.last_client_edited_at IS NOT NULL
+            AND (
+              mapping_sets.last_reviewed_at IS NULL
+              OR mapping_sets.last_client_edited_at > mapping_sets.last_reviewed_at
+            )
+          ),
+          'updatedAt', mapping_sets.updated_at
+        )
+        ORDER BY
+          CASE mapping_sets.status WHEN 'published' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END,
+          mapping_sets.updated_at DESC
+      )
+      FROM integration_mapping_sets mapping_sets
+      WHERE mapping_sets.process_id = process_items.id
+        AND mapping_sets.company_id = process_items.company_id
+    ),
+    '[]'::json
+  ) AS mappings,
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
           'id', ordered_updates.id,
           'parentId', ordered_updates.parent_id,
           'kind', ordered_updates.kind,
@@ -245,6 +282,7 @@ const sanitizeProcessForUser = (item, user) => {
   if (!item) return item;
   if (user?.role === 'client') {
     item.updates = (item.updates || []).filter(update => update.visibility === 'client');
+    item.mappings = (item.mappings || []).filter(mapping => mapping.status === 'published');
     delete item.customFields;
   }
   return item;

@@ -49,7 +49,10 @@
             <div class="flex flex-wrap items-center gap-2">
               <h3 class="text-lg font-semibold tracking-tight text-slate-950">{{ selectedSet.name }}</h3>
               <span :class="setStatusClass(selectedSet.status)" class="rounded-full px-2 py-0.5 text-xs font-medium">{{ setStatusLabel(selectedSet.status) }}</span>
-              <span class="text-xs text-slate-400">v{{ selectedSet.version }}</span>
+              <span class="text-xs text-slate-400">versão {{ selectedSet.version }} · revisão {{ selectedSet.revision }}</span>
+              <span v-if="selectedSet.hasUnreviewedClientChanges" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                Alterações aguardando revisão
+              </span>
             </div>
             <p class="mt-1 text-sm text-slate-500">
               <span class="font-medium text-slate-700">{{ selectedSet.sourceSystem }}</span>
@@ -96,7 +99,9 @@
           </div>
           <div class="bg-white px-4 py-3">
             <dt class="text-xs text-slate-500">{{ selectedSet.clientEditMode === 'none' ? 'Última alteração' : 'Colaboração do cliente' }}</dt>
-            <dd class="mt-1 text-sm font-medium text-slate-800">{{ selectedSet.clientEditMode === 'none' ? formatDate(selectedSet.closedAt || selectedSet.updatedAt) : clientEditModeLabel(selectedSet.clientEditMode) }}</dd>
+            <dd class="mt-1 text-sm font-medium text-slate-800">
+              {{ selectedSet.hasUnreviewedClientChanges ? 'Revisão pendente' : selectedSet.clientEditMode === 'none' ? formatDate(selectedSet.closedAt || selectedSet.updatedAt) : clientEditModeLabel(selectedSet.clientEditMode) }}
+            </dd>
           </div>
         </dl>
       </header>
@@ -115,6 +120,13 @@
       </nav>
 
       <section v-if="activeTab === 'document'" class="pt-5">
+        <div v-if="!auth.isAdmin && clientNextAction" class="mb-4 flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white">1</span>
+          <div>
+            <p class="text-sm font-semibold text-slate-900">{{ clientNextAction.title }}</p>
+            <p class="mt-0.5 text-xs leading-5 text-slate-600">{{ clientNextAction.detail }}</p>
+          </div>
+        </div>
         <div v-if="selectedSet.clientInstructions && !auth.isAdmin" class="mb-4 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-900">
           <span class="font-medium">Orientação da equipe:</span> {{ selectedSet.clientInstructions }}
         </div>
@@ -135,6 +147,22 @@
       </section>
 
       <section v-else-if="activeTab === 'fields'" class="pt-5">
+        <div v-if="selectedEntryIds.length" class="mb-4 flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-sm font-medium text-slate-800">{{ selectedEntryIds.length }} vínculo{{ selectedEntryIds.length === 1 ? '' : 's' }} selecionado{{ selectedEntryIds.length === 1 ? '' : 's' }}</p>
+          <div class="flex flex-wrap gap-2">
+            <select v-model="bulkStatus" class="min-h-9 rounded-md border border-slate-300 bg-white px-3 text-xs">
+              <option value="">Alterar situação…</option>
+              <option value="mapped">Mapeado</option>
+              <option value="pending">Pendente</option>
+              <option value="attention">Requer atenção</option>
+              <option value="ignored">Desconsiderado</option>
+            </select>
+            <button :disabled="!bulkStatus || saving" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-40" @click="applyBulkStatus">
+              Aplicar
+            </button>
+            <button class="rounded-md px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white" @click="selectedEntryIds = []">Limpar seleção</button>
+          </div>
+        </div>
         <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row">
             <label class="min-w-0 flex-1">
@@ -161,6 +189,15 @@
           <table class="w-full min-w-[980px] text-left">
             <thead class="border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
               <tr>
+                <th v-if="auth.isAdmin && selectedSet.status === 'draft'" class="w-10 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    :checked="allVisibleEntriesSelected"
+                    :aria-label="allVisibleEntriesSelected ? 'Desmarcar vínculos visíveis' : 'Selecionar vínculos visíveis'"
+                    @change="toggleVisibleEntries"
+                  >
+                </th>
                 <th class="px-4 py-3">Origem</th>
                 <th class="px-4 py-3">Destino</th>
                 <th class="px-4 py-3">Regra</th>
@@ -170,7 +207,10 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 text-sm">
-              <tr v-for="entry in filteredEntries" :key="entry.id" class="align-top hover:bg-slate-50/70">
+              <tr v-for="entry in paginatedEntries" :key="entry.id" class="align-top hover:bg-slate-50/70">
+                <td v-if="auth.isAdmin && selectedSet.status === 'draft'" class="px-3 py-3">
+                  <input v-model="selectedEntryIds" type="checkbox" :value="entry.id" class="h-4 w-4 rounded border-slate-300" :aria-label="`Selecionar ${entry.sourcePath}`">
+                </td>
                 <td class="px-4 py-3">
                   <p v-if="entry.section" class="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">{{ entry.section }}</p>
                   <code class="font-mono text-xs text-slate-900">{{ entry.sourcePath }}</code>
@@ -197,7 +237,7 @@
                 </td>
               </tr>
               <tr v-if="!filteredEntries.length">
-                <td :colspan="showsEntryActions ? 6 : 5" class="px-5 py-12 text-center">
+                <td :colspan="(showsEntryActions ? 6 : 5) + (auth.isAdmin && selectedSet.status === 'draft' ? 1 : 0)" class="px-5 py-12 text-center">
                   <p class="text-sm font-medium text-slate-700">{{ selectedSet.entries.length ? 'Nenhum vínculo corresponde aos filtros.' : 'Nenhum vínculo estruturado.' }}</p>
                   <p v-if="!selectedSet.entries.length" class="mt-1 text-xs text-slate-500">Use esta visão quando precisar filtrar, exportar ou validar campos individualmente.</p>
                 </td>
@@ -205,6 +245,19 @@
             </tbody>
           </table>
         </div>
+        <div v-if="filteredEntries.length > entryPageSize" class="flex items-center justify-between border-x border-b border-slate-200 bg-white px-4 py-3">
+          <p class="text-xs text-slate-500">
+            {{ (entryPage - 1) * entryPageSize + 1 }}–{{ Math.min(entryPage * entryPageSize, filteredEntries.length) }} de {{ filteredEntries.length }}
+          </p>
+          <div class="flex gap-2">
+            <button :disabled="entryPage === 1" class="rounded-md border border-slate-300 px-3 py-2 text-xs disabled:opacity-40" @click="entryPage -= 1">Anterior</button>
+            <button :disabled="entryPage >= entryPageCount" class="rounded-md border border-slate-300 px-3 py-2 text-xs disabled:opacity-40" @click="entryPage += 1">Próxima</button>
+          </div>
+        </div>
+      </section>
+
+      <section v-else-if="activeTab === 'history'" class="pt-5">
+        <MappingHistoryPanel :mapping-set="selectedSet" @changed="handleHistoryChanged" />
       </section>
 
       <section v-else-if="activeTab === 'files'" class="pt-5">
@@ -277,7 +330,7 @@
               {{ mappingQuality.ready ? 'Pronto para publicar' : 'Revisão recomendada' }}
             </p>
             <p class="mt-2 text-xs leading-5 text-slate-500">
-              {{ mappingQuality.ready ? 'O documento tem conteúdo e não possui pendências estruturadas.' : 'Resolva os itens sinalizados ou publique conscientemente com as pendências registradas.' }}
+              {{ mappingQuality.ready ? 'O conteúdo atende à política de publicação configurada.' : 'Resolva os itens exigidos pela política antes de publicar.' }}
             </p>
             <button v-if="auth.isAdmin && selectedSet.status === 'draft'" type="button" class="mt-4 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white" @click="publishConfirmOpen = true">
               Revisar publicação
@@ -364,7 +417,7 @@
     </div>
 
     <div v-if="documentEditorOpen && selectedSet" class="fixed inset-0 z-[70]">
-      <div class="absolute inset-0 bg-slate-950/45" @click="closeDocumentEditor"></div>
+      <div class="absolute inset-0 bg-slate-950/45" @click="closeDocumentEditor()"></div>
       <aside class="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-slate-200 bg-white shadow-xl">
         <header class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -372,7 +425,7 @@
             <p class="mt-0.5 text-xs text-slate-500">Markdown · {{ documentDraft.length.toLocaleString('pt-BR') }} caracteres</p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" @click="closeDocumentEditor">Cancelar</button>
+            <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" @click="closeDocumentEditor()">Cancelar</button>
             <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-50" @click="saveDocument">{{ saving ? 'Salvando…' : 'Salvar documento' }}</button>
           </div>
         </header>
@@ -429,6 +482,28 @@
             <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm"><input v-model="metadataForm.clientCanAddEntries" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300"><span><span class="block font-medium">Adicionar vínculos</span><span class="mt-0.5 block text-xs text-slate-500">Permite criar novas linhas.</span></span></label>
             <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm"><input v-model="metadataForm.clientCanDeleteEntries" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300"><span><span class="block font-medium">Excluir vínculos</span><span class="mt-0.5 block text-xs text-slate-500">Permite remover linhas.</span></span></label>
           </div>
+          <fieldset class="border-t border-slate-200 pt-4">
+            <legend class="text-sm font-medium text-slate-800">Política de publicação</legend>
+            <p class="mt-1 text-xs leading-5 text-slate-500">Escolha quais verificações realmente devem impedir uma publicação.</p>
+            <div class="mt-3 grid gap-2 sm:grid-cols-2">
+              <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm">
+                <input v-model="metadataForm.validationRules.requireStructuredEntries" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300">
+                <span><span class="block font-medium">Exigir vínculos</span><span class="mt-0.5 block text-xs text-slate-500">Bloqueia documento sem campos estruturados.</span></span>
+              </label>
+              <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm">
+                <input v-model="metadataForm.validationRules.blockUnresolved" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300">
+                <span><span class="block font-medium">Bloquear pendências</span><span class="mt-0.5 block text-xs text-slate-500">Exige resolver itens pendentes ou com atenção.</span></span>
+              </label>
+              <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm">
+                <input v-model="metadataForm.validationRules.blockDuplicateSources" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300">
+                <span><span class="block font-medium">Bloquear duplicidades</span><span class="mt-0.5 block text-xs text-slate-500">Exige revisar origens repetidas na mesma seção.</span></span>
+              </label>
+              <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm">
+                <input v-model="metadataForm.validationRules.requireTypes" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300">
+                <span><span class="block font-medium">Exigir tipos técnicos</span><span class="mt-0.5 block text-xs text-slate-500">Exige tipo de origem e destino em todos os vínculos.</span></span>
+              </label>
+            </div>
+          </fieldset>
           <div><label class="mb-1.5 block text-sm font-medium">Orientações ao cliente</label><textarea v-model="metadataForm.clientInstructions" rows="3" maxlength="5000" placeholder="Explique o que deve ser preenchido e como validar." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
         </div>
         <p v-if="modalError" class="mt-3 text-sm text-red-700">{{ modalError }}</p>
@@ -491,8 +566,15 @@
     <div v-if="publishConfirmOpen && selectedSet" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
       <div class="absolute inset-0 bg-slate-950/55" @click="publishConfirmOpen = false"></div>
       <div class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
-        <h3 class="text-lg font-semibold text-slate-950">Publicar e fechar para edições?</h3>
-        <p class="mt-2 text-sm leading-6 text-slate-500">O cliente passará a ver esta versão. Novas alterações exigirão uma nova versão, preservando o histórico publicado.</p>
+        <h3 class="text-lg font-semibold text-slate-950">Publicar esta versão?</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">
+          <template v-if="selectedSet.clientEditMode === 'none'">
+            O cliente passará a ver esta versão protegida. Alterações administrativas futuras exigirão uma nova versão.
+          </template>
+          <template v-else>
+            O cliente passará a ver esta versão e poderá editar o que foi liberado. Cada mudança ficará registrada no histórico para revisão da equipe.
+          </template>
+        </p>
         <p v-if="pendingCount" class="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">Há {{ pendingCount }} vínculo{{ pendingCount === 1 ? '' : 's' }} pendente{{ pendingCount === 1 ? '' : 's' }} ou com atenção.</p>
         <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="publishConfirmOpen = false">Revisar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="publishSet">{{ saving ? 'Publicando…' : 'Publicar versão' }}</button></div>
       </div>
@@ -539,9 +621,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
+import MappingHistoryPanel from '@/components/MappingHistoryPanel.vue'
 import {
   blankMappingTemplate,
   extractMappingEntries,
@@ -555,15 +638,20 @@ import type { MappingAttachment, MappingEntry, MappingEntryClientField, MappingS
 
 const props = defineProps<{
   integrationId: number
+  initialMappingSetId?: number | null
   processOptions?: Array<{ id: number; referenceCode: string; title: string }>
 }>()
 const api = useApi()
 const auth = useAuthStore()
 const mappingSets = ref<MappingSet[]>([])
 const selectedSetId = ref('')
-const activeTab = ref<'document' | 'fields' | 'files' | 'review'>('document')
+const activeTab = ref<'document' | 'fields' | 'history' | 'files' | 'review'>('document')
 const entrySearch = ref('')
 const entryStatusFilter = ref('')
+const entryPage = ref(1)
+const entryPageSize = 25
+const selectedEntryIds = ref<number[]>([])
+const bulkStatus = ref('')
 const loading = ref(true)
 const saving = ref(false)
 const errorMessage = ref('')
@@ -595,7 +683,13 @@ const metadataForm = ref({
   clientEditMode: 'none' as MappingSet['clientEditMode'],
   clientCanAddEntries: false,
   clientCanDeleteEntries: false,
-  clientInstructions: ''
+  clientInstructions: '',
+  validationRules: {
+    requireStructuredEntries: false,
+    blockUnresolved: false,
+    blockDuplicateSources: false,
+    requireTypes: false
+  }
 })
 const emptyEntryForm = () => ({
   id: null as number | null,
@@ -617,6 +711,31 @@ const emptyEntryForm = () => ({
 const entryForm = ref(emptyEntryForm())
 
 const selectedSet = computed(() => mappingSets.value.find(item => String(item.id) === selectedSetId.value) || null)
+const clientNextAction = computed(() => {
+  if (!selectedSet.value || auth.isAdmin) return null
+  if (selectedSet.value.clientEditMode === 'none') {
+    return {
+      title: 'Consulte e valide o de-para',
+      detail: 'Use as abas para conferir o documento, os vínculos e o histórico. Se algo estiver incorreto, registre um comentário no histórico.'
+    }
+  }
+  if (selectedSet.value.hasUnreviewedClientChanges) {
+    return {
+      title: 'Suas alterações foram registradas',
+      detail: 'A equipe técnica poderá conferir exatamente o que mudou. Você pode complementar o contexto na aba Histórico.'
+    }
+  }
+  if (pendingCount.value) {
+    return {
+      title: `Ajude a resolver ${pendingCount.value} pendência${pendingCount.value === 1 ? '' : 's'}`,
+      detail: 'Abra a aba Campos estruturados, filtre por “Pendente” ou “Requer atenção” e preencha somente o que estiver liberado.'
+    }
+  }
+  return {
+    title: 'Mapeamento pronto para conferência',
+    detail: 'Revise os valores e registre qualquer dúvida ou decisão na aba Histórico.'
+  }
+})
 const canEditDocument = computed(() => Boolean(selectedSet.value && (
   (auth.isAdmin && selectedSet.value.status === 'draft') ||
   (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode === 'all')
@@ -715,13 +834,20 @@ const mappingQuality = computed(() => {
         : 'Nenhuma possível duplicidade encontrada.'
     }
   ]
+  const rules = selectedSet.value?.validationRules
+  const passesPolicy = Boolean(
+    (!rules?.requireStructuredEntries || entries.length > 0) &&
+    (!rules?.blockUnresolved || unresolved === 0) &&
+    (!rules?.blockDuplicateSources || duplicates.length === 0) &&
+    (!rules?.requireTypes || entries.every(entry => entry.sourceType && entry.targetType))
+  )
   return {
     mapped,
     unresolved,
     duplicates,
     completionPercent,
     checks,
-    ready: hasContent && unresolved === 0 && duplicates.length === 0
+    ready: hasContent && passesPolicy
   }
 })
 const filteredEntries = computed(() => {
@@ -733,9 +859,19 @@ const filteredEntries = computed(() => {
       .some(value => value?.toLocaleLowerCase('pt-BR').includes(search)))
   )
 })
+const entryPageCount = computed(() => Math.max(1, Math.ceil(filteredEntries.value.length / entryPageSize)))
+const paginatedEntries = computed(() => {
+  const start = (entryPage.value - 1) * entryPageSize
+  return filteredEntries.value.slice(start, start + entryPageSize)
+})
+const allVisibleEntriesSelected = computed(() => Boolean(
+  paginatedEntries.value.length &&
+  paginatedEntries.value.every(entry => selectedEntryIds.value.includes(entry.id))
+))
 const workspaceTabs = computed(() => [
   { value: 'document' as const, label: 'Documento', count: null },
   { value: 'fields' as const, label: 'Campos estruturados', count: selectedSet.value?.entries.length || 0 },
+  { value: 'history' as const, label: 'Histórico', count: selectedSet.value?.hasUnreviewedClientChanges ? 1 : null },
   { value: 'files' as const, label: 'Arquivos', count: selectedSet.value?.attachments?.length || 0 },
   { value: 'review' as const, label: 'Revisão', count: pendingCount.value || null }
 ])
@@ -785,9 +921,12 @@ const fetchMappings = async (preserveSelection = true) => {
   try {
     const data = await api.get<{ mappingSets: MappingSet[] }>(`/lambda/integrations/${props.integrationId}/mappings`)
     mappingSets.value = data.mappingSets
+    const requestedId = props.initialMappingSetId ? String(props.initialMappingSetId) : ''
     selectedSetId.value = data.mappingSets.some(item => String(item.id) === previousId)
       ? previousId
-      : (data.mappingSets[0] ? String(data.mappingSets[0].id) : '')
+      : data.mappingSets.some(item => String(item.id) === requestedId)
+        ? requestedId
+        : (data.mappingSets[0] ? String(data.mappingSets[0].id) : '')
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Não foi possível carregar os mapeamentos'
   } finally {
@@ -838,28 +977,26 @@ const createSet = async () => {
     } else if (setForm.value.template === 'migration') {
       contentMarkdown = migrationMappingTemplate(setForm.value.name, setForm.value.sourceSystem, setForm.value.targetSystem)
     }
+    const importedEntries = createMode.value === 'import' && contentMarkdown
+      ? extractMappingEntries(contentMarkdown, setForm.value.sourceSystem, setForm.value.targetSystem)
+      : []
+    const attachment = createMode.value === 'import' && createFile.value
+      ? {
+          fileName: createFile.value.name,
+          mimeType: createFile.value.type || 'application/octet-stream',
+          contentBase64: await fileToBase64(createFile.value)
+        }
+      : null
     const data = await api.post<{ mappingSetId: number }>(`/lambda/integrations/${props.integrationId}/mappings`, {
       name: setForm.value.name,
       sourceSystem: setForm.value.sourceSystem,
       targetSystem: setForm.value.targetSystem,
       description: setForm.value.description || null,
       contentMarkdown: contentMarkdown || null,
-      processId: setForm.value.processId ? Number(setForm.value.processId) : null
+      processId: setForm.value.processId ? Number(setForm.value.processId) : null,
+      entries: importedEntries,
+      attachment
     })
-    if (createMode.value === 'import' && contentMarkdown) {
-      const importedEntries = extractMappingEntries(contentMarkdown, setForm.value.sourceSystem, setForm.value.targetSystem)
-      if (importedEntries.length) {
-        await api.post(`/lambda/mappings/${data.mappingSetId}/entries/bulk`, { entries: importedEntries })
-      }
-    }
-    if (createMode.value === 'import' && createFile.value) {
-      await api.post(`/lambda/mappings/${data.mappingSetId}/attachments`, {
-        fileName: createFile.value.name,
-        mimeType: createFile.value.type || 'application/octet-stream',
-        contentBase64: await fileToBase64(createFile.value),
-        appendToDocument: false
-      })
-    }
     closeCreateModal()
     await fetchMappings(false)
     selectedSetId.value = String(data.mappingSetId)
@@ -877,7 +1014,11 @@ const openDocumentEditor = () => {
   modalError.value = ''
   documentEditorOpen.value = true
 }
-const closeDocumentEditor = () => {
+const closeDocumentEditor = (force = false) => {
+  if (!force && documentDraft.value !== (selectedSet.value?.contentMarkdown || '') &&
+      !window.confirm('Descartar as alterações ainda não salvas do documento?')) {
+    return
+  }
   documentEditorOpen.value = false
   modalError.value = ''
 }
@@ -901,9 +1042,9 @@ const saveDocument = async () => {
   try {
     await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
       contentMarkdown: documentDraft.value || null,
-      ...(!auth.isAdmin ? { expectedVersion: selectedSet.value.version } : {})
+      expectedRevision: selectedSet.value.revision
     })
-    closeDocumentEditor()
+    closeDocumentEditor(true)
     await fetchMappings()
     showSuccess('Documento salvo')
   } catch (error) {
@@ -924,7 +1065,13 @@ const openMetadataModal = () => {
     clientEditMode: selectedSet.value.clientEditMode || 'none',
     clientCanAddEntries: selectedSet.value.clientCanAddEntries || false,
     clientCanDeleteEntries: selectedSet.value.clientCanDeleteEntries || false,
-    clientInstructions: selectedSet.value.clientInstructions || ''
+    clientInstructions: selectedSet.value.clientInstructions || '',
+    validationRules: {
+      requireStructuredEntries: selectedSet.value.validationRules?.requireStructuredEntries || false,
+      blockUnresolved: selectedSet.value.validationRules?.blockUnresolved || false,
+      blockDuplicateSources: selectedSet.value.validationRules?.blockDuplicateSources || false,
+      requireTypes: selectedSet.value.validationRules?.requireTypes || false
+    }
   }
   modalError.value = ''
   metadataModalOpen.value = true
@@ -938,7 +1085,8 @@ const saveMetadata = async () => {
       ...metadataForm.value,
       description: metadataForm.value.description || null,
       clientInstructions: metadataForm.value.clientInstructions || null,
-      processId: metadataForm.value.processId ? Number(metadataForm.value.processId) : null
+      processId: metadataForm.value.processId ? Number(metadataForm.value.processId) : null,
+      expectedRevision: selectedSet.value.revision
     })
     metadataModalOpen.value = false
     await fetchMappings()
@@ -996,7 +1144,7 @@ const saveEntry = async () => {
   const payload = !auth.isAdmin && entryForm.value.id && selectedSet.value.clientEditMode === 'selected'
     ? Object.fromEntries(Object.entries(fullPayload).filter(([field]) => entryForm.value.clientEditableFields.includes(field as MappingEntryClientField)))
     : fullPayload
-  if (!auth.isAdmin && entryForm.value.id) Object.assign(payload, { expectedVersion: selectedSet.value.version })
+  Object.assign(payload, { expectedRevision: selectedSet.value.revision })
   try {
     if (entryForm.value.id) await api.patch(`/lambda/mappings/${selectedSet.value.id}/entries/${entryForm.value.id}`, payload)
     else await api.post(`/lambda/mappings/${selectedSet.value.id}/entries`, payload)
@@ -1013,7 +1161,8 @@ const deleteEntry = async () => {
   if (!selectedSet.value || !entryToDelete.value) return
   saving.value = true
   try {
-    await api.del(`/lambda/mappings/${selectedSet.value.id}/entries/${entryToDelete.value.id}`)
+    const suffix = auth.isAdmin ? '' : `?expectedRevision=${selectedSet.value.revision}`
+    await api.del(`/lambda/mappings/${selectedSet.value.id}/entries/${entryToDelete.value.id}${suffix}`)
     entryToDelete.value = null
     await fetchMappings()
     showSuccess('Vínculo excluído')
@@ -1022,6 +1171,39 @@ const deleteEntry = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const toggleVisibleEntries = () => {
+  const visibleIds = paginatedEntries.value.map(entry => entry.id)
+  if (allVisibleEntriesSelected.value) {
+    selectedEntryIds.value = selectedEntryIds.value.filter(id => !visibleIds.includes(id))
+  } else {
+    selectedEntryIds.value = [...new Set([...selectedEntryIds.value, ...visibleIds])]
+  }
+}
+const applyBulkStatus = async () => {
+  if (!selectedSet.value || !selectedEntryIds.value.length || !bulkStatus.value) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}/entries/bulk`, {
+      entryIds: selectedEntryIds.value,
+      changes: { mappingStatus: bulkStatus.value }
+    })
+    const updated = selectedEntryIds.value.length
+    selectedEntryIds.value = []
+    bulkStatus.value = ''
+    await fetchMappings()
+    showSuccess(`${updated} vínculo${updated === 1 ? '' : 's'} atualizado${updated === 1 ? '' : 's'}`)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível atualizar os vínculos'
+  } finally {
+    saving.value = false
+  }
+}
+const handleHistoryChanged = async () => {
+  await fetchMappings()
+  showSuccess('Histórico e mapeamento atualizados')
 }
 
 const selectAttachmentFile = async (event: Event) => {
@@ -1088,7 +1270,10 @@ const publishSet = async () => {
   if (!selectedSet.value) return
   saving.value = true
   try {
-    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, { status: 'published' })
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
+      status: 'published',
+      expectedRevision: selectedSet.value.revision
+    })
     publishConfirmOpen.value = false
     await fetchMappings()
     showSuccess('Versão publicada para o cliente')
@@ -1119,7 +1304,10 @@ const archiveSet = async () => {
   saving.value = true
   errorMessage.value = ''
   try {
-    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, { status: 'archived' })
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
+      status: 'archived',
+      expectedRevision: selectedSet.value.revision
+    })
     archiveConfirmOpen.value = false
     await fetchMappings(false)
     showSuccess('De-para arquivado e removido do portal do cliente')
@@ -1181,12 +1369,33 @@ const exportCsv = () => {
 }
 
 watch(() => props.integrationId, () => void fetchMappings(false))
+watch(() => props.initialMappingSetId, (mappingSetId) => {
+  if (mappingSetId && mappingSets.value.some(item => item.id === mappingSetId)) {
+    selectedSetId.value = String(mappingSetId)
+  }
+})
 watch(selectedSetId, () => {
   activeTab.value = 'document'
   entrySearch.value = ''
   entryStatusFilter.value = ''
+  entryPage.value = 1
+  selectedEntryIds.value = []
 })
+watch([entrySearch, entryStatusFilter], () => {
+  entryPage.value = 1
+  selectedEntryIds.value = []
+})
+watch(entryPageCount, (count) => {
+  if (entryPage.value > count) entryPage.value = count
+})
+const preventUnsavedDocumentClose = (event: BeforeUnloadEvent) => {
+  if (documentEditorOpen.value && documentDraft.value !== (selectedSet.value?.contentMarkdown || '')) {
+    event.preventDefault()
+  }
+}
 onMounted(() => void fetchMappings(false))
+onMounted(() => window.addEventListener('beforeunload', preventUnsavedDocumentClose))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', preventUnsavedDocumentClose))
 </script>
 
 <style scoped>

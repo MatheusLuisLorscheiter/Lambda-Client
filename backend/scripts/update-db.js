@@ -57,15 +57,57 @@ const run = async () => {
         'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_can_add_entries BOOLEAN NOT NULL DEFAULT FALSE',
         'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_can_delete_entries BOOLEAN NOT NULL DEFAULT FALSE',
         'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_instructions TEXT',
+        `ALTER TABLE integration_mapping_sets
+           ADD COLUMN IF NOT EXISTS validation_rules JSONB NOT NULL DEFAULT '{
+             "requireStructuredEntries": false,
+             "blockUnresolved": false,
+             "blockDuplicateSources": false,
+             "requireTypes": false
+           }'`,
+        `DO $$ BEGIN
+            IF NOT EXISTS (
+              SELECT 1
+                FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'integration_mapping_sets'
+                 AND column_name = 'revision'
+            ) THEN
+              ALTER TABLE integration_mapping_sets ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+              UPDATE integration_mapping_sets SET revision = version;
+              WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY integration_id, name
+                         ORDER BY created_at, id
+                       ) AS semantic_version
+                  FROM integration_mapping_sets
+              )
+              UPDATE integration_mapping_sets
+                 SET version = ranked.semantic_version
+                FROM ranked
+               WHERE integration_mapping_sets.id = ranked.id;
+            END IF;
+          END $$;`,
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS cloned_from_mapping_set_id INTEGER REFERENCES integration_mapping_sets(id) ON DELETE SET NULL',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS last_client_edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS last_client_edited_at TIMESTAMPTZ',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS last_reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMPTZ',
         'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS section TEXT',
         "ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS mapping_status TEXT NOT NULL DEFAULT 'mapped'",
         "ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS client_editable_fields JSONB NOT NULL DEFAULT '[]'",
         'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS last_client_edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
         'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS last_client_edited_at TIMESTAMPTZ',
+        'ALTER TABLE integration_mapping_changes ADD COLUMN IF NOT EXISTS audit_log_id INTEGER REFERENCES audit_logs(id) ON DELETE SET NULL',
         `DO $$ BEGIN
                     ALTER TABLE integration_mapping_sets
                     ADD CONSTRAINT chk_mapping_client_edit_mode
                     CHECK (client_edit_mode IN ('none', 'all', 'selected'));
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+        `DO $$ BEGIN
+                    ALTER TABLE integration_mapping_sets
+                    ADD CONSTRAINT chk_mapping_revision_positive
+                    CHECK (revision > 0);
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         `DO $$ BEGIN
                     ALTER TABLE integration_mapping_entries
@@ -84,6 +126,86 @@ const run = async () => {
                     CHECK (working_days_per_month > 0 AND working_days_per_month <= 31);
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         'CREATE INDEX IF NOT EXISTS idx_mapping_sets_client_visibility ON integration_mapping_sets(company_id, integration_id, status)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_mapping_sets_semantic_version ON integration_mapping_sets(integration_id, name, version)',
+        'CREATE INDEX IF NOT EXISTS idx_mapping_changes_set ON integration_mapping_changes(mapping_set_id, created_at DESC, id DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_mapping_changes_actor ON integration_mapping_changes(actor_user_id, created_at DESC)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_mapping_changes_audit_log ON integration_mapping_changes(audit_log_id)',
+        `WITH client_edits AS (
+            SELECT mapping_set_id, last_client_edited_by AS user_id, last_client_edited_at AS edited_at
+              FROM integration_mapping_entries
+             WHERE last_client_edited_at IS NOT NULL
+            UNION ALL
+            SELECT audit_logs.resource_id::integer AS mapping_set_id,
+                   audit_logs.user_id,
+                   audit_logs.created_at
+              FROM audit_logs
+             WHERE audit_logs.action = 'mapping.client.document.update'
+               AND audit_logs.resource_id ~ '^[0-9]+$'
+          ),
+          latest AS (
+            SELECT DISTINCT ON (mapping_set_id) mapping_set_id, user_id, edited_at
+              FROM client_edits
+             ORDER BY mapping_set_id, edited_at DESC
+          )
+          UPDATE integration_mapping_sets
+             SET last_client_edited_by = latest.user_id,
+                 last_client_edited_at = latest.edited_at
+            FROM latest
+           WHERE integration_mapping_sets.id = latest.mapping_set_id
+             AND (
+               integration_mapping_sets.last_client_edited_at IS NULL
+               OR integration_mapping_sets.last_client_edited_at < latest.edited_at
+             )`,
+        `INSERT INTO integration_mapping_changes
+            (audit_log_id, mapping_set_id, actor_user_id, actor_role, action, entity_type,
+             entity_id, summary, changed_fields, mapping_revision, client_visible, created_at)
+         SELECT audit_logs.id,
+                mapping_sets.id,
+                audit_logs.user_id,
+                COALESCE(users.role, 'system'),
+                CASE
+                  WHEN audit_logs.action LIKE '%.bulk_import' THEN 'bulk_import'
+                  WHEN audit_logs.action LIKE '%.create' THEN 'create'
+                  WHEN audit_logs.action LIKE '%.update' THEN 'update'
+                  WHEN audit_logs.action LIKE '%.delete' THEN 'delete'
+                  WHEN audit_logs.action LIKE '%.archive' THEN 'archive'
+                  WHEN audit_logs.action LIKE '%.clone' THEN 'clone'
+                  WHEN audit_logs.action LIKE '%.upload' THEN 'upload'
+                  ELSE 'update'
+                END,
+                CASE audit_logs.resource_type
+                  WHEN 'mapping_entry' THEN 'mapping_entry'
+                  ELSE 'mapping_set'
+                END,
+                audit_logs.resource_id,
+                CASE
+                  WHEN audit_logs.action = 'mapping.client.document.update' THEN 'Cliente atualizou o documento'
+                  WHEN audit_logs.action = 'mapping.client.entry.update' THEN 'Cliente atualizou um vínculo'
+                  WHEN audit_logs.action = 'mapping.client.entry.create' THEN 'Cliente adicionou um vínculo'
+                  WHEN audit_logs.action = 'mapping.client.entry.delete' THEN 'Cliente excluiu um vínculo'
+                  WHEN audit_logs.action = 'mapping.archive' THEN 'Mapeamento arquivado'
+                  WHEN audit_logs.action = 'mapping.clone' THEN 'Nova versão criada'
+                  WHEN audit_logs.action = 'mapping.attachment.upload' THEN 'Arquivo anexado'
+                  WHEN audit_logs.action = 'mapping.attachment.delete' THEN 'Arquivo removido'
+                  WHEN audit_logs.action = 'mapping.entry.bulk_import' THEN 'Vínculos importados'
+                  WHEN audit_logs.action = 'mapping.create' THEN 'Mapeamento criado'
+                  ELSE 'Mapeamento atualizado'
+                END,
+                '[]'::jsonb,
+                1,
+                TRUE,
+                audit_logs.created_at
+           FROM audit_logs
+           LEFT JOIN users ON users.id = audit_logs.user_id
+           JOIN integration_mapping_sets mapping_sets
+             ON mapping_sets.id = CASE
+               WHEN audit_logs.resource_type = 'mapping_set'
+                 THEN CASE WHEN audit_logs.resource_id ~ '^[0-9]+$' THEN audit_logs.resource_id::integer END
+               ELSE CASE WHEN COALESCE(audit_logs.metadata->>'mappingSetId', '') ~ '^[0-9]+$'
+                 THEN (audit_logs.metadata->>'mappingSetId')::integer END
+             END
+          WHERE audit_logs.action LIKE 'mapping.%'
+         ON CONFLICT (audit_log_id) DO NOTHING`,
         `WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY position NULLS LAST, created_at, id) AS next_position
             FROM process_items

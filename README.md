@@ -113,6 +113,18 @@ migração falhar, a API não inicia com um schema incompatível.
 - O cliente pode registrar tempo, frequência e pessoas envolvidas por atividade antes e depois da automação.
 - O Lambda Pulse calcula horas mensais, pessoas equivalentes e redução de esforço sem perder o histórico das medições.
 
+## 🧭 Mapeamentos de dados
+
+- De-paras combinam documento Markdown, vínculos estruturados, exemplos, regras e arquivos de referência.
+- Versões publicadas e revisões de edição são controladas separadamente.
+- Administradores configuram exatamente o que o cliente pode editar e quais validações bloqueiam uma publicação.
+- Toda alteração relevante possui linha do tempo com autor, data, antes/depois e restauração auditável.
+- Alterações do cliente entram em um fluxo visível de revisão e aceite pela equipe técnica.
+- Importações criam documento, vínculos e anexo de forma atômica.
+- Mapas vinculados aparecem diretamente no contexto da demanda em Processos.
+
+O contrato completo está em [docs/MAPPINGS_MODULE.md](docs/MAPPINGS_MODULE.md).
+
 ---
 
 ## 🤝 Contribuindo

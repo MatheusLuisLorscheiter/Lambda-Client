@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS integration_mapping_sets (
   source_system TEXT NOT NULL,
   target_system TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft', 'published', 'archived')),
   client_edit_mode TEXT NOT NULL DEFAULT 'none'
@@ -228,6 +229,17 @@ CREATE TABLE IF NOT EXISTS integration_mapping_sets (
   client_can_add_entries BOOLEAN NOT NULL DEFAULT FALSE,
   client_can_delete_entries BOOLEAN NOT NULL DEFAULT FALSE,
   client_instructions TEXT,
+  validation_rules JSONB NOT NULL DEFAULT '{
+    "requireStructuredEntries": false,
+    "blockUnresolved": false,
+    "blockDuplicateSources": false,
+    "requireTypes": false
+  }',
+  cloned_from_mapping_set_id INTEGER REFERENCES integration_mapping_sets(id) ON DELETE SET NULL,
+  last_client_edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  last_client_edited_at TIMESTAMPTZ,
+  last_reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  last_reviewed_at TIMESTAMPTZ,
   published_at TIMESTAMPTZ,
   closed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -271,6 +283,29 @@ CREATE TABLE IF NOT EXISTS integration_mapping_attachments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS integration_mapping_changes (
+  id BIGSERIAL PRIMARY KEY,
+  audit_log_id INTEGER UNIQUE REFERENCES audit_logs(id) ON DELETE SET NULL,
+  mapping_set_id INTEGER NOT NULL REFERENCES integration_mapping_sets(id) ON DELETE CASCADE,
+  actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  actor_role TEXT NOT NULL CHECK (actor_role IN ('admin', 'client', 'system')),
+  action TEXT NOT NULL
+    CHECK (action IN (
+      'create', 'update', 'delete', 'publish', 'archive', 'clone', 'upload',
+      'review', 'comment', 'restore', 'bulk_import', 'bulk_update'
+    )),
+  entity_type TEXT NOT NULL
+    CHECK (entity_type IN ('mapping_set', 'mapping_entry', 'attachment', 'comment')),
+  entity_id TEXT,
+  summary TEXT NOT NULL,
+  changed_fields JSONB NOT NULL DEFAULT '[]',
+  before_data JSONB,
+  after_data JSONB,
+  mapping_revision INTEGER NOT NULL,
+  client_visible BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integrations(owner_user_id);
@@ -291,3 +326,7 @@ CREATE INDEX IF NOT EXISTS idx_process_effort_items
 CREATE INDEX IF NOT EXISTS idx_mapping_sets_integration ON integration_mapping_sets(integration_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_entries_set ON integration_mapping_entries(mapping_set_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_attachments_set ON integration_mapping_attachments(mapping_set_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_mapping_changes_set
+  ON integration_mapping_changes(mapping_set_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_mapping_changes_actor
+  ON integration_mapping_changes(actor_user_id, created_at DESC);

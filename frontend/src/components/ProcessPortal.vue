@@ -395,6 +395,29 @@
                 </div>
               </div>
             </div>
+            <div v-if="detailTab === 'overview' && selectedProcess.mappings?.length" class="border-t border-slate-200 pt-5">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Mapeamentos desta demanda</p>
+              <div class="mt-3 space-y-2">
+                <button
+                  v-for="mapping in selectedProcess.mappings"
+                  :key="mapping.id"
+                  type="button"
+                  class="flex w-full items-start justify-between gap-3 rounded-md border border-slate-200 px-3 py-3 text-left hover:border-slate-300 hover:bg-slate-50"
+                  @click="openMapping(mapping.integrationId, mapping.id)"
+                >
+                  <span class="min-w-0">
+                    <span class="block truncate text-sm font-medium text-slate-900">{{ mapping.name }}</span>
+                    <span class="mt-0.5 block text-xs text-slate-500">{{ mapping.sourceSystem }} → {{ mapping.targetSystem }} · versão {{ mapping.version }}</span>
+                  </span>
+                  <span class="flex shrink-0 flex-col items-end gap-1">
+                    <span class="rounded-full px-2 py-0.5 text-[11px] font-medium" :class="mapping.status === 'published' ? 'bg-emerald-100 text-emerald-800' : mapping.status === 'draft' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'">
+                      {{ mapping.status === 'published' ? 'Publicado' : mapping.status === 'draft' ? 'Rascunho' : 'Arquivado' }}
+                    </span>
+                    <span v-if="mapping.pendingCount" class="text-[11px] font-medium text-amber-700">{{ mapping.pendingCount }} pendência{{ mapping.pendingCount === 1 ? '' : 's' }}</span>
+                  </span>
+                </button>
+              </div>
+            </div>
             <ProcessEffortPanel
               v-if="detailTab === 'effort'"
               :process-id="selectedProcess.id"
@@ -458,7 +481,7 @@ import type { ProcessClientField, ProcessItem, ProcessStatus } from '@/types'
 import ProcessEffortPanel from '@/components/ProcessEffortPanel.vue'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
-const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number]; openMapping: [integrationId: number] }>()
+const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number]; openMapping: [integrationId: number, mappingSetId?: number] }>()
 
 const api = useApi()
 const auth = useAuthStore()
@@ -659,9 +682,9 @@ const openAutomation = (integrationId: number) => {
   selectedProcess.value = null
   emit('openAutomation', integrationId)
 }
-const openMapping = (integrationId: number) => {
+const openMapping = (integrationId: number, mappingSetId?: number) => {
   selectedProcess.value = null
-  emit('openMapping', integrationId)
+  emit('openMapping', integrationId, mappingSetId)
 }
 const closeRequestModal = () => {
   requestModalOpen.value = false

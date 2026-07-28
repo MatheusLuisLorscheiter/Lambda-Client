@@ -39,6 +39,7 @@ export interface MappingEntry {
   mappingStatus: 'mapped' | 'pending' | 'attention' | 'ignored'
   clientEditableFields: MappingEntryClientField[]
   lastClientEditedAt: string | null
+  lastClientEditedByEmail: string | null
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -50,6 +51,7 @@ export interface MappingAttachment {
   mimeType: string
   fileSize: number
   hasExtractedText: boolean
+  uploadedByEmail: string | null
   createdAt: string
 }
 
@@ -65,17 +67,67 @@ export interface MappingSet {
   sourceSystem: string
   targetSystem: string
   version: number
+  revision: number
   status: 'draft' | 'published' | 'archived'
   clientEditMode: 'none' | 'all' | 'selected'
   clientCanAddEntries: boolean
   clientCanDeleteEntries: boolean
   clientInstructions: string | null
+  validationRules: {
+    requireStructuredEntries: boolean
+    blockUnresolved: boolean
+    blockDuplicateSources: boolean
+    requireTypes: boolean
+  }
+  clonedFromMappingSetId: number | null
+  lastClientEditedAt: string | null
+  lastClientEditedByEmail: string | null
+  lastReviewedAt: string | null
+  lastReviewedByEmail: string | null
+  hasUnreviewedClientChanges: boolean
   publishedAt: string | null
   closedAt: string | null
   createdAt: string
   updatedAt: string
   entries: MappingEntry[]
   attachments: MappingAttachment[]
+}
+
+export type MappingChangeAction =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'publish'
+  | 'archive'
+  | 'clone'
+  | 'upload'
+  | 'review'
+  | 'comment'
+  | 'restore'
+  | 'bulk_import'
+  | 'bulk_update'
+
+export interface MappingChangedField {
+  field: string
+  before: unknown
+  after: unknown
+}
+
+export interface MappingChange {
+  id: number
+  actorUserId: number | null
+  actorEmail: string | null
+  actorRole: 'admin' | 'client' | 'system'
+  action: MappingChangeAction
+  entityType: 'mapping_set' | 'mapping_entry' | 'attachment' | 'comment'
+  entityId: string | null
+  summary: string
+  changedFields: MappingChangedField[]
+  canRestore: boolean
+  beforeData?: Record<string, unknown> | null
+  afterData?: Record<string, unknown> | null
+  mappingRevision: number
+  createdAt: string
 }
 
 export type MappingEntryClientField =
@@ -161,6 +213,19 @@ export interface ProcessItem {
     id: number
     name: string
     functionName: string
+  }>
+  mappings?: Array<{
+    id: number
+    integrationId: number
+    name: string
+    sourceSystem: string
+    targetSystem: string
+    version: number
+    revision: number
+    status: MappingSet['status']
+    pendingCount: number
+    hasUnreviewedClientChanges: boolean
+    updatedAt: string
   }>
   updates?: Array<{
     id: number
