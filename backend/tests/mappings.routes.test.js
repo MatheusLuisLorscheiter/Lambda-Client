@@ -7,6 +7,7 @@ const integrationsServicePath = require.resolve('../services/integrations');
 const auditPath = require.resolve('../audit/logger');
 
 let queries = [];
+let mappingSetFixture = null;
 const query = async (sql, params = []) => {
   queries.push({ sql, params });
   if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return { rowCount: 0, rows: [] };
@@ -30,7 +31,7 @@ const query = async (sql, params = []) => {
   if (sql.includes('FROM integration_mapping_sets mapping_sets')) {
     return {
       rowCount: 1,
-      rows: [{
+      rows: [mappingSetFixture || {
         id: 91,
         company_id: 12,
         integration_id: 4,
@@ -39,6 +40,9 @@ const query = async (sql, params = []) => {
         status: 'draft'
       }]
     };
+  }
+  if (sql.includes('SELECT id, client_editable_fields FROM integration_mapping_entries')) {
+    return { rowCount: 1, rows: [{ id: 7, client_editable_fields: ['targetPath', 'notes'] }] };
   }
   if (sql.includes('MAX(sort_order)')) return { rowCount: 1, rows: [{ sortOrder: 0 }] };
   if (sql.includes('INSERT INTO integration_mapping_entries')) {
@@ -52,6 +56,9 @@ const query = async (sql, params = []) => {
         isRequired: true
       }]
     };
+  }
+  if (sql.includes('UPDATE integration_mapping_entries')) {
+    return { rowCount: 1, rows: [{ id: 7, targetPath: params[0], clientEditableFields: ['targetPath', 'notes'] }] };
   }
   if (sql.includes('INSERT INTO integration_mapping_attachments')) {
     return {
@@ -118,6 +125,12 @@ const uploadAttachmentHandler = router.stack
 const bulkEntriesHandler = router.stack
   .find(layer => layer.route?.path === '/mappings/:mappingSetId/entries/bulk' && layer.route.methods.post)
   .route.stack.at(-1).handle;
+const updateEntryHandler = router.stack
+  .find(layer => layer.route?.path === '/mappings/:mappingSetId/entries/:entryId' && layer.route.methods.patch)
+  .route.stack.at(-1).handle;
+const deleteSetHandler = router.stack
+  .find(layer => layer.route?.path === '/mappings/:mappingSetId' && layer.route.methods.delete)
+  .route.stack.at(-1).handle;
 
 const invoke = async (handler, { user, params = {}, query: queryParams = {}, body = {} }) => {
   let statusCode = 200;
@@ -140,6 +153,7 @@ const invoke = async (handler, { user, params = {}, query: queryParams = {}, bod
 
 test('admin creates a versioned mapping set for an integration company', async () => {
   queries = [];
+  mappingSetFixture = null;
   const response = await invoke(createSetHandler, {
     user: { id: 7, role: 'admin', companyId: null },
     params: { integrationId: '4' },
@@ -174,6 +188,7 @@ test('client listing is restricted to published mapping sets', async () => {
 
 test('entry creation persists transformation contract and marks required fields', async () => {
   queries = [];
+  mappingSetFixture = null;
   const response = await invoke(createEntryHandler, {
     user: { id: 7, role: 'admin', companyId: null },
     params: { mappingSetId: '91' },
@@ -197,6 +212,7 @@ test('entry creation persists transformation contract and marks required fields'
 
 test('admin can attach a prepared Markdown mapping to a draft version', async () => {
   queries = [];
+  mappingSetFixture = null;
   const markdown = '# DE-PARA · Pedidos';
   const response = await invoke(uploadAttachmentHandler, {
     user: { id: 7, role: 'admin', companyId: null },
@@ -220,6 +236,7 @@ test('admin can attach a prepared Markdown mapping to a draft version', async ()
 
 test('Markdown table import can create structured mapping entries in bulk', async () => {
   queries = [];
+  mappingSetFixture = null;
   const response = await invoke(bulkEntriesHandler, {
     user: { id: 7, role: 'admin', companyId: null },
     params: { mappingSetId: '91' },
@@ -250,4 +267,69 @@ test('Markdown table import can create structured mapping entries in bulk', asyn
   assert.equal(insert.params[13], 'mapped');
   assert.equal(insert.params[15], '35 dias');
   assert.equal(insert.params[27], 'pending');
+});
+
+test('client can edit only an explicitly released field in selected mode', async () => {
+  queries = [];
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'published',
+    client_edit_mode: 'selected'
+  };
+  const response = await invoke(updateEntryHandler, {
+    user: { id: 21, role: 'client', companyId: 12 },
+    params: { mappingSetId: '91', entryId: '7' },
+    body: { targetPath: 'order.customer.externalId' }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const update = queries.find(item => item.sql.includes('UPDATE integration_mapping_entries'));
+  assert.match(update.sql, /target_path =/);
+  assert.match(update.sql, /last_client_edited_at =/);
+  assert.equal(update.params[0], 'order.customer.externalId');
+});
+
+test('client cannot edit a field that was not released', async () => {
+  queries = [];
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'published',
+    client_edit_mode: 'selected'
+  };
+  const response = await invoke(updateEntryHandler, {
+    user: { id: 21, role: 'client', companyId: 12 },
+    params: { mappingSetId: '91', entryId: '7' },
+    body: { sourcePath: 'pedido.novo_codigo' }
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.match(response.body.error, /sourcePath/);
+  assert.equal(queries.some(item => item.sql.includes('UPDATE integration_mapping_entries')), false);
+});
+
+test('published mapping must be archived before permanent deletion', async () => {
+  queries = [];
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'published'
+  };
+  const response = await invoke(deleteSetHandler, {
+    user: { id: 7, role: 'admin', companyId: null },
+    params: { mappingSetId: '91' }
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.error, /Arquive/);
 });

@@ -8,6 +8,11 @@ const router = express.Router();
 const validStatuses = new Set(['draft', 'published', 'archived']);
 const validDirections = new Set(['source_to_target', 'target_to_source', 'bidirectional']);
 const validMappingStatuses = new Set(['mapped', 'pending', 'attention', 'ignored']);
+const validClientEditModes = new Set(['none', 'all', 'selected']);
+const clientWritableEntryFields = new Set([
+  'section', 'sourcePath', 'sourceType', 'targetPath', 'targetType', 'direction',
+  'transformation', 'fallbackValue', 'isRequired', 'notes', 'examples', 'mappingStatus'
+]);
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const allowedAttachmentExtensions = new Set([
   'md', 'markdown', 'txt', 'pdf', 'csv', 'tsv', 'json', 'html', 'htm', 'xml', 'yaml', 'yml',
@@ -30,6 +35,22 @@ const normalizeText = (value, label, max, required = false) => {
   if (required && !text) throw new Error(`${label} é obrigatório`);
   if (text.length > max) throw new Error(`${label} excede ${max} caracteres`);
   return text || null;
+};
+
+const normalizeClientEditableFields = (value) => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('Campos editáveis pelo cliente são inválidos');
+  const fields = [...new Set(value.map(field => String(field).trim()).filter(Boolean))];
+  if (fields.some(field => !clientWritableEntryFields.has(field))) {
+    throw new Error('Há campos editáveis pelo cliente que não são permitidos');
+  }
+  return fields;
+};
+
+const canClientEditEntryField = (mappingSet, entry, field) => {
+  if (mappingSet.client_edit_mode === 'all') return clientWritableEntryFields.has(field);
+  if (mappingSet.client_edit_mode !== 'selected') return false;
+  return Array.isArray(entry.client_editable_fields) && entry.client_editable_fields.includes(field);
 };
 
 const getFileExtension = (fileName) => {
@@ -109,6 +130,10 @@ const mappingSetSelect = `
   mapping_sets.target_system AS "targetSystem",
   mapping_sets.version,
   mapping_sets.status,
+  mapping_sets.client_edit_mode AS "clientEditMode",
+  mapping_sets.client_can_add_entries AS "clientCanAddEntries",
+  mapping_sets.client_can_delete_entries AS "clientCanDeleteEntries",
+  mapping_sets.client_instructions AS "clientInstructions",
   mapping_sets.published_at AS "publishedAt",
   mapping_sets.closed_at AS "closedAt",
   mapping_sets.created_at AS "createdAt",
@@ -130,6 +155,8 @@ const mappingSetSelect = `
           'examples', entries.examples,
           'section', entries.section,
           'mappingStatus', entries.mapping_status,
+          'clientEditableFields', entries.client_editable_fields,
+          'lastClientEditedAt', entries.last_client_edited_at,
           'sortOrder', entries.sort_order,
           'createdAt', entries.created_at,
           'updatedAt', entries.updated_at
@@ -184,15 +211,22 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
   let contentMarkdown;
   let sourceSystem;
   let targetSystem;
+  let clientInstructions;
   try {
     name = normalizeText(req.body.name, 'Nome', 160, true);
     description = normalizeText(req.body.description, 'Descrição', 3000);
     contentMarkdown = normalizeText(req.body.contentMarkdown, 'Conteúdo do documento', 250000);
     sourceSystem = normalizeText(req.body.sourceSystem, 'Sistema de origem', 160, true);
     targetSystem = normalizeText(req.body.targetSystem, 'Sistema de destino', 160, true);
+    clientInstructions = normalizeText(req.body.clientInstructions, 'Orientações ao cliente', 5000);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
+  const clientEditMode = validClientEditModes.has(req.body.clientEditMode)
+    ? req.body.clientEditMode
+    : 'none';
+  const clientCanAddEntries = clientEditMode === 'all' && Boolean(req.body.clientCanAddEntries);
+  const clientCanDeleteEntries = clientEditMode === 'all' && Boolean(req.body.clientCanDeleteEntries);
   const processId = req.body.processId ? Number(req.body.processId) : null;
   if (processId) {
     const process = await query(
@@ -204,12 +238,15 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
 
   const result = await query(
     `INSERT INTO integration_mapping_sets
-      (company_id, integration_id, process_id, created_by, name, description, content_markdown, source_system, target_system)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      (company_id, integration_id, process_id, created_by, name, description, content_markdown,
+       source_system, target_system, client_edit_mode, client_can_add_entries,
+       client_can_delete_entries, client_instructions)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING id`,
     [
       integration.company_id, integrationId, processId, req.user.id,
-      name, description, contentMarkdown, sourceSystem, targetSystem
+      name, description, contentMarkdown, sourceSystem, targetSystem, clientEditMode,
+      clientCanAddEntries, clientCanDeleteEntries, clientInstructions
     ]
   );
   await logAudit({
@@ -218,7 +255,7 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
     action: 'mapping.create',
     resourceType: 'mapping_set',
     resourceId: String(result.rows[0].id),
-    metadata: { integrationId, name, sourceSystem, targetSystem },
+    metadata: { integrationId, name, sourceSystem, targetSystem, clientEditMode },
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
   });
@@ -226,10 +263,49 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
 });
 
 router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
-  if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
+  if (!Number.isInteger(mappingSetId) || mappingSetId <= 0) {
+    return res.status(400).json({ error: 'Mapeamento inválido' });
+  }
   const existing = await getMappingSet(mappingSetId, req.user);
   if (!existing) return res.status(404).json({ error: 'Mapeamento não encontrado' });
+
+  if (req.user.role === 'client') {
+    const requestedFields = Object.keys(req.body).filter(key => key !== 'expectedVersion');
+    if (existing.client_edit_mode !== 'all' || existing.status !== 'published' ||
+      requestedFields.length !== 1 || requestedFields[0] !== 'contentMarkdown') {
+      return res.status(403).json({ error: 'Este documento não está liberado para edição' });
+    }
+    if (req.body.expectedVersion !== undefined && Number(req.body.expectedVersion) !== Number(existing.version)) {
+      return res.status(409).json({ error: 'O de-para foi atualizado. Reabra o editor para carregar a versão mais recente.' });
+    }
+    let contentMarkdown;
+    try {
+      contentMarkdown = normalizeText(req.body.contentMarkdown, 'Conteúdo do documento', 250000);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    const result = await query(
+      `UPDATE integration_mapping_sets
+          SET content_markdown = $1, version = version + 1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, version, status, updated_at AS "updatedAt"`,
+      [contentMarkdown, mappingSetId]
+    );
+    await logAudit({
+      companyId: existing.company_id,
+      userId: req.user.id,
+      action: 'mapping.client.document.update',
+      resourceType: 'mapping_set',
+      resourceId: String(mappingSetId),
+      metadata: { contentLength: contentMarkdown?.length || 0 },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+    return res.json({ mappingSet: result.rows[0] });
+  }
+
+  if (!requireAdmin(req, res)) return;
 
   const fields = [];
   const values = [];
@@ -251,8 +327,28 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
     if (req.body.targetSystem !== undefined) {
       add('target_system', normalizeText(req.body.targetSystem, 'Sistema de destino', 160, true));
     }
+    if (req.body.clientInstructions !== undefined) {
+      add('client_instructions', normalizeText(req.body.clientInstructions, 'Orientações ao cliente', 5000));
+    }
   } catch (error) {
     return res.status(400).json({ error: error.message });
+  }
+  const effectiveClientEditMode = req.body.clientEditMode ?? existing.client_edit_mode;
+  if (!validClientEditModes.has(effectiveClientEditMode)) {
+    return res.status(400).json({ error: 'Modo de edição do cliente inválido' });
+  }
+  if (req.body.clientEditMode !== undefined) add('client_edit_mode', effectiveClientEditMode);
+  if (req.body.clientCanAddEntries !== undefined || req.body.clientEditMode !== undefined) {
+    add(
+      'client_can_add_entries',
+      effectiveClientEditMode === 'all' && Boolean(req.body.clientCanAddEntries ?? existing.client_can_add_entries)
+    );
+  }
+  if (req.body.clientCanDeleteEntries !== undefined || req.body.clientEditMode !== undefined) {
+    add(
+      'client_can_delete_entries',
+      effectiveClientEditMode === 'all' && Boolean(req.body.clientCanDeleteEntries ?? existing.client_can_delete_entries)
+    );
   }
   if (req.body.processId !== undefined) {
     const processId = req.body.processId ? Number(req.body.processId) : null;
@@ -279,14 +375,21 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
       }
     }
     add('status', req.body.status);
-    add('published_at', req.body.status === 'published' ? new Date() : null);
-    add('closed_at', req.body.status === 'published' ? new Date() : null);
+    if (req.body.status === 'published') {
+      add('published_at', new Date());
+      add('closed_at', effectiveClientEditMode === 'none' ? new Date() : null);
+    } else if (req.body.status === 'archived') {
+      add('closed_at', new Date());
+    } else {
+      add('published_at', null);
+      add('closed_at', null);
+    }
   }
   if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
   if (req.body.status === 'published') {
     await query(
       `UPDATE integration_mapping_sets
-          SET status = 'archived', updated_at = NOW()
+          SET status = 'archived', closed_at = NOW(), updated_at = NOW()
         WHERE integration_id = $1
           AND name = $2
           AND status = 'published'
@@ -303,15 +406,28 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
       RETURNING id, version, status, published_at AS "publishedAt", updated_at AS "updatedAt"`,
     values
   );
+  await logAudit({
+    companyId: existing.company_id,
+    userId: req.user.id,
+    action: req.body.status === 'archived' ? 'mapping.archive' : 'mapping.update',
+    resourceType: 'mapping_set',
+    resourceId: String(mappingSetId),
+    metadata: { fields: Object.keys(req.body), status: req.body.status || existing.status },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.json({ mappingSet: result.rows[0] });
 });
 
 router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, res) => {
-  if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
   if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
-  if (mappingSet.status !== 'draft') {
+  const isClient = req.user.role === 'client';
+  if (isClient && (mappingSet.status !== 'published' || mappingSet.client_edit_mode !== 'all' || !mappingSet.client_can_add_entries)) {
+    return res.status(403).json({ error: 'A inclusão de vínculos não está liberada para o cliente' });
+  }
+  if (!isClient && mappingSet.status !== 'draft') {
     return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
   }
   let sourcePath;
@@ -330,16 +446,24 @@ router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, re
   const examples = req.body.examples && typeof req.body.examples === 'object' && !Array.isArray(req.body.examples)
     ? req.body.examples
     : {};
+  let clientEditableFields = [];
+  try {
+    clientEditableFields = isClient ? [] : (normalizeClientEditableFields(req.body.clientEditableFields) || []);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
   const result = await query(
     `INSERT INTO integration_mapping_entries
       (mapping_set_id, source_path, source_type, target_path, target_type, direction,
-       transformation, fallback_value, is_required, notes, examples, sort_order, section, mapping_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       transformation, fallback_value, is_required, notes, examples, sort_order, section, mapping_status,
+       client_editable_fields, last_client_edited_by, last_client_edited_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING id, source_path AS "sourcePath", source_type AS "sourceType",
                target_path AS "targetPath", target_type AS "targetType", direction,
                transformation, fallback_value AS "fallbackValue",
                is_required AS "isRequired", notes, examples, section,
-               mapping_status AS "mappingStatus", sort_order AS "sortOrder",
+               mapping_status AS "mappingStatus", client_editable_fields AS "clientEditableFields",
+               last_client_edited_at AS "lastClientEditedAt", sort_order AS "sortOrder",
                created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       mappingSetId, sourcePath, normalizeText(req.body.sourceType, 'Tipo de origem', 80),
@@ -349,13 +473,24 @@ router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, re
       Boolean(req.body.isRequired), normalizeText(req.body.notes, 'Observações', 3000),
       JSON.stringify(examples), Number(sortResult.rows[0].sortOrder),
       normalizeText(req.body.section, 'Seção', 240),
-      validMappingStatuses.has(req.body.mappingStatus) ? req.body.mappingStatus : 'mapped'
+      validMappingStatuses.has(req.body.mappingStatus) ? req.body.mappingStatus : 'mapped',
+      JSON.stringify(clientEditableFields), isClient ? req.user.id : null, isClient ? new Date() : null
     ]
   );
   await query(
     'UPDATE integration_mapping_sets SET version = version + 1, status = $1, updated_at = NOW() WHERE id = $2',
-    [mappingSet.status === 'published' ? 'draft' : mappingSet.status, mappingSetId]
+    [isClient ? mappingSet.status : (mappingSet.status === 'published' ? 'draft' : mappingSet.status), mappingSetId]
   );
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: isClient ? 'mapping.client.entry.create' : 'mapping.entry.create',
+    resourceType: 'mapping_entry',
+    resourceId: String(result.rows[0].id),
+    metadata: { mappingSetId },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.status(201).json({ entry: result.rows[0] });
 });
 
@@ -444,13 +579,37 @@ router.post('/mappings/:mappingSetId/entries/bulk', authenticateToken, async (re
 });
 
 router.patch('/mappings/:mappingSetId/entries/:entryId', authenticateToken, async (req, res) => {
-  if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
   const entryId = Number(req.params.entryId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
   if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
-  if (mappingSet.status !== 'draft') {
+  const isClient = req.user.role === 'client';
+  if (!isClient && mappingSet.status !== 'draft') {
     return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
+  }
+  let editableEntry = null;
+  if (isClient) {
+    if (mappingSet.status !== 'published' || mappingSet.client_edit_mode === 'none') {
+      return res.status(403).json({ error: 'Este de-para não está liberado para edição' });
+    }
+    const entryResult = await query(
+      'SELECT id, client_editable_fields FROM integration_mapping_entries WHERE id = $1 AND mapping_set_id = $2',
+      [entryId, mappingSetId]
+    );
+    editableEntry = entryResult.rows[0];
+    if (!editableEntry) return res.status(404).json({ error: 'Campo não encontrado' });
+    if (req.body.expectedVersion !== undefined && Number(req.body.expectedVersion) !== Number(mappingSet.version)) {
+      return res.status(409).json({ error: 'O de-para foi atualizado. Reabra o vínculo para carregar a versão mais recente.' });
+    }
+    const requestedFields = Object.keys(req.body).filter(key => key !== 'expectedVersion');
+    const forbiddenField = requestedFields.find(field => !canClientEditEntryField(mappingSet, editableEntry, field));
+    if (!requestedFields.length || forbiddenField) {
+      return res.status(403).json({
+        error: forbiddenField
+          ? `O campo "${forbiddenField}" não está liberado para edição`
+          : 'Nenhuma alteração permitida foi informada'
+      });
+    }
   }
   const allowedFields = {
     sourcePath: ['source_path', 500],
@@ -499,7 +658,18 @@ router.patch('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asyn
     if (!Number.isInteger(sortOrder) || sortOrder < 0) return res.status(400).json({ error: 'Ordem inválida' });
     add('sort_order', sortOrder);
   }
+  if (!isClient && req.body.clientEditableFields !== undefined) {
+    try {
+      add('client_editable_fields', JSON.stringify(normalizeClientEditableFields(req.body.clientEditableFields)));
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
   if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
+  if (isClient) {
+    add('last_client_edited_by', req.user.id);
+    add('last_client_edited_at', new Date());
+  }
   fields.push('updated_at = NOW()');
   values.push(entryId, mappingSetId);
   const result = await query(
@@ -510,25 +680,39 @@ router.patch('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asyn
                 target_path AS "targetPath", target_type AS "targetType", direction,
                 transformation, fallback_value AS "fallbackValue",
                 is_required AS "isRequired", notes, examples, section,
-                mapping_status AS "mappingStatus", sort_order AS "sortOrder",
+                mapping_status AS "mappingStatus", client_editable_fields AS "clientEditableFields",
+                last_client_edited_at AS "lastClientEditedAt", sort_order AS "sortOrder",
                 created_at AS "createdAt", updated_at AS "updatedAt"`,
     values
   );
   if (!result.rowCount) return res.status(404).json({ error: 'Campo não encontrado' });
   await query(
     'UPDATE integration_mapping_sets SET version = version + 1, status = $1, updated_at = NOW() WHERE id = $2',
-    [mappingSet.status === 'published' ? 'draft' : mappingSet.status, mappingSetId]
+    [isClient ? mappingSet.status : (mappingSet.status === 'published' ? 'draft' : mappingSet.status), mappingSetId]
   );
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: isClient ? 'mapping.client.entry.update' : 'mapping.entry.update',
+    resourceType: 'mapping_entry',
+    resourceId: String(entryId),
+    metadata: { mappingSetId, fields: Object.keys(req.body) },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.json({ entry: result.rows[0] });
 });
 
 router.delete('/mappings/:mappingSetId/entries/:entryId', authenticateToken, async (req, res) => {
-  if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
   const entryId = Number(req.params.entryId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
   if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
-  if (mappingSet.status !== 'draft') {
+  const isClient = req.user.role === 'client';
+  if (isClient && (mappingSet.status !== 'published' || mappingSet.client_edit_mode !== 'all' || !mappingSet.client_can_delete_entries)) {
+    return res.status(403).json({ error: 'A exclusão de vínculos não está liberada para o cliente' });
+  }
+  if (!isClient && mappingSet.status !== 'draft') {
     return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
   }
   const result = await query(
@@ -538,8 +722,18 @@ router.delete('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asy
   if (!result.rowCount) return res.status(404).json({ error: 'Campo não encontrado' });
   await query(
     'UPDATE integration_mapping_sets SET version = version + 1, status = $1, updated_at = NOW() WHERE id = $2',
-    [mappingSet.status === 'published' ? 'draft' : mappingSet.status, mappingSetId]
+    [isClient ? mappingSet.status : (mappingSet.status === 'published' ? 'draft' : mappingSet.status), mappingSetId]
   );
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: isClient ? 'mapping.client.entry.delete' : 'mapping.entry.delete',
+    resourceType: 'mapping_entry',
+    resourceId: String(entryId),
+    metadata: { mappingSetId },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.json({ success: true });
 });
 
@@ -662,6 +856,35 @@ router.delete('/mappings/:mappingSetId/attachments/:attachmentId', authenticateT
   res.json({ success: true });
 });
 
+router.delete('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const mappingSetId = Number(req.params.mappingSetId);
+  if (!Number.isInteger(mappingSetId) || mappingSetId <= 0) {
+    return res.status(400).json({ error: 'Mapeamento inválido' });
+  }
+  const mappingSet = await getMappingSet(mappingSetId, req.user);
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
+  if (mappingSet.status === 'published') {
+    return res.status(409).json({ error: 'Arquive o de-para antes de excluí-lo definitivamente' });
+  }
+  const result = await query(
+    'DELETE FROM integration_mapping_sets WHERE id = $1 RETURNING id, name',
+    [mappingSetId]
+  );
+  if (!result.rowCount) return res.status(404).json({ error: 'Mapeamento não encontrado' });
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: 'mapping.delete',
+    resourceType: 'mapping_set',
+    resourceId: String(mappingSetId),
+    metadata: { name: result.rows[0].name, previousStatus: mappingSet.status },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+  res.json({ success: true });
+});
+
 router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
@@ -674,9 +897,11 @@ router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res)
     const created = await client.query(
       `INSERT INTO integration_mapping_sets
         (company_id, integration_id, process_id, created_by, name, description,
-         content_markdown, source_system, target_system, version, status)
+         content_markdown, source_system, target_system, version, status, client_edit_mode,
+         client_can_add_entries, client_can_delete_entries, client_instructions)
        SELECT company_id, integration_id, process_id, $1, $2, description,
-              content_markdown, source_system, target_system, 1, 'draft'
+              content_markdown, source_system, target_system, 1, 'draft', client_edit_mode,
+              client_can_add_entries, client_can_delete_entries, client_instructions
          FROM integration_mapping_sets
         WHERE id = $3
        RETURNING id`,
@@ -690,9 +915,11 @@ router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res)
     await client.query(
       `INSERT INTO integration_mapping_entries
         (mapping_set_id, source_path, source_type, target_path, target_type, direction,
-         transformation, fallback_value, is_required, notes, examples, sort_order, section, mapping_status)
+         transformation, fallback_value, is_required, notes, examples, sort_order, section,
+         mapping_status, client_editable_fields)
        SELECT $1, source_path, source_type, target_path, target_type, direction,
-              transformation, fallback_value, is_required, notes, examples, sort_order, section, mapping_status
+              transformation, fallback_value, is_required, notes, examples, sort_order, section,
+              mapping_status, client_editable_fields
          FROM integration_mapping_entries
         WHERE mapping_set_id = $2`,
       [clonedId, mappingSetId]

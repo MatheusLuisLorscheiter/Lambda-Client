@@ -40,6 +40,9 @@ const run = async () => {
         "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'",
         "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'",
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS client_can_comment BOOLEAN NOT NULL DEFAULT TRUE',
+        "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS client_editable_fields JSONB NOT NULL DEFAULT '[]'",
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS is_client_visible BOOLEAN NOT NULL DEFAULT TRUE',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ',
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1',
         'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES process_updates(id) ON DELETE SET NULL',
         "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'update'",
@@ -49,8 +52,20 @@ const run = async () => {
         'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ',
         'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS content_markdown TEXT',
         'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ',
+        "ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_edit_mode TEXT NOT NULL DEFAULT 'none'",
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_can_add_entries BOOLEAN NOT NULL DEFAULT FALSE',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_can_delete_entries BOOLEAN NOT NULL DEFAULT FALSE',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS client_instructions TEXT',
         'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS section TEXT',
         "ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS mapping_status TEXT NOT NULL DEFAULT 'mapped'",
+        "ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS client_editable_fields JSONB NOT NULL DEFAULT '[]'",
+        'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS last_client_edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS last_client_edited_at TIMESTAMPTZ',
+        `DO $$ BEGIN
+                    ALTER TABLE integration_mapping_sets
+                    ADD CONSTRAINT chk_mapping_client_edit_mode
+                    CHECK (client_edit_mode IN ('none', 'all', 'selected'));
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         `DO $$ BEGIN
                     ALTER TABLE integration_mapping_entries
                     ADD CONSTRAINT chk_mapping_entry_status
@@ -58,6 +73,8 @@ const run = async () => {
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         "UPDATE process_items SET reference_code = 'LP-' || LPAD(id::text, 6, '0') WHERE reference_code IS NULL",
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_process_reference_code ON process_items(reference_code)',
+        'CREATE INDEX IF NOT EXISTS idx_process_items_visibility ON process_items(company_id, archived_at, is_client_visible)',
+        'CREATE INDEX IF NOT EXISTS idx_mapping_sets_client_visibility ON integration_mapping_sets(company_id, integration_id, status)',
         `WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY position NULLS LAST, created_at, id) AS next_position
             FROM process_items

@@ -16,6 +16,9 @@ const validUpdateKinds = new Set(['update', 'comment', 'status', 'decision', 'de
 const validChecklistStatuses = new Set(['todo', 'in_progress', 'done', 'blocked']);
 const validDeliveryStatuses = new Set(['draft', 'ready', 'accepted', 'rejected']);
 const validDeliveryEnvironments = new Set(['development', 'staging', 'production']);
+const validClientProcessFields = new Set([
+  'title', 'description', 'objective', 'scope', 'acceptanceCriteria', 'tags'
+]);
 
 const normalizeText = (value, maxLength, { required = false } = {}) => {
   if (value === undefined) return undefined;
@@ -31,6 +34,16 @@ const normalizeTags = (value) => {
   const tags = [...new Set(value.map(item => String(item).trim().toLowerCase()).filter(Boolean))];
   if (tags.length > 20 || tags.some(tag => tag.length > 40)) throw new Error('Tags inválidas');
   return tags;
+};
+
+const normalizeClientProcessFields = (value) => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('Campos editáveis pelo cliente são inválidos');
+  const fields = [...new Set(value.map(field => String(field).trim()).filter(Boolean))];
+  if (fields.some(field => !validClientProcessFields.has(field))) {
+    throw new Error('Há campos editáveis pelo cliente que não são permitidos');
+  }
+  return fields;
 };
 
 const normalizeLinks = (value) => {
@@ -116,6 +129,9 @@ const selectFields = `
   process_items.tags,
   process_items.custom_fields AS "customFields",
   process_items.client_can_comment AS "clientCanComment",
+  process_items.client_editable_fields AS "clientEditableFields",
+  process_items.is_client_visible AS "isClientVisible",
+  process_items.archived_at AS "archivedAt",
   process_items.version,
   process_items.latest_update AS "latestUpdate",
   process_items.created_at AS "createdAt",
@@ -249,7 +265,9 @@ const getProcessItem = async (id, user = null) => {
 const getAuthorizedProcess = async (id, user) => {
   const item = await getProcessItem(id, user);
   if (!item) return null;
-  if (user.role === 'client' && item.companyId !== user.companyId) return null;
+  if (user.role === 'client' && (
+    item.companyId !== user.companyId || item.archivedAt || item.isClientVisible === false
+  )) return null;
   return item;
 };
 
@@ -260,6 +278,8 @@ router.get('/', authenticateToken, async (req, res) => {
   if (req.user.role === 'client') {
     values.push(req.user.companyId);
     conditions.push(`process_items.company_id = $${values.length}`);
+    conditions.push('process_items.archived_at IS NULL');
+    conditions.push('process_items.is_client_visible = TRUE');
   } else if (req.query.companyId) {
     const companyId = Number(req.query.companyId);
     if (!Number.isInteger(companyId) || companyId <= 0) {
@@ -267,6 +287,11 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     values.push(companyId);
     conditions.push(`process_items.company_id = $${values.length}`);
+  }
+
+  if (req.user.role === 'admin') {
+    if (req.query.archived === 'only') conditions.push('process_items.archived_at IS NOT NULL');
+    else if (req.query.archived !== 'all') conditions.push('process_items.archived_at IS NULL');
   }
 
   if (req.query.status) {
@@ -330,6 +355,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
   if (req.user.role === 'client') {
     values.push(req.user.companyId);
     conditions.push(`company_id = $${values.length}`);
+    conditions.push('archived_at IS NULL');
+    conditions.push('is_client_visible = TRUE');
   } else if (req.query.companyId) {
     const companyId = Number(req.query.companyId);
     if (!Number.isInteger(companyId) || companyId <= 0) {
@@ -338,6 +365,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
     values.push(companyId);
     conditions.push(`company_id = $${values.length}`);
   }
+  if (req.user.role === 'admin') conditions.push('archived_at IS NULL');
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await query(
@@ -478,6 +506,8 @@ router.post('/', authenticateToken, async (req, res) => {
   let blockedReason = null;
   let nextAction = null;
   let clientCanComment = true;
+  let clientEditableFields = [];
+  let isClientVisible = true;
   let latestUpdate = status === 'requested'
     ? 'Solicitação recebida. A análise de viabilidade será iniciada em até 48h úteis.'
     : null;
@@ -521,6 +551,12 @@ router.post('/', authenticateToken, async (req, res) => {
     blockedReason = String(req.body.blockedReason || '').trim() || null;
     nextAction = String(req.body.nextAction || '').trim() || null;
     clientCanComment = req.body.clientCanComment !== false;
+    try {
+      clientEditableFields = normalizeClientProcessFields(req.body.clientEditableFields) || [];
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    isClientVisible = req.body.isClientVisible !== false;
     if (req.body.targetSlaAt) {
       targetSlaAt = new Date(req.body.targetSlaAt);
       if (Number.isNaN(targetSlaAt.getTime())) {
@@ -555,9 +591,9 @@ router.post('/', authenticateToken, async (req, res) => {
         (company_id, requested_by, title, description, category, status, priority, position,
          complexity, progress, estimate_business_days, planned_start, due_date, delivered_at, latest_update,
          created_at, owner_user_id, objective, scope, acceptance_criteria, impact, health, target_sla_at,
-         blocked_reason, next_action, tags, client_can_comment)
+         blocked_reason, next_action, tags, client_can_comment, client_editable_fields, is_client_visible)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               COALESCE($16, NOW()), $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+               COALESCE($16, NOW()), $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
        RETURNING id`,
       [
         companyId,
@@ -586,7 +622,9 @@ router.post('/', authenticateToken, async (req, res) => {
         blockedReason,
         nextAction,
         JSON.stringify(tags),
-        clientCanComment
+        clientCanComment,
+        JSON.stringify(clientEditableFields),
+        isClientVisible
       ]
     );
     processId = result.rows[0].id;
@@ -627,17 +665,92 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 router.patch('/:processId', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
-  }
-
   const processId = Number(req.params.processId);
   if (!Number.isInteger(processId) || processId <= 0) {
     return res.status(400).json({ error: 'Demanda inválida' });
   }
-  const existing = await getProcessItem(processId);
+  const existing = req.user.role === 'client'
+    ? await getAuthorizedProcess(processId, req.user)
+    : await getProcessItem(processId);
   if (!existing) {
     return res.status(404).json({ error: 'Demanda não encontrada' });
+  }
+
+  if (req.user.role === 'client') {
+    const requestedFields = Object.keys(req.body).filter(key => key !== 'expectedVersion');
+    const editableFields = new Set(existing.clientEditableFields || []);
+    const forbiddenField = requestedFields.find(field => !validClientProcessFields.has(field) || !editableFields.has(field));
+    if (!requestedFields.length || forbiddenField) {
+      return res.status(403).json({
+        error: forbiddenField
+          ? `O campo "${forbiddenField}" não está liberado para edição`
+          : 'Nenhuma alteração permitida foi informada'
+      });
+    }
+    if (['delivered', 'cancelled'].includes(existing.status)) {
+      return res.status(409).json({ error: 'Esta demanda já foi encerrada e não pode mais ser alterada' });
+    }
+    if (req.body.expectedVersion !== undefined && Number(req.body.expectedVersion) !== Number(existing.version)) {
+      return res.status(409).json({ error: 'A demanda foi atualizada. Reabra o editor para carregar a versão mais recente.' });
+    }
+
+    const updates = [];
+    const values = [];
+    const add = (column, value) => {
+      values.push(value);
+      updates.push(`${column} = $${values.length}`);
+    };
+    try {
+      if (req.body.title !== undefined) add('title', normalizeText(req.body.title, 160, { required: true }));
+      if (req.body.description !== undefined) add('description', normalizeText(req.body.description, 5000, { required: true }));
+      if (req.body.objective !== undefined) add('objective', normalizeText(req.body.objective, 3000));
+      if (req.body.scope !== undefined) add('scope', normalizeText(req.body.scope, 5000));
+      if (req.body.acceptanceCriteria !== undefined) {
+        add('acceptance_criteria', normalizeText(req.body.acceptanceCriteria, 5000));
+      }
+      if (req.body.tags !== undefined) add('tags', JSON.stringify(normalizeTags(req.body.tags)));
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    updates.push('version = version + 1', 'updated_at = NOW()');
+    values.push(processId);
+    await query(
+      `UPDATE process_items SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values
+    );
+    await query(
+      `INSERT INTO process_updates
+        (process_id, author_user_id, kind, visibility, message, metadata)
+       VALUES ($1, $2, 'system', 'client', $3, $4)`,
+      [
+        processId,
+        req.user.id,
+        'Informações da solicitação atualizadas pelo cliente.',
+        JSON.stringify({ fields: requestedFields })
+      ]
+    );
+    await logAudit({
+      companyId: existing.companyId,
+      userId: req.user.id,
+      action: 'process.client.update',
+      resourceType: 'process',
+      resourceId: String(processId),
+      metadata: { fields: requestedFields },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+    publishProcessEvent({
+      companyId: existing.companyId,
+      processId,
+      type: 'process.client.updated',
+      data: { fields: requestedFields }
+    });
+    return res.json({ process: await getProcessItem(processId, req.user) });
+  }
+
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
   const updates = [];
@@ -837,6 +950,21 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   if (req.body.clientCanComment !== undefined) {
     add('client_can_comment', Boolean(req.body.clientCanComment));
   }
+  if (req.body.clientEditableFields !== undefined) {
+    try {
+      add('client_editable_fields', JSON.stringify(normalizeClientProcessFields(req.body.clientEditableFields)));
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+  if (req.body.isClientVisible !== undefined) {
+    add('is_client_visible', Boolean(req.body.isClientVisible));
+  }
+  if (req.body.archived !== undefined) {
+    const archived = Boolean(req.body.archived);
+    add('archived_at', archived ? new Date() : null);
+    if (archived) add('position', null);
+  }
   if (req.body.customFields !== undefined) {
     if (!req.body.customFields || typeof req.body.customFields !== 'object' || Array.isArray(req.body.customFields)) {
       return res.status(400).json({ error: 'Campos personalizados inválidos' });
@@ -930,6 +1058,35 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   });
 
   res.json({ process: item });
+});
+
+router.delete('/:processId', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
+  }
+  const processId = Number(req.params.processId);
+  if (!Number.isInteger(processId) || processId <= 0) {
+    return res.status(400).json({ error: 'Demanda inválida' });
+  }
+  const existing = await getProcessItem(processId);
+  if (!existing) return res.status(404).json({ error: 'Demanda não encontrada' });
+  if (!existing.archivedAt) {
+    return res.status(409).json({ error: 'Arquive a demanda antes de excluí-la definitivamente' });
+  }
+  const result = await query('DELETE FROM process_items WHERE id = $1 RETURNING id', [processId]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Demanda não encontrada' });
+  await logAudit({
+    companyId: existing.companyId,
+    userId: req.user.id,
+    action: 'process.delete',
+    resourceType: 'process',
+    resourceId: String(processId),
+    metadata: { referenceCode: existing.referenceCode, title: existing.title },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+  publishProcessEvent({ companyId: existing.companyId, processId, type: 'process.deleted' });
+  res.json({ success: true });
 });
 
 router.post('/queue/reorder', authenticateToken, async (req, res) => {

@@ -37,6 +37,8 @@ export interface MappingEntry {
   examples: Record<string, unknown>
   section: string | null
   mappingStatus: 'mapped' | 'pending' | 'attention' | 'ignored'
+  clientEditableFields: MappingEntryClientField[]
+  lastClientEditedAt: string | null
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -64,6 +66,10 @@ export interface MappingSet {
   targetSystem: string
   version: number
   status: 'draft' | 'published' | 'archived'
+  clientEditMode: 'none' | 'all' | 'selected'
+  clientCanAddEntries: boolean
+  clientCanDeleteEntries: boolean
+  clientInstructions: string | null
   publishedAt: string | null
   closedAt: string | null
   createdAt: string
@@ -71,6 +77,20 @@ export interface MappingSet {
   entries: MappingEntry[]
   attachments: MappingAttachment[]
 }
+
+export type MappingEntryClientField =
+  | 'section'
+  | 'sourcePath'
+  | 'sourceType'
+  | 'targetPath'
+  | 'targetType'
+  | 'direction'
+  | 'transformation'
+  | 'fallbackValue'
+  | 'isRequired'
+  | 'notes'
+  | 'examples'
+  | 'mappingStatus'
 
 export interface ClientUser {
   id: number
@@ -129,6 +149,9 @@ export interface ProcessItem {
   tags: string[]
   customFields?: Record<string, unknown>
   clientCanComment: boolean
+  clientEditableFields: ProcessClientField[]
+  isClientVisible: boolean
+  archivedAt: string | null
   version: number
   latestUpdate: string | null
   createdAt: string
@@ -154,6 +177,14 @@ export interface ProcessItem {
   checklist?: ProcessChecklistItem[]
   deliveries?: ProcessDelivery[]
 }
+
+export type ProcessClientField =
+  | 'title'
+  | 'description'
+  | 'objective'
+  | 'scope'
+  | 'acceptanceCriteria'
+  | 'tags'
 
 export interface ProcessChecklistItem {
   id: number

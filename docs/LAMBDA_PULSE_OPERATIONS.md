@@ -24,6 +24,8 @@ Cada solicitação recebe:
 - timeline auditável;
 - comentários habilitados por padrão.
 
+O administrador também controla a visibilidade da demanda e pode liberar, campo a campo, a edição de título, contexto, objetivo, escopo, critérios de aceite e tags. O cliente nunca recebe permissão para alterar status, prioridade, planejamento ou progresso. Atualizações do cliente usam a versão esperada para evitar sobrescrita silenciosa e geram evento de sistema e log de auditoria.
+
 ### 2. Análise e planejamento
 
 O administrador qualifica:
@@ -57,6 +59,8 @@ A timeline diferencia:
 
 Comentários registram autor, papel, visibilidade, edição e resposta. Clientes só acessam eventos visíveis ao cliente. Comentários internos permanecem restritos ao administrador.
 
+Demandas arquivadas saem da operação ativa e do portal do cliente sem perder etapas, entregas ou histórico. A exclusão permanente só é aceita depois do arquivamento.
+
 ### 5. Entrega e aceite
 
 Uma entrega registra:
@@ -81,7 +85,13 @@ Cada integração pode ter conjuntos de mapeamento com:
 - direção, transformação e valor padrão;
 - obrigatoriedade, exemplos e observações.
 
-Mapas publicados são imutáveis. Alterações exigem uma nova versão; ao publicar a nova versão, a versão anterior é arquivada. O cliente vê somente a versão publicada e pode exportá-la em CSV.
+O administrador escolhe a política de colaboração de cada mapa:
+
+- `none`: somente visualização;
+- `all`: documento e todos os campos editáveis, com inclusão e exclusão de vínculos opcionais;
+- `selected`: somente propriedades explicitamente liberadas em cada vínculo.
+
+Alterações do cliente são aceitas apenas na versão publicada da própria empresa, registram autor e data, incrementam a versão e entram na auditoria. Alterações administrativas de conteúdo continuam sendo feitas em rascunho; ao publicar uma nova versão, a anterior é arquivada. O cliente vê somente mapas publicados. Arquivar remove o mapa do portal sem apagar seu histórico, enquanto a exclusão permanente exige que ele já não esteja publicado.
 
 ### 7. Operação AWS
 
@@ -116,6 +126,7 @@ Falhas de consulta não são convertidas em zeros “saudáveis”: a interface 
 - `GET /processes/stream/events`
 - `POST /processes`
 - `PATCH /processes/:processId`
+- `DELETE /processes/:processId` (somente após arquivamento)
 - `POST /processes/queue/reorder`
 - `POST|PATCH|DELETE /processes/:processId/comments[...]`
 - `POST|PATCH|DELETE /processes/:processId/checklist[...]`
@@ -128,6 +139,7 @@ Falhas de consulta não são convertidas em zeros “saudáveis”: a interface 
 - `POST /lambda/integrations/:integrationId/health-check`
 - `GET|POST /lambda/integrations/:integrationId/mappings`
 - `PATCH /lambda/mappings/:mappingSetId`
+- `DELETE /lambda/mappings/:mappingSetId` (rascunho ou arquivado)
 - `POST|PATCH|DELETE /lambda/mappings/:mappingSetId/entries[...]`
 - `POST /lambda/mappings/:mappingSetId/clone`
 

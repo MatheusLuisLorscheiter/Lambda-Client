@@ -26,6 +26,7 @@
             <option value="">Todos os status</option>
             <option value="intake">Recebidas / análise</option>
             <option value="execution">Em execução / validação</option>
+            <option value="archived">Arquivadas</option>
             <option v-for="status in statuses" :key="status.value" :value="status.value">{{ status.label }}</option>
           </select>
         </label>
@@ -68,6 +69,8 @@
               <span class="font-mono text-xs text-slate-400">{{ item.referenceCode }}</span>
               <span v-if="item.position && item.status === 'queued'" class="text-xs font-medium text-slate-500">Fila #{{ item.position }}</span>
               <span v-if="item.health !== 'on_track'" :class="healthClass(item.health)" class="rounded-full px-2 py-0.5 text-xs font-medium">{{ healthLabel(item.health) }}</span>
+              <span v-if="item.archivedAt" class="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">Arquivada</span>
+              <span v-else-if="!item.isClientVisible" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Oculta do cliente</span>
             </div>
             <p class="mt-2 truncate font-medium text-slate-950">{{ item.title }}</p>
             <p class="mt-1 truncate text-sm text-slate-500">{{ item.nextAction || item.latestUpdate || item.description }}</p>
@@ -165,6 +168,17 @@
                   <span><span class="block text-sm font-medium text-slate-700">Comentários do cliente</span><span class="mt-0.5 block text-xs text-slate-400">Permite dúvidas e validações dentro do processo.</span></span>
                   <input v-model="editor.clientCanComment" type="checkbox" class="h-4 w-4 rounded border-slate-300">
                 </label>
+                <label class="flex items-center justify-between rounded-md border border-slate-200 px-3 py-3">
+                  <span><span class="block text-sm font-medium text-slate-700">Visível no portal do cliente</span><span class="mt-0.5 block text-xs text-slate-400">Ocultar não apaga o processo nem o histórico interno.</span></span>
+                  <input v-model="editor.isClientVisible" type="checkbox" class="h-4 w-4 rounded border-slate-300">
+                </label>
+                <fieldset class="rounded-md border border-slate-200 p-4">
+                  <legend class="px-1 text-sm font-medium text-slate-800">O cliente pode editar</legend>
+                  <p class="mt-1 text-xs leading-5 text-slate-500">Libere somente informações de contexto. Planejamento, status e progresso continuam sob controle administrativo.</p>
+                  <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label v-for="field in clientProcessFieldOptions" :key="field.value" class="flex items-center gap-2 text-sm text-slate-600"><input v-model="editor.clientEditableFields" type="checkbox" :value="field.value" class="h-4 w-4 rounded border-slate-300">{{ field.label }}</label>
+                  </div>
+                </fieldset>
               </section>
 
               <section v-else-if="editorTab === 'planning'" class="space-y-5">
@@ -242,7 +256,12 @@
             </div>
 
             <footer class="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:px-6">
-              <p class="hidden text-xs text-slate-400 sm:block">{{ editor.id ? `Versão ${selectedEditorProcess?.version || 1}` : 'Novo registro' }}</p>
+              <div class="flex items-center gap-2">
+                <p class="hidden text-xs text-slate-400 sm:block">{{ editor.id ? `Versão ${selectedEditorProcess?.version || 1}` : 'Novo registro' }}</p>
+                <button v-if="editor.id && !selectedEditorProcess?.archivedAt" type="button" class="rounded-md px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100" @click="archiveConfirmOpen = true">Arquivar</button>
+                <button v-if="editor.id && selectedEditorProcess?.archivedAt" type="button" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700" @click="restoreProcess">Restaurar</button>
+                <button v-if="editor.id && selectedEditorProcess?.archivedAt" type="button" class="rounded-md px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50" @click="deleteProcessConfirmOpen = true">Excluir</button>
+              </div>
               <div class="ml-auto flex gap-2"><button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700" @click="closeEditor">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar processo' }}</button></div>
             </footer>
           </form>
@@ -284,6 +303,24 @@
         <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="checkItemToDelete = null">Cancelar</button><button class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white" @click="deleteChecklistItem">Remover</button></div>
       </div>
     </div>
+
+    <div v-if="archiveConfirmOpen" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="archiveConfirmOpen = false"></div>
+      <div class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+        <h3 class="text-lg font-semibold text-slate-950">Arquivar esta demanda?</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">Ela deixará de aparecer no portal do cliente e sairá da operação ativa, mas todo o histórico continuará preservado.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="archiveConfirmOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="archiveProcess">Arquivar demanda</button></div>
+      </div>
+    </div>
+
+    <div v-if="deleteProcessConfirmOpen" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="deleteProcessConfirmOpen = false"></div>
+      <div class="relative w-full max-w-md rounded-lg border border-red-200 bg-white p-6 shadow-xl">
+        <h3 class="text-lg font-semibold text-slate-950">Excluir definitivamente?</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">A demanda, etapas, entregas e histórico serão removidos. Esta ação não pode ser desfeita.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="deleteProcessConfirmOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="deleteProcess">Excluir demanda</button></div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -291,7 +328,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { formatCalendarDate, formatInstant, toCalendarDateInput } from '@/utils/dates'
-import type { Company, ProcessItem, ProcessStatus } from '@/types'
+import type { Company, ProcessClientField, ProcessItem, ProcessStatus } from '@/types'
 
 const props = defineProps<{ companies: Company[] }>()
 const api = useApi()
@@ -330,6 +367,8 @@ const emptyEditor = () => ({
   nextAction: '',
   tagsText: '',
   clientCanComment: true,
+  clientEditableFields: [] as ProcessClientField[],
+  isClientVisible: true,
   createdAt: '',
   deliveredAt: '',
   updates: [] as NonNullable<ProcessItem['updates']>,
@@ -340,6 +379,8 @@ const editor = ref(emptyEditor())
 const checklistModalOpen = ref(false)
 const deliveryModalOpen = ref(false)
 const checkItemToDelete = ref<number | null>(null)
+const archiveConfirmOpen = ref(false)
+const deleteProcessConfirmOpen = ref(false)
 const secondarySaving = ref(false)
 const secondaryFormError = ref('')
 const checklistForm = ref({ title: '', description: '', dueDate: '' })
@@ -354,13 +395,23 @@ const statuses: Array<{ value: ProcessStatus; label: string }> = [
   { value: 'paused', label: 'Pausada' },
   { value: 'cancelled', label: 'Cancelada' }
 ]
+const clientProcessFieldOptions: Array<{ value: ProcessClientField; label: string }> = [
+  { value: 'title', label: 'Título' },
+  { value: 'description', label: 'Contexto atual' },
+  { value: 'objective', label: 'Resultado esperado' },
+  { value: 'scope', label: 'Escopo' },
+  { value: 'acceptanceCriteria', label: 'Critérios de aceite' },
+  { value: 'tags', label: 'Tags' }
+]
 
 const filteredProcesses = computed(() => {
   const search = searchFilter.value.trim().toLocaleLowerCase('pt-BR')
   return processes.value.filter(item =>
+    (statusFilter.value === 'archived' ? Boolean(item.archivedAt) : !item.archivedAt) &&
     (!companyFilter.value || String(item.companyId) === companyFilter.value) &&
     (
       !statusFilter.value ||
+      statusFilter.value === 'archived' ||
       item.status === statusFilter.value ||
       (statusFilter.value === 'intake' && ['requested', 'analysis'].includes(item.status)) ||
       (statusFilter.value === 'execution' && ['in_progress', 'validation'].includes(item.status))
@@ -370,10 +421,10 @@ const filteredProcesses = computed(() => {
   )
 })
 const summaries = computed(() => [
-  { label: 'Recebidas / análise', value: processes.value.filter(item => ['requested', 'analysis'].includes(item.status)).length, filter: 'analysis' },
-  { label: 'Na fila', value: processes.value.filter(item => item.status === 'queued').length, filter: 'queued' },
-  { label: 'Em execução', value: processes.value.filter(item => ['in_progress', 'validation'].includes(item.status)).length, filter: 'execution' },
-  { label: 'Entregues', value: processes.value.filter(item => item.status === 'delivered').length, filter: 'delivered' }
+  { label: 'Recebidas / análise', value: processes.value.filter(item => !item.archivedAt && ['requested', 'analysis'].includes(item.status)).length, filter: 'analysis' },
+  { label: 'Na fila', value: processes.value.filter(item => !item.archivedAt && item.status === 'queued').length, filter: 'queued' },
+  { label: 'Em execução', value: processes.value.filter(item => !item.archivedAt && ['in_progress', 'validation'].includes(item.status)).length, filter: 'execution' },
+  { label: 'Entregues', value: processes.value.filter(item => !item.archivedAt && item.status === 'delivered').length, filter: 'delivered' }
 ])
 const boardColumns = computed(() => [
   { key: 'intake', label: 'Entrada', items: filteredProcesses.value.filter(item => ['requested', 'analysis'].includes(item.status)) },
@@ -389,7 +440,9 @@ const activeFilters = computed(() => {
     filters.push({ label: company?.name || 'Empresa', clear: () => { companyFilter.value = '' } })
   }
   if (statusFilter.value) {
-    const label = statusFilter.value === 'intake'
+    const label = statusFilter.value === 'archived'
+      ? 'Arquivadas'
+      : statusFilter.value === 'intake'
       ? 'Recebidas / análise'
       : statusFilter.value === 'execution'
         ? 'Em execução / validação'
@@ -435,7 +488,7 @@ const fetchProcesses = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    processes.value = (await api.get<{ processes: ProcessItem[] }>('/processes')).processes
+    processes.value = (await api.get<{ processes: ProcessItem[] }>('/processes?archived=all')).processes
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : 'Tente novamente em alguns instantes.'
   } finally {
@@ -473,6 +526,8 @@ const openEdit = (item: ProcessItem) => {
     nextAction: item.nextAction || '',
     tagsText: (item.tags || []).join(', '),
     clientCanComment: item.clientCanComment !== false,
+    clientEditableFields: item.clientEditableFields || [],
+    isClientVisible: item.isClientVisible !== false,
     createdAt: toCalendarDateInput(item.createdAt),
     deliveredAt: toCalendarDateInput(item.deliveredAt),
     updates: item.updates || [],
@@ -515,7 +570,9 @@ const saveProcess = async () => {
     blockedReason: editor.value.health === 'blocked' ? editor.value.blockedReason : null,
     nextAction: editor.value.nextAction || null,
     tags: editor.value.tagsText.split(',').map(tag => tag.trim()).filter(Boolean),
-    clientCanComment: editor.value.clientCanComment
+    clientCanComment: editor.value.clientCanComment,
+    clientEditableFields: editor.value.clientEditableFields,
+    isClientVisible: editor.value.isClientVisible
   }
   if (editor.value.latestUpdate.trim()) payload.latestUpdate = editor.value.latestUpdate.trim()
   try {
@@ -539,6 +596,50 @@ const refreshOpenEditor = async () => {
       openEdit(updated)
       editorTab.value = activeTab
     }
+  }
+}
+const archiveProcess = async () => {
+  if (!editor.value.id) return
+  saving.value = true
+  formError.value = ''
+  try {
+    await api.patch(`/processes/${editor.value.id}`, { archived: true })
+    archiveConfirmOpen.value = false
+    await fetchProcesses()
+    closeEditor()
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : 'Não foi possível arquivar a demanda'
+  } finally {
+    saving.value = false
+  }
+}
+const restoreProcess = async () => {
+  if (!editor.value.id) return
+  saving.value = true
+  formError.value = ''
+  try {
+    await api.patch(`/processes/${editor.value.id}`, { archived: false })
+    await fetchProcesses()
+    closeEditor()
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : 'Não foi possível restaurar a demanda'
+  } finally {
+    saving.value = false
+  }
+}
+const deleteProcess = async () => {
+  if (!editor.value.id) return
+  saving.value = true
+  formError.value = ''
+  try {
+    await api.del(`/processes/${editor.value.id}`)
+    deleteProcessConfirmOpen.value = false
+    await fetchProcesses()
+    closeEditor()
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : 'Não foi possível excluir a demanda'
+  } finally {
+    saving.value = false
   }
 }
 const openChecklistModal = () => {

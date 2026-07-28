@@ -6,7 +6,7 @@
         <select v-model="selectedSetId" class="min-h-11 w-full max-w-2xl rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-900">
           <option value="">Selecione um de-para</option>
           <option v-for="mappingSet in mappingSets" :key="mappingSet.id" :value="String(mappingSet.id)">
-            {{ mappingSet.name }} · {{ mappingSet.sourceSystem }} → {{ mappingSet.targetSystem }} · v{{ mappingSet.version }}
+            {{ mappingSet.name }} · {{ mappingSet.sourceSystem }} → {{ mappingSet.targetSystem }} · v{{ mappingSet.version }} · {{ setStatusLabel(mappingSet.status) }}
           </option>
         </select>
       </label>
@@ -59,18 +59,24 @@
             </p>
             <p v-if="selectedSet.processTitle" class="mt-1 text-xs text-slate-400">Processo relacionado: {{ selectedSet.processTitle }}</p>
           </div>
-          <div v-if="auth.isAdmin" class="flex flex-wrap gap-2">
-            <button class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openMetadataModal">
+          <div class="flex flex-wrap gap-2">
+            <button v-if="auth.isAdmin" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openMetadataModal">
               Configurações
             </button>
-            <button v-if="selectedSet.status !== 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="cloneSet">
+            <button v-if="auth.isAdmin && selectedSet.status !== 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="cloneSet">
               Criar nova versão
             </button>
-            <button v-if="selectedSet.status === 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openDocumentEditor">
+            <button v-if="canEditDocument" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openDocumentEditor">
               Editar documento
             </button>
-            <button v-if="selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
               Publicar para o cliente
+            </button>
+            <button v-if="auth.isAdmin && selectedSet.status !== 'archived'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" @click="archiveConfirmOpen = true">
+              Arquivar
+            </button>
+            <button v-if="auth.isAdmin && selectedSet.status !== 'published'" class="rounded-md px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50" @click="deleteSetConfirmOpen = true">
+              Excluir
             </button>
           </div>
         </div>
@@ -89,8 +95,8 @@
             <dd class="mt-1 text-xl font-semibold text-slate-950">{{ selectedSet.attachments?.length || 0 }}</dd>
           </div>
           <div class="bg-white px-4 py-3">
-            <dt class="text-xs text-slate-500">{{ selectedSet.status === 'published' ? 'Fechado para edições' : 'Última alteração' }}</dt>
-            <dd class="mt-1 text-sm font-medium text-slate-800">{{ formatDate(selectedSet.closedAt || selectedSet.updatedAt) }}</dd>
+            <dt class="text-xs text-slate-500">{{ selectedSet.clientEditMode === 'none' ? 'Última alteração' : 'Colaboração do cliente' }}</dt>
+            <dd class="mt-1 text-sm font-medium text-slate-800">{{ selectedSet.clientEditMode === 'none' ? formatDate(selectedSet.closedAt || selectedSet.updatedAt) : clientEditModeLabel(selectedSet.clientEditMode) }}</dd>
           </div>
         </dl>
       </header>
@@ -109,14 +115,20 @@
       </nav>
 
       <section v-if="activeTab === 'document'" class="pt-5">
-        <div v-if="selectedSet.status === 'published'" class="mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Fechado para edições em {{ formatDate(selectedSet.closedAt || selectedSet.publishedAt || selectedSet.updatedAt) }}. Para alterar, crie uma nova versão.
+        <div v-if="selectedSet.clientInstructions && !auth.isAdmin" class="mb-4 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-900">
+          <span class="font-medium">Orientação da equipe:</span> {{ selectedSet.clientInstructions }}
+        </div>
+        <div v-if="selectedSet.status === 'published' && selectedSet.clientEditMode === 'none'" class="mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Versão publicada e protegida contra alterações. Para editar como administrador, crie uma nova versão.
+        </div>
+        <div v-else-if="selectedSet.status === 'published' && selectedSet.clientEditMode !== 'none'" class="mb-5 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          {{ selectedSet.clientEditMode === 'all' ? 'Este de-para está aberto para preenchimento completo pelo cliente.' : 'Somente os campos marcados pela equipe podem ser preenchidos pelo cliente.' }}
         </div>
         <div v-if="selectedSet.contentMarkdown" class="mapping-document rounded-lg border border-slate-200 bg-white px-5 py-6 sm:px-8 sm:py-8" v-html="renderedDocument"></div>
         <div v-else class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
           <h4 class="font-semibold text-slate-900">O documento ainda está vazio</h4>
           <p class="mx-auto mt-1 max-w-lg text-sm leading-6 text-slate-500">Registre tabelas, perguntas, decisões, regras e pré-requisitos com total liberdade usando Markdown.</p>
-          <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white" @click="openDocumentEditor">
+          <button v-if="canEditDocument" class="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white" @click="openDocumentEditor">
             Começar documento
           </button>
         </div>
@@ -140,7 +152,7 @@
               </select>
             </label>
           </div>
-          <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="min-h-10 rounded-md bg-slate-950 px-3 text-sm font-medium text-white" @click="openEntryModal()">
+          <button v-if="canAddEntry" class="min-h-10 rounded-md bg-slate-950 px-3 text-sm font-medium text-white" @click="openEntryModal()">
             Adicionar vínculo
           </button>
         </div>
@@ -154,7 +166,7 @@
                 <th class="px-4 py-3">Regra</th>
                 <th class="px-4 py-3">Situação</th>
                 <th class="px-4 py-3">Observações</th>
-                <th v-if="auth.isAdmin && selectedSet.status === 'draft'" class="w-36 px-4 py-3"><span class="sr-only">Ações</span></th>
+                <th v-if="showsEntryActions" class="w-36 px-4 py-3"><span class="sr-only">Ações</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 text-sm">
@@ -177,15 +189,15 @@
                   <span :class="entryStatusClass(entry.mappingStatus)" class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium">{{ entryStatusLabel(entry.mappingStatus) }}</span>
                 </td>
                 <td class="px-4 py-3"><p class="max-w-xs whitespace-pre-wrap text-xs leading-5 text-slate-500">{{ entry.notes || '—' }}</p></td>
-                <td v-if="auth.isAdmin && selectedSet.status === 'draft'" class="px-4 py-3">
+                <td v-if="showsEntryActions" class="px-4 py-3">
                   <div class="flex items-center justify-end gap-2">
-                    <button class="text-xs font-medium text-slate-700 hover:text-slate-950" @click="openEntryModal(entry)">Editar</button>
-                    <button class="text-xs font-medium text-red-600 hover:text-red-700" @click="entryToDelete = entry">Excluir</button>
+                    <button v-if="canEditEntry(entry)" class="text-xs font-medium text-slate-700 hover:text-slate-950" @click="openEntryModal(entry)">Editar</button>
+                    <button v-if="canDeleteEntry" class="text-xs font-medium text-red-600 hover:text-red-700" @click="entryToDelete = entry">Excluir</button>
                   </div>
                 </td>
               </tr>
               <tr v-if="!filteredEntries.length">
-                <td :colspan="auth.isAdmin && selectedSet.status === 'draft' ? 6 : 5" class="px-5 py-12 text-center">
+                <td :colspan="showsEntryActions ? 6 : 5" class="px-5 py-12 text-center">
                   <p class="text-sm font-medium text-slate-700">{{ selectedSet.entries.length ? 'Nenhum vínculo corresponde aos filtros.' : 'Nenhum vínculo estruturado.' }}</p>
                   <p v-if="!selectedSet.entries.length" class="mt-1 text-xs text-slate-500">Use esta visão quando precisar filtrar, exportar ou validar campos individualmente.</p>
                 </td>
@@ -323,6 +335,20 @@
             <div><label class="mb-1.5 block text-sm font-medium">Destino</label><input v-model="metadataForm.targetSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
           </div>
           <div><label class="mb-1.5 block text-sm font-medium">Descrição</label><textarea v-model="metadataForm.description" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
+          <div class="border-t border-slate-200 pt-4">
+            <label class="mb-1.5 block text-sm font-medium">Edição pelo cliente</label>
+            <select v-model="metadataForm.clientEditMode" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+              <option value="none">Somente visualização</option>
+              <option value="all">De-para inteiro editável</option>
+              <option value="selected">Somente campos selecionados</option>
+            </select>
+            <p class="mt-1 text-xs leading-5 text-slate-500">No modo seletivo, escolha os campos permitidos dentro de cada vínculo.</p>
+          </div>
+          <div v-if="metadataForm.clientEditMode === 'all'" class="grid gap-2 sm:grid-cols-2">
+            <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm"><input v-model="metadataForm.clientCanAddEntries" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300"><span><span class="block font-medium">Adicionar vínculos</span><span class="mt-0.5 block text-xs text-slate-500">Permite criar novas linhas.</span></span></label>
+            <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-3 text-sm"><input v-model="metadataForm.clientCanDeleteEntries" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300"><span><span class="block font-medium">Excluir vínculos</span><span class="mt-0.5 block text-xs text-slate-500">Permite remover linhas.</span></span></label>
+          </div>
+          <div><label class="mb-1.5 block text-sm font-medium">Orientações ao cliente</label><textarea v-model="metadataForm.clientInstructions" rows="3" maxlength="5000" placeholder="Explique o que deve ser preenchido e como validar." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
         </div>
         <p v-if="modalError" class="mt-3 text-sm text-red-700">{{ modalError }}</p>
         <div class="mt-5 flex justify-end gap-2"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="metadataModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar' }}</button></div>
@@ -337,19 +363,25 @@
           <p class="mt-1 text-sm text-slate-500">Documente o valor, a regra e o que ainda depende de decisão.</p>
         </header>
         <div class="grid gap-4 p-6 sm:grid-cols-2">
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Seção</label><input v-model="entryForm.section" maxlength="240" placeholder="Ex.: Condições de pagamento" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de origem</label><input v-model="entryForm.sourcePath" required maxlength="500" placeholder="Ex.: 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de destino</label><input v-model="entryForm.targetPath" required maxlength="500" placeholder="Ex.: A28 - Para 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Tipo de origem <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.sourceType" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Tipo de destino <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.targetType" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Situação</label><select v-model="entryForm.mappingStatus" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="mapped">Mapeado</option><option value="pending">Pendente</option><option value="attention">Requer atenção</option><option value="ignored">Desconsiderado</option></select></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Direção</label><select v-model="entryForm.direction" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="source_to_target">Origem → destino</option><option value="target_to_source">Destino → origem</option><option value="bidirectional">Bidirecional</option></select></div>
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Regra ou transformação</label><textarea v-model="entryForm.transformation" rows="3" maxlength="5000" placeholder="Ex.: remover pontuação e completar com zeros à esquerda." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor padrão (fallback)</label><input v-model="entryForm.fallbackValue" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
-          <label class="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2.5 text-sm font-medium"><input v-model="entryForm.isRequired" type="checkbox" class="h-4 w-4 rounded border-slate-300"> Campo obrigatório</label>
-          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de origem</label><input v-model="entryForm.sourceExample" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de destino</label><input v-model="entryForm.targetExample" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Observações e ações</label><textarea v-model="entryForm.notes" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
+          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Seção</label><input v-model="entryForm.section" :disabled="!canEditField('section')" maxlength="240" placeholder="Ex.: Condições de pagamento" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de origem</label><input v-model="entryForm.sourcePath" :disabled="!canEditField('sourcePath')" required maxlength="500" placeholder="Ex.: 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de destino</label><input v-model="entryForm.targetPath" :disabled="!canEditField('targetPath')" required maxlength="500" placeholder="Ex.: A28 - Para 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Tipo de origem <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.sourceType" :disabled="!canEditField('sourceType')" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Tipo de destino <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.targetType" :disabled="!canEditField('targetType')" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Situação</label><select v-model="entryForm.mappingStatus" :disabled="!canEditField('mappingStatus')" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><option value="mapped">Mapeado</option><option value="pending">Pendente</option><option value="attention">Requer atenção</option><option value="ignored">Desconsiderado</option></select></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Direção</label><select v-model="entryForm.direction" :disabled="!canEditField('direction')" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><option value="source_to_target">Origem → destino</option><option value="target_to_source">Destino → origem</option><option value="bidirectional">Bidirecional</option></select></div>
+          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Regra ou transformação</label><textarea v-model="entryForm.transformation" :disabled="!canEditField('transformation')" rows="3" maxlength="5000" placeholder="Ex.: remover pontuação e completar com zeros à esquerda." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Valor padrão (fallback)</label><input v-model="entryForm.fallbackValue" :disabled="!canEditField('fallbackValue')" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <label class="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2.5 text-sm font-medium"><input v-model="entryForm.isRequired" :disabled="!canEditField('isRequired')" type="checkbox" class="h-4 w-4 rounded border-slate-300"> Campo obrigatório</label>
+          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de origem</label><input v-model="entryForm.sourceExample" :disabled="!canEditField('examples')" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de destino</label><input v-model="entryForm.targetExample" :disabled="!canEditField('examples')" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Observações e ações</label><textarea v-model="entryForm.notes" :disabled="!canEditField('notes')" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+          <fieldset v-if="auth.isAdmin && selectedSet.clientEditMode === 'selected'" class="sm:col-span-2 rounded-md border border-slate-200 p-4">
+            <legend class="px-1 text-sm font-medium text-slate-800">Campos que o cliente pode editar</legend>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <label v-for="field in clientFieldOptions" :key="field.value" class="flex items-center gap-2 text-sm text-slate-600"><input v-model="entryForm.clientEditableFields" type="checkbox" :value="field.value" class="h-4 w-4 rounded border-slate-300">{{ field.label }}</label>
+            </div>
+          </fieldset>
           <p v-if="modalError" class="sm:col-span-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ modalError }}</p>
         </div>
         <footer class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="entryModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar vínculo' }}</button></footer>
@@ -403,6 +435,24 @@
       </div>
     </div>
 
+    <div v-if="archiveConfirmOpen && selectedSet" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="archiveConfirmOpen = false"></div>
+      <div class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+        <h3 class="text-lg font-semibold text-slate-950">Arquivar este de-para?</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">Ele deixará de aparecer imediatamente para o cliente, mas o histórico, vínculos e arquivos serão preservados para consulta interna.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="archiveConfirmOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="archiveSet">Arquivar</button></div>
+      </div>
+    </div>
+
+    <div v-if="deleteSetConfirmOpen && selectedSet" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="deleteSetConfirmOpen = false"></div>
+      <div class="relative w-full max-w-md rounded-lg border border-red-200 bg-white p-6 shadow-xl">
+        <h3 class="text-lg font-semibold text-slate-950">Excluir definitivamente?</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">“{{ selectedSet.name }}” e todos os vínculos e anexos desta versão serão removidos. Esta ação não pode ser desfeita.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="deleteSetConfirmOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="deleteSet">Excluir de-para</button></div>
+      </div>
+    </div>
+
     <div v-if="successMessage" class="fixed bottom-5 right-5 z-[90] rounded-md bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-lg" aria-live="polite">{{ successMessage }}</div>
   </section>
 </template>
@@ -420,7 +470,7 @@ import {
   readTextAttachment,
   renderMappingMarkdown
 } from '@/utils/mappingDocument'
-import type { MappingAttachment, MappingEntry, MappingSet } from '@/types'
+import type { MappingAttachment, MappingEntry, MappingEntryClientField, MappingSet } from '@/types'
 
 const props = defineProps<{ integrationId: number }>()
 const api = useApi()
@@ -447,13 +497,21 @@ const metadataModalOpen = ref(false)
 const entryModalOpen = ref(false)
 const attachmentModalOpen = ref(false)
 const publishConfirmOpen = ref(false)
+const archiveConfirmOpen = ref(false)
+const deleteSetConfirmOpen = ref(false)
 const entryToDelete = ref<MappingEntry | null>(null)
 const attachmentToDelete = ref<MappingAttachment | null>(null)
 const attachmentFile = ref<File | null>(null)
 const attachmentTextAvailable = ref(false)
 const appendAttachmentToDocument = ref(false)
 const setForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete' })
-const metadataForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '' })
+const metadataForm = ref({
+  name: '', sourceSystem: '', targetSystem: '', description: '',
+  clientEditMode: 'none' as MappingSet['clientEditMode'],
+  clientCanAddEntries: false,
+  clientCanDeleteEntries: false,
+  clientInstructions: ''
+})
 const emptyEntryForm = () => ({
   id: null as number | null,
   section: '',
@@ -467,12 +525,56 @@ const emptyEntryForm = () => ({
   isRequired: false,
   notes: '',
   mappingStatus: 'mapped' as MappingEntry['mappingStatus'],
+  clientEditableFields: [] as MappingEntryClientField[],
   sourceExample: '',
   targetExample: ''
 })
 const entryForm = ref(emptyEntryForm())
 
 const selectedSet = computed(() => mappingSets.value.find(item => String(item.id) === selectedSetId.value) || null)
+const canEditDocument = computed(() => Boolean(selectedSet.value && (
+  (auth.isAdmin && selectedSet.value.status === 'draft') ||
+  (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode === 'all')
+)))
+const canAddEntry = computed(() => Boolean(selectedSet.value && (
+  (auth.isAdmin && selectedSet.value.status === 'draft') ||
+  (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode === 'all' && selectedSet.value.clientCanAddEntries)
+)))
+const canDeleteEntry = computed(() => Boolean(selectedSet.value && (
+  (auth.isAdmin && selectedSet.value.status === 'draft') ||
+  (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode === 'all' && selectedSet.value.clientCanDeleteEntries)
+)))
+const canEditEntry = (entry: MappingEntry) => Boolean(selectedSet.value && (
+  (auth.isAdmin && selectedSet.value.status === 'draft') ||
+  (!auth.isAdmin && selectedSet.value.status === 'published' && (
+    selectedSet.value.clientEditMode === 'all' ||
+    (selectedSet.value.clientEditMode === 'selected' && entry.clientEditableFields?.length)
+  ))
+))
+const showsEntryActions = computed(() => Boolean(selectedSet.value && (
+  (auth.isAdmin && selectedSet.value.status === 'draft') ||
+  (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode !== 'none')
+)))
+const canEditField = (field: MappingEntryClientField) => {
+  if (auth.isAdmin) return true
+  if (!selectedSet.value || selectedSet.value.clientEditMode === 'none') return false
+  if (selectedSet.value.clientEditMode === 'all') return true
+  return entryForm.value.clientEditableFields.includes(field)
+}
+const clientFieldOptions: Array<{ value: MappingEntryClientField; label: string }> = [
+  { value: 'section', label: 'Seção' },
+  { value: 'sourcePath', label: 'Campo de origem' },
+  { value: 'sourceType', label: 'Tipo de origem' },
+  { value: 'targetPath', label: 'Campo de destino' },
+  { value: 'targetType', label: 'Tipo de destino' },
+  { value: 'direction', label: 'Direção' },
+  { value: 'transformation', label: 'Regra / transformação' },
+  { value: 'fallbackValue', label: 'Valor padrão' },
+  { value: 'isRequired', label: 'Obrigatoriedade' },
+  { value: 'examples', label: 'Exemplos' },
+  { value: 'notes', label: 'Observações' },
+  { value: 'mappingStatus', label: 'Situação' }
+]
 const renderedDocument = computed(() => renderMappingMarkdown(selectedSet.value?.contentMarkdown || ''))
 const pendingCount = computed(() => selectedSet.value?.entries.filter(entry => ['pending', 'attention'].includes(entry.mappingStatus)).length || 0)
 const filteredEntries = computed(() => {
@@ -499,6 +601,7 @@ const editorSnippets = [
 ]
 
 const setStatusLabel = (status: MappingSet['status']) => ({ draft: 'Rascunho', published: 'Publicado', archived: 'Arquivado' }[status])
+const clientEditModeLabel = (mode: MappingSet['clientEditMode']) => ({ none: 'Somente leitura', all: 'Edição completa', selected: 'Campos selecionados' }[mode])
 const setStatusClass = (status: MappingSet['status']) => ({
   draft: 'bg-amber-100 text-amber-800',
   published: 'bg-emerald-100 text-emerald-800',
@@ -647,7 +750,10 @@ const saveDocument = async () => {
   saving.value = true
   modalError.value = ''
   try {
-    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, { contentMarkdown: documentDraft.value || null })
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
+      contentMarkdown: documentDraft.value || null,
+      ...(!auth.isAdmin ? { expectedVersion: selectedSet.value.version } : {})
+    })
     closeDocumentEditor()
     await fetchMappings()
     showSuccess('Documento salvo')
@@ -664,7 +770,11 @@ const openMetadataModal = () => {
     name: selectedSet.value.name,
     sourceSystem: selectedSet.value.sourceSystem,
     targetSystem: selectedSet.value.targetSystem,
-    description: selectedSet.value.description || ''
+    description: selectedSet.value.description || '',
+    clientEditMode: selectedSet.value.clientEditMode || 'none',
+    clientCanAddEntries: selectedSet.value.clientCanAddEntries || false,
+    clientCanDeleteEntries: selectedSet.value.clientCanDeleteEntries || false,
+    clientInstructions: selectedSet.value.clientInstructions || ''
   }
   modalError.value = ''
   metadataModalOpen.value = true
@@ -676,7 +786,8 @@ const saveMetadata = async () => {
   try {
     await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
       ...metadataForm.value,
-      description: metadataForm.value.description || null
+      description: metadataForm.value.description || null,
+      clientInstructions: metadataForm.value.clientInstructions || null
     })
     metadataModalOpen.value = false
     await fetchMappings()
@@ -702,6 +813,7 @@ const openEntryModal = (entry?: MappingEntry) => {
     isRequired: entry.isRequired,
     notes: entry.notes || '',
     mappingStatus: entry.mappingStatus || 'mapped',
+    clientEditableFields: entry.clientEditableFields || [],
     sourceExample: typeof entry.examples?.source === 'string' ? entry.examples.source : '',
     targetExample: typeof entry.examples?.target === 'string' ? entry.examples.target : ''
   } : emptyEntryForm()
@@ -712,7 +824,7 @@ const saveEntry = async () => {
   if (!selectedSet.value) return
   saving.value = true
   modalError.value = ''
-  const payload = {
+  const fullPayload = {
     section: entryForm.value.section || null,
     sourcePath: entryForm.value.sourcePath,
     sourceType: entryForm.value.sourceType || null,
@@ -724,11 +836,16 @@ const saveEntry = async () => {
     isRequired: entryForm.value.isRequired,
     notes: entryForm.value.notes || null,
     mappingStatus: entryForm.value.mappingStatus,
+    ...(auth.isAdmin ? { clientEditableFields: entryForm.value.clientEditableFields } : {}),
     examples: {
       ...(entryForm.value.sourceExample ? { source: entryForm.value.sourceExample } : {}),
       ...(entryForm.value.targetExample ? { target: entryForm.value.targetExample } : {})
     }
   }
+  const payload = !auth.isAdmin && entryForm.value.id && selectedSet.value.clientEditMode === 'selected'
+    ? Object.fromEntries(Object.entries(fullPayload).filter(([field]) => entryForm.value.clientEditableFields.includes(field as MappingEntryClientField)))
+    : fullPayload
+  if (!auth.isAdmin && entryForm.value.id) Object.assign(payload, { expectedVersion: selectedSet.value.version })
   try {
     if (entryForm.value.id) await api.patch(`/lambda/mappings/${selectedSet.value.id}/entries/${entryForm.value.id}`, payload)
     else await api.post(`/lambda/mappings/${selectedSet.value.id}/entries`, payload)
@@ -841,6 +958,38 @@ const cloneSet = async () => {
     showSuccess('Nova versão criada')
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Não foi possível criar uma nova versão'
+  } finally {
+    saving.value = false
+  }
+}
+
+const archiveSet = async () => {
+  if (!selectedSet.value) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, { status: 'archived' })
+    archiveConfirmOpen.value = false
+    await fetchMappings(false)
+    showSuccess('De-para arquivado e removido do portal do cliente')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível arquivar o de-para'
+  } finally {
+    saving.value = false
+  }
+}
+
+const deleteSet = async () => {
+  if (!selectedSet.value) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    await api.del(`/lambda/mappings/${selectedSet.value.id}`)
+    deleteSetConfirmOpen.value = false
+    await fetchMappings(false)
+    showSuccess('De-para excluído definitivamente')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível excluir o de-para'
   } finally {
     saving.value = false
   }

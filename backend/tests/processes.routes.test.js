@@ -118,11 +118,11 @@ const invokePost = async (user, body) => {
   return { statusCode, body: responseBody };
 };
 
-const invokePatch = async (processId, body) => {
+const invokePatch = async (processId, body, user = { id: 7, role: 'admin', companyId: null }) => {
   let responseBody;
   let statusCode = 200;
   const req = {
-    user: { id: 7, role: 'admin', companyId: null },
+    user,
     params: { processId: String(processId) },
     body,
     ip: '127.0.0.1',
@@ -327,4 +327,61 @@ test('marking a process as delivered forces 100% progress and stores an update',
   assert.ok(capturedUpdateParams.includes(100));
   assert.ok(!capturedUpdateParams.includes(40));
   assert.equal(currentItem.updates[0].message, 'Entrega validada.');
+});
+
+test('client can update only request fields released by the administrator', async () => {
+  currentItem = {
+    id: 42,
+    companyId: 12,
+    companyName: 'Empresa teste',
+    title: 'Integração Omie e CRM',
+    description: 'Contexto inicial.',
+    objective: null,
+    status: 'analysis',
+    version: 3,
+    isClientVisible: true,
+    archivedAt: null,
+    clientEditableFields: ['description', 'objective'],
+    integrations: [],
+    updates: []
+  };
+  capturedUpdateSql = null;
+  capturedUpdateParams = null;
+
+  const response = await invokePatch(
+    42,
+    { description: 'Contexto detalhado pelo cliente.', expectedVersion: 3 },
+    { id: 21, role: 'client', companyId: 12, email: 'cliente@empresa.com' }
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(capturedUpdateSql, /description =/);
+  assert.ok(capturedUpdateParams.includes('Contexto detalhado pelo cliente.'));
+});
+
+test('client cannot change workflow fields or unreleased request fields', async () => {
+  currentItem = {
+    id: 42,
+    companyId: 12,
+    title: 'Integração Omie e CRM',
+    description: 'Contexto inicial.',
+    status: 'analysis',
+    version: 3,
+    isClientVisible: true,
+    archivedAt: null,
+    clientEditableFields: ['description'],
+    integrations: [],
+    updates: []
+  };
+  capturedUpdateSql = null;
+
+  const response = await invokePatch(
+    42,
+    { status: 'delivered' },
+    { id: 21, role: 'client', companyId: 12, email: 'cliente@empresa.com' }
+  );
+
+  assert.equal(response.statusCode, 403);
+  assert.match(response.body.error, /status/);
+  assert.equal(capturedUpdateSql, null);
 });

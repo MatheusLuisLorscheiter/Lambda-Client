@@ -230,7 +230,10 @@
               </div>
               <h3 class="mt-3 text-xl font-semibold text-slate-950">{{ selectedProcess.title }}</h3>
             </div>
-            <button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Fechar" @click="selectedProcess = null">✕</button>
+            <div class="flex items-center gap-2">
+              <button v-if="selectedProcess.clientEditableFields?.length && !['delivered', 'cancelled'].includes(selectedProcess.status)" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openProcessEditor">Editar informações</button>
+              <button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Fechar" @click="selectedProcess = null">✕</button>
+            </div>
            </div>
           <nav class="sticky top-0 z-10 flex gap-5 overflow-x-auto border-b border-slate-200 bg-white px-6 pt-3" aria-label="Detalhes do processo">
             <button
@@ -398,6 +401,28 @@
     </transition>
 
     <transition name="fade">
+      <div v-if="processEditorOpen && selectedProcess" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-950/55" @click="processEditorOpen = false"></div>
+        <form class="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl" @submit.prevent="saveProcessEdits">
+          <header class="border-b border-slate-200 px-6 py-5">
+            <h3 class="text-lg font-semibold text-slate-950">Atualizar informações da solicitação</h3>
+            <p class="mt-1 text-sm text-slate-500">Somente os campos liberados pela equipe estão disponíveis.</p>
+          </header>
+          <div class="grid gap-4 p-6">
+            <div><label class="mb-1.5 block text-sm font-medium text-slate-700">Título</label><input v-model="processEditForm.title" :disabled="!canEditProcessField('title')" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+            <div><label class="mb-1.5 block text-sm font-medium text-slate-700">Contexto atual</label><textarea v-model="processEditForm.description" :disabled="!canEditProcessField('description')" required rows="4" maxlength="5000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+            <div><label class="mb-1.5 block text-sm font-medium text-slate-700">Resultado esperado</label><textarea v-model="processEditForm.objective" :disabled="!canEditProcessField('objective')" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+            <div><label class="mb-1.5 block text-sm font-medium text-slate-700">Escopo</label><textarea v-model="processEditForm.scope" :disabled="!canEditProcessField('scope')" rows="3" maxlength="5000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+            <div><label class="mb-1.5 block text-sm font-medium text-slate-700">Critérios de aceite</label><textarea v-model="processEditForm.acceptanceCriteria" :disabled="!canEditProcessField('acceptanceCriteria')" rows="3" maxlength="5000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+            <div><label class="mb-1.5 block text-sm font-medium text-slate-700">Tags</label><input v-model="processEditForm.tagsText" :disabled="!canEditProcessField('tags')" maxlength="800" placeholder="financeiro, pedidos, homologação" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><p class="mt-1 text-xs text-slate-400">Separe por vírgulas.</p></div>
+            <p v-if="processEditError" class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ processEditError }}</p>
+          </div>
+          <footer class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4"><button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" @click="processEditorOpen = false">Cancelar</button><button :disabled="processEditSubmitting" class="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{{ processEditSubmitting ? 'Salvando…' : 'Salvar alterações' }}</button></footer>
+        </form>
+      </div>
+    </transition>
+
+    <transition name="fade">
       <div v-if="rejectDeliveryId" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-slate-950/55" @click="closeRejectDelivery"></div>
         <form class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="rejectDelivery">
@@ -424,7 +449,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { formatCalendarDate, formatInstant } from '@/utils/dates'
-import type { ProcessItem, ProcessStatus } from '@/types'
+import type { ProcessClientField, ProcessItem, ProcessStatus } from '@/types'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
 const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number]; openMapping: [integrationId: number] }>()
@@ -446,6 +471,10 @@ const requestForm = ref({ title: '', category: 'automation', description: '', ob
 const commentMessage = ref('')
 const commentSubmitting = ref(false)
 const commentError = ref('')
+const processEditorOpen = ref(false)
+const processEditSubmitting = ref(false)
+const processEditError = ref('')
+const processEditForm = ref({ title: '', description: '', objective: '', scope: '', acceptanceCriteria: '', tagsText: '' })
 const rejectDeliveryId = ref<number | null>(null)
 const rejectionNote = ref('')
 const deliveryActionLoading = ref(false)
@@ -555,6 +584,7 @@ const deliveryLabel = (item: ProcessItem) => {
   if (item.estimateBusinessDays) return `${item.estimateBusinessDays} dias úteis`
   return item.status === 'requested' || item.status === 'analysis' ? 'Após análise' : 'A definir'
 }
+const canEditProcessField = (field: ProcessClientField) => Boolean(selectedProcess.value?.clientEditableFields?.includes(field))
 
 const fetchProcesses = async (silent = false) => {
   if (!silent) loading.value = true
@@ -576,6 +606,47 @@ const openProcess = (item: ProcessItem) => {
   detailTab.value = 'overview'
   commentMessage.value = ''
   commentError.value = ''
+}
+const openProcessEditor = () => {
+  if (!selectedProcess.value) return
+  processEditForm.value = {
+    title: selectedProcess.value.title,
+    description: selectedProcess.value.description,
+    objective: selectedProcess.value.objective || '',
+    scope: selectedProcess.value.scope || '',
+    acceptanceCriteria: selectedProcess.value.acceptanceCriteria || '',
+    tagsText: (selectedProcess.value.tags || []).join(', ')
+  }
+  processEditError.value = ''
+  processEditorOpen.value = true
+}
+const saveProcessEdits = async () => {
+  if (!selectedProcess.value) return
+  processEditSubmitting.value = true
+  processEditError.value = ''
+  const values: Record<ProcessClientField, unknown> = {
+    title: processEditForm.value.title,
+    description: processEditForm.value.description,
+    objective: processEditForm.value.objective || null,
+    scope: processEditForm.value.scope || null,
+    acceptanceCriteria: processEditForm.value.acceptanceCriteria || null,
+    tags: processEditForm.value.tagsText.split(',').map(tag => tag.trim()).filter(Boolean)
+  }
+  const payload = Object.fromEntries(
+    selectedProcess.value.clientEditableFields.map(field => [field, values[field]])
+  )
+  payload.expectedVersion = selectedProcess.value.version
+  try {
+    await api.patch(`/processes/${selectedProcess.value.id}`, payload)
+    processEditorOpen.value = false
+    await fetchProcesses(true)
+    successMessage.value = 'Informações atualizadas'
+    setTimeout(() => { successMessage.value = '' }, 3000)
+  } catch (error) {
+    processEditError.value = error instanceof Error ? error.message : 'Não foi possível atualizar a solicitação'
+  } finally {
+    processEditSubmitting.value = false
+  }
 }
 const openAutomation = (integrationId: number) => {
   selectedProcess.value = null

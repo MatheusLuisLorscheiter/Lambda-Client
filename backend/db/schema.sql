@@ -98,6 +98,9 @@ CREATE TABLE IF NOT EXISTS process_items (
   tags JSONB NOT NULL DEFAULT '[]',
   custom_fields JSONB NOT NULL DEFAULT '{}',
   client_can_comment BOOLEAN NOT NULL DEFAULT TRUE,
+  client_editable_fields JSONB NOT NULL DEFAULT '[]',
+  is_client_visible BOOLEAN NOT NULL DEFAULT TRUE,
+  archived_at TIMESTAMPTZ,
   version INTEGER NOT NULL DEFAULT 1,
   latest_update TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -178,6 +181,11 @@ CREATE TABLE IF NOT EXISTS integration_mapping_sets (
   version INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft', 'published', 'archived')),
+  client_edit_mode TEXT NOT NULL DEFAULT 'none'
+    CONSTRAINT chk_mapping_client_edit_mode CHECK (client_edit_mode IN ('none', 'all', 'selected')),
+  client_can_add_entries BOOLEAN NOT NULL DEFAULT FALSE,
+  client_can_delete_entries BOOLEAN NOT NULL DEFAULT FALSE,
+  client_instructions TEXT,
   published_at TIMESTAMPTZ,
   closed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -201,6 +209,9 @@ CREATE TABLE IF NOT EXISTS integration_mapping_entries (
   section TEXT,
   mapping_status TEXT NOT NULL DEFAULT 'mapped'
     CHECK (mapping_status IN ('mapped', 'pending', 'attention', 'ignored')),
+  client_editable_fields JSONB NOT NULL DEFAULT '[]',
+  last_client_edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  last_client_edited_at TIMESTAMPTZ,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
