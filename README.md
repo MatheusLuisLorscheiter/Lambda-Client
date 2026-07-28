@@ -110,6 +110,8 @@ migração falhar, a API não inicia com um schema incompatível.
   da mesma empresa ou criar um novo processo já vinculado.
 - O cliente acessa a automação relacionada diretamente pelos detalhes do processo.
 - Cada nova atualização administrativa é preservada em uma linha do tempo visível ao cliente.
+- O cliente pode registrar tempo, frequência e pessoas envolvidas por atividade antes e depois da automação.
+- O Lambda Pulse calcula horas mensais, pessoas equivalentes e redução de esforço sem perder o histórico das medições.
 
 ---
 

@@ -149,6 +149,7 @@ export interface ProcessItem {
   tags: string[]
   customFields?: Record<string, unknown>
   clientCanComment: boolean
+  clientCanManageEffort: boolean
   clientEditableFields: ProcessClientField[]
   isClientVisible: boolean
   archivedAt: string | null
@@ -227,6 +228,72 @@ export interface ProcessSummary {
   overdue: number
   averageProgress: number
   nextDueDate: string | null
+}
+
+export type ProcessEffortStage = 'baseline' | 'post_automation'
+export type ProcessEffortSource = 'estimated' | 'observed' | 'system'
+export type ProcessEffortStatus = 'draft' | 'confirmed'
+export type ProcessEffortPeriodUnit = 'day' | 'week' | 'month' | 'quarter' | 'year'
+
+export interface ProcessEffortItem {
+  id?: number
+  activityName: string
+  roleName: string | null
+  executionTimeMinutes: number
+  executionsPerPeriod: number
+  periodUnit: ProcessEffortPeriodUnit
+  workingDaysPerMonth: number
+  peopleCount: number
+  monthlyHoursPerEmployee: number
+  notes: string | null
+  sortOrder?: number
+}
+
+export interface ProcessEffortAssessment {
+  id: number
+  processId: number
+  stage: ProcessEffortStage
+  label: string
+  measuredAt: string
+  source: ProcessEffortSource
+  status: ProcessEffortStatus
+  notes: string | null
+  version: number
+  confirmedAt: string | null
+  createdAt: string
+  updatedAt: string
+  createdByEmail: string | null
+  items: ProcessEffortItem[]
+}
+
+export interface ProcessEffortSummary {
+  assessmentId: number
+  label: string
+  measuredAt: string
+  status: ProcessEffortStatus
+  activityCount: number
+  executionsPerMonth: number
+  elapsedHoursPerMonth: number
+  workHoursPerMonth: number
+  fteEquivalent: number
+  items: Array<{
+    id?: number
+    executionsPerMonth: number
+    elapsedHoursPerMonth: number
+    workHoursPerMonth: number
+    fteEquivalent: number
+  }>
+}
+
+export interface ProcessEffortComparison {
+  baseline: ProcessEffortSummary | null
+  postAutomation: ProcessEffortSummary | null
+  savings: {
+    monthlyHours: number
+    annualHours: number
+    monthlyFte: number
+    reductionPercent: number
+  } | null
 }
 
 export interface ParsedReport {

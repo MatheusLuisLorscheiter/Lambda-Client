@@ -36,6 +36,13 @@
           <button class="rounded px-2.5 py-1.5 text-xs font-medium" :class="viewMode === 'list' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'" @click="viewMode = 'list'">Lista</button>
           <button class="rounded px-2.5 py-1.5 text-xs font-medium" :class="viewMode === 'board' ? 'bg-slate-100 text-slate-950' : 'text-slate-500'" @click="viewMode = 'board'">Quadro</button>
         </div>
+        <button
+          v-if="companyFilter && queuedForSelectedCompany.length > 1"
+          class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          @click="openQueueOrganizer"
+        >
+          Organizar fila
+        </button>
         <button class="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-medium text-white hover:bg-slate-800" @click="openCreate">Adicionar demanda</button>
       </div>
     </div>
@@ -169,6 +176,10 @@
                   <input v-model="editor.clientCanComment" type="checkbox" class="h-4 w-4 rounded border-slate-300">
                 </label>
                 <label class="flex items-center justify-between rounded-md border border-slate-200 px-3 py-3">
+                  <span><span class="block text-sm font-medium text-slate-700">Medições de tempo e equipe</span><span class="mt-0.5 block text-xs text-slate-400">Permite ao cliente registrar a linha de base e medições após a automação.</span></span>
+                  <input v-model="editor.clientCanManageEffort" type="checkbox" class="h-4 w-4 rounded border-slate-300">
+                </label>
+                <label class="flex items-center justify-between rounded-md border border-slate-200 px-3 py-3">
                   <span><span class="block text-sm font-medium text-slate-700">Visível no portal do cliente</span><span class="mt-0.5 block text-xs text-slate-400">Ocultar não apaga o processo nem o histórico interno.</span></span>
                   <input v-model="editor.isClientVisible" type="checkbox" class="h-4 w-4 rounded border-slate-300">
                 </label>
@@ -203,6 +214,14 @@
                   <input v-model.number="editor.progress" type="range" min="0" max="100" step="5" class="w-full accent-slate-900">
                   <div class="mt-1 flex justify-between text-[11px] text-slate-400"><span>Não iniciado</span><span>Entregue</span></div>
                 </div>
+              </section>
+
+              <section v-else-if="editorTab === 'effort'">
+                <div v-if="!editor.id" class="rounded-lg border border-dashed border-slate-300 px-5 py-12 text-center">
+                  <p class="text-sm font-medium text-slate-700">Salve o processo primeiro</p>
+                  <p class="mt-1 text-xs text-slate-500">Depois você poderá registrar as medições de tempo e equipe.</p>
+                </div>
+                <ProcessEffortPanel v-else :process-id="editor.id" @changed="refreshOpenEditor" />
               </section>
 
               <section v-else-if="editorTab === 'execution'" class="space-y-7">
@@ -321,6 +340,34 @@
         <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="deleteProcessConfirmOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="deleteProcess">Excluir demanda</button></div>
       </div>
     </div>
+
+    <div v-if="queueModalOpen" class="fixed inset-0 z-[75] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="queueModalOpen = false"></div>
+      <div class="relative flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+        <header class="border-b border-slate-200 px-5 py-4">
+          <h3 class="text-lg font-semibold text-slate-950">Organizar fila</h3>
+          <p class="mt-1 text-sm text-slate-500">Defina a ordem de execução da empresa selecionada.</p>
+        </header>
+        <ol class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto px-5">
+          <li v-for="(item, index) in queueDraft" :key="item.id" class="flex items-center gap-3 py-3">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ index + 1 }}</span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-medium text-slate-900">{{ item.title }}</span>
+              <span class="mt-0.5 block font-mono text-[11px] text-slate-400">{{ item.referenceCode }}</span>
+            </span>
+            <span class="flex shrink-0 gap-1">
+              <button type="button" :disabled="index === 0" class="rounded-md border border-slate-300 px-2.5 py-1.5 text-sm disabled:opacity-30" :aria-label="`Mover ${item.title} para cima`" @click="moveQueueItem(index, -1)">↑</button>
+              <button type="button" :disabled="index === queueDraft.length - 1" class="rounded-md border border-slate-300 px-2.5 py-1.5 text-sm disabled:opacity-30" :aria-label="`Mover ${item.title} para baixo`" @click="moveQueueItem(index, 1)">↓</button>
+            </span>
+          </li>
+        </ol>
+        <p v-if="queueError" class="border-t border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700">{{ queueError }}</p>
+        <footer class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="queueModalOpen = false">Cancelar</button>
+          <button :disabled="queueSaving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="saveQueueOrder">{{ queueSaving ? 'Salvando…' : 'Salvar ordem' }}</button>
+        </footer>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -329,6 +376,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { formatCalendarDate, formatInstant, toCalendarDateInput } from '@/utils/dates'
 import type { Company, ProcessClientField, ProcessItem, ProcessStatus } from '@/types'
+import ProcessEffortPanel from '@/components/ProcessEffortPanel.vue'
 
 const props = defineProps<{ companies: Company[] }>()
 const api = useApi()
@@ -342,7 +390,7 @@ const statusFilter = ref('')
 const searchFilter = ref('')
 const viewMode = ref<'list' | 'board'>((localStorage.getItem('lambda-process-view') as 'list' | 'board') || 'list')
 const editorOpen = ref(false)
-const editorTab = ref<'context' | 'planning' | 'execution' | 'activity'>('context')
+const editorTab = ref<'context' | 'planning' | 'effort' | 'execution' | 'activity'>('context')
 const emptyEditor = () => ({
   id: null as number | null,
   companyId: '',
@@ -367,6 +415,7 @@ const emptyEditor = () => ({
   nextAction: '',
   tagsText: '',
   clientCanComment: true,
+  clientCanManageEffort: true,
   clientEditableFields: [] as ProcessClientField[],
   isClientVisible: true,
   createdAt: '',
@@ -381,6 +430,10 @@ const deliveryModalOpen = ref(false)
 const checkItemToDelete = ref<number | null>(null)
 const archiveConfirmOpen = ref(false)
 const deleteProcessConfirmOpen = ref(false)
+const queueModalOpen = ref(false)
+const queueSaving = ref(false)
+const queueError = ref('')
+const queueDraft = ref<ProcessItem[]>([])
 const secondarySaving = ref(false)
 const secondaryFormError = ref('')
 const checklistForm = ref({ title: '', description: '', dueDate: '' })
@@ -433,6 +486,15 @@ const boardColumns = computed(() => [
   { key: 'validation', label: 'Validação', items: filteredProcesses.value.filter(item => item.status === 'validation') },
   { key: 'done', label: 'Concluídas', items: filteredProcesses.value.filter(item => ['delivered', 'cancelled'].includes(item.status)) }
 ])
+const queuedForSelectedCompany = computed(() => processes.value
+  .filter(item =>
+    !item.archivedAt &&
+    item.status === 'queued' &&
+    String(item.companyId) === companyFilter.value
+  )
+  .sort((left, right) =>
+    (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER)
+  ))
 const activeFilters = computed(() => {
   const filters: Array<{ label: string; clear: () => void }> = []
   if (companyFilter.value) {
@@ -456,6 +518,7 @@ const selectedEditorProcess = computed(() => editor.value.id ? processes.value.f
 const editorTabs = computed(() => [
   { value: 'context' as const, label: 'Contexto', count: null },
   { value: 'planning' as const, label: 'Planejamento', count: null },
+  { value: 'effort' as const, label: 'Tempo e equipe', count: null },
   { value: 'execution' as const, label: 'Execução', count: editor.value.checklist.length + editor.value.deliveries.length },
   { value: 'activity' as const, label: 'Atividade', count: editor.value.updates.length }
 ])
@@ -482,6 +545,36 @@ const clearFilters = () => { companyFilter.value = ''; statusFilter.value = ''; 
 const applySummaryFilter = (filter: string) => {
   searchFilter.value = ''
   statusFilter.value = filter === 'analysis' ? 'intake' : filter
+}
+const openQueueOrganizer = () => {
+  queueDraft.value = [...queuedForSelectedCompany.value]
+  queueError.value = ''
+  queueModalOpen.value = true
+}
+const moveQueueItem = (index: number, direction: -1 | 1) => {
+  const target = index + direction
+  if (target < 0 || target >= queueDraft.value.length) return
+  const next = [...queueDraft.value]
+  const [item] = next.splice(index, 1)
+  if (item) next.splice(target, 0, item)
+  queueDraft.value = next
+}
+const saveQueueOrder = async () => {
+  if (!companyFilter.value || !queueDraft.value.length) return
+  queueSaving.value = true
+  queueError.value = ''
+  try {
+    await api.post('/processes/queue/reorder', {
+      companyId: Number(companyFilter.value),
+      orderedIds: queueDraft.value.map(item => item.id)
+    })
+    queueModalOpen.value = false
+    await fetchProcesses()
+  } catch (error) {
+    queueError.value = error instanceof Error ? error.message : 'Não foi possível salvar a ordem da fila'
+  } finally {
+    queueSaving.value = false
+  }
 }
 
 const fetchProcesses = async () => {
@@ -526,6 +619,7 @@ const openEdit = (item: ProcessItem) => {
     nextAction: item.nextAction || '',
     tagsText: (item.tags || []).join(', '),
     clientCanComment: item.clientCanComment !== false,
+    clientCanManageEffort: item.clientCanManageEffort !== false,
     clientEditableFields: item.clientEditableFields || [],
     isClientVisible: item.isClientVisible !== false,
     createdAt: toCalendarDateInput(item.createdAt),
@@ -571,6 +665,7 @@ const saveProcess = async () => {
     nextAction: editor.value.nextAction || null,
     tags: editor.value.tagsText.split(',').map(tag => tag.trim()).filter(Boolean),
     clientCanComment: editor.value.clientCanComment,
+    clientCanManageEffort: editor.value.clientCanManageEffort,
     clientEditableFields: editor.value.clientEditableFields,
     isClientVisible: editor.value.isClientVisible
   }

@@ -334,6 +334,7 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
   const effectiveClientEditMode = req.body.clientEditMode ?? existing.client_edit_mode;
+  const effectiveName = req.body.name !== undefined ? String(req.body.name).trim() : existing.name;
   if (!validClientEditModes.has(effectiveClientEditMode)) {
     return res.status(400).json({ error: 'Modo de edição do cliente inválido' });
   }
@@ -386,26 +387,37 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
     }
   }
   if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
-  if (req.body.status === 'published') {
-    await query(
-      `UPDATE integration_mapping_sets
-          SET status = 'archived', closed_at = NOW(), updated_at = NOW()
-        WHERE integration_id = $1
-          AND name = $2
-          AND status = 'published'
-          AND id <> $3`,
-      [existing.integration_id, existing.name, mappingSetId]
-    );
-  }
   fields.push('version = version + 1', 'updated_at = NOW()');
   values.push(mappingSetId);
-  const result = await query(
-    `UPDATE integration_mapping_sets
-        SET ${fields.join(', ')}
-      WHERE id = $${values.length}
-      RETURNING id, version, status, published_at AS "publishedAt", updated_at AS "updatedAt"`,
-    values
-  );
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query('BEGIN');
+    if (req.body.status === 'published') {
+      await client.query(
+        `UPDATE integration_mapping_sets
+            SET status = 'archived', closed_at = NOW(), updated_at = NOW()
+          WHERE integration_id = $1
+            AND name = $2
+            AND status = 'published'
+            AND id <> $3`,
+        [existing.integration_id, effectiveName, mappingSetId]
+      );
+    }
+    result = await client.query(
+      `UPDATE integration_mapping_sets
+          SET ${fields.join(', ')}
+        WHERE id = $${values.length}
+        RETURNING id, version, status, published_at AS "publishedAt", updated_at AS "updatedAt"`,
+      values
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
   await logAudit({
     companyId: existing.company_id,
     userId: req.user.id,
@@ -431,10 +443,22 @@ router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, re
     return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
   }
   let sourcePath;
+  let sourceType;
   let targetPath;
+  let targetType;
+  let transformation;
+  let fallbackValue;
+  let notes;
+  let section;
   try {
     sourcePath = normalizeText(req.body.sourcePath, 'Campo de origem', 500, true);
+    sourceType = normalizeText(req.body.sourceType, 'Tipo de origem', 80);
     targetPath = normalizeText(req.body.targetPath, 'Campo de destino', 500, true);
+    targetType = normalizeText(req.body.targetType, 'Tipo de destino', 80);
+    transformation = normalizeText(req.body.transformation, 'Transformação', 5000);
+    fallbackValue = normalizeText(req.body.fallbackValue, 'Valor padrão', 2000);
+    notes = normalizeText(req.body.notes, 'Observações', 3000);
+    section = normalizeText(req.body.section, 'Seção', 240);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -466,13 +490,13 @@ router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, re
                last_client_edited_at AS "lastClientEditedAt", sort_order AS "sortOrder",
                created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
-      mappingSetId, sourcePath, normalizeText(req.body.sourceType, 'Tipo de origem', 80),
-      targetPath, normalizeText(req.body.targetType, 'Tipo de destino', 80), direction,
-      normalizeText(req.body.transformation, 'Transformação', 5000),
-      normalizeText(req.body.fallbackValue, 'Valor padrão', 2000),
-      Boolean(req.body.isRequired), normalizeText(req.body.notes, 'Observações', 3000),
+      mappingSetId, sourcePath, sourceType,
+      targetPath, targetType, direction,
+      transformation,
+      fallbackValue,
+      Boolean(req.body.isRequired), notes,
       JSON.stringify(examples), Number(sortResult.rows[0].sortOrder),
-      normalizeText(req.body.section, 'Seção', 240),
+      section,
       validMappingStatuses.has(req.body.mappingStatus) ? req.body.mappingStatus : 'mapped',
       JSON.stringify(clientEditableFields), isClient ? req.user.id : null, isClient ? new Date() : null
     ]
@@ -575,6 +599,16 @@ router.post('/mappings/:mappingSetId/entries/bulk', authenticateToken, async (re
   } finally {
     client.release();
   }
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: 'mapping.entry.bulk_import',
+    resourceType: 'mapping_set',
+    resourceId: String(mappingSetId),
+    metadata: { imported: entries.length },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.status(201).json({ imported: entries.length });
 });
 
@@ -844,15 +878,39 @@ router.delete('/mappings/:mappingSetId/attachments/:attachmentId', authenticateT
   if (mappingSet.status !== 'draft') {
     return res.status(409).json({ error: 'Crie uma nova versão antes de remover arquivos' });
   }
-  const result = await query(
-    'DELETE FROM integration_mapping_attachments WHERE id = $1 AND mapping_set_id = $2 RETURNING file_name',
-    [attachmentId, mappingSetId]
-  );
-  if (!result.rowCount) return res.status(404).json({ error: 'Arquivo não encontrado' });
-  await query(
-    'UPDATE integration_mapping_sets SET version = version + 1, updated_at = NOW() WHERE id = $1',
-    [mappingSetId]
-  );
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query('BEGIN');
+    result = await client.query(
+      'DELETE FROM integration_mapping_attachments WHERE id = $1 AND mapping_set_id = $2 RETURNING file_name',
+      [attachmentId, mappingSetId]
+    );
+    if (!result.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Arquivo não encontrado' });
+    }
+    await client.query(
+      'UPDATE integration_mapping_sets SET version = version + 1, updated_at = NOW() WHERE id = $1',
+      [mappingSetId]
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: 'mapping.attachment.delete',
+    resourceType: 'mapping_set',
+    resourceId: String(mappingSetId),
+    metadata: { attachmentId, fileName: result.rows[0].file_name },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.json({ success: true });
 });
 
@@ -890,6 +948,12 @@ router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res)
   const mappingSetId = Number(req.params.mappingSetId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
   if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
+  let clonedName;
+  try {
+    clonedName = normalizeText(req.body.name || mappingSet.name, 'Nome', 160, true);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
   const client = await pool.connect();
   let clonedId;
   try {
@@ -905,7 +969,7 @@ router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res)
          FROM integration_mapping_sets
         WHERE id = $3
        RETURNING id`,
-      [req.user.id, String(req.body.name || mappingSet.name).trim(), mappingSetId]
+      [req.user.id, clonedName, mappingSetId]
     );
     clonedId = created.rows[0].id;
     await client.query(
@@ -939,6 +1003,16 @@ router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res)
   } finally {
     client.release();
   }
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: 'mapping.clone',
+    resourceType: 'mapping_set',
+    resourceId: String(clonedId),
+    metadata: { sourceMappingSetId: mappingSetId, name: clonedName },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
   res.status(201).json({ mappingSetId: clonedId });
 });
 

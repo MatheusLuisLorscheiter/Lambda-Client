@@ -129,6 +129,7 @@ const selectFields = `
   process_items.tags,
   process_items.custom_fields AS "customFields",
   process_items.client_can_comment AS "clientCanComment",
+  process_items.client_can_manage_effort AS "clientCanManageEffort",
   process_items.client_editable_fields AS "clientEditableFields",
   process_items.is_client_visible AS "isClientVisible",
   process_items.archived_at AS "archivedAt",
@@ -506,6 +507,7 @@ router.post('/', authenticateToken, async (req, res) => {
   let blockedReason = null;
   let nextAction = null;
   let clientCanComment = true;
+  let clientCanManageEffort = true;
   let clientEditableFields = [];
   let isClientVisible = true;
   let latestUpdate = status === 'requested'
@@ -551,6 +553,7 @@ router.post('/', authenticateToken, async (req, res) => {
     blockedReason = String(req.body.blockedReason || '').trim() || null;
     nextAction = String(req.body.nextAction || '').trim() || null;
     clientCanComment = req.body.clientCanComment !== false;
+    clientCanManageEffort = req.body.clientCanManageEffort !== false;
     try {
       clientEditableFields = normalizeClientProcessFields(req.body.clientEditableFields) || [];
     } catch (error) {
@@ -591,9 +594,10 @@ router.post('/', authenticateToken, async (req, res) => {
         (company_id, requested_by, title, description, category, status, priority, position,
          complexity, progress, estimate_business_days, planned_start, due_date, delivered_at, latest_update,
          created_at, owner_user_id, objective, scope, acceptance_criteria, impact, health, target_sla_at,
-         blocked_reason, next_action, tags, client_can_comment, client_editable_fields, is_client_visible)
+         blocked_reason, next_action, tags, client_can_comment, client_editable_fields,
+         is_client_visible, client_can_manage_effort)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               COALESCE($16, NOW()), $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+               COALESCE($16, NOW()), $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
        RETURNING id`,
       [
         companyId,
@@ -624,7 +628,8 @@ router.post('/', authenticateToken, async (req, res) => {
         JSON.stringify(tags),
         clientCanComment,
         JSON.stringify(clientEditableFields),
-        isClientVisible
+        isClientVisible,
+        clientCanManageEffort
       ]
     );
     processId = result.rows[0].id;
@@ -949,6 +954,9 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   }
   if (req.body.clientCanComment !== undefined) {
     add('client_can_comment', Boolean(req.body.clientCanComment));
+  }
+  if (req.body.clientCanManageEffort !== undefined) {
+    add('client_can_manage_effort', Boolean(req.body.clientCanManageEffort));
   }
   if (req.body.clientEditableFields !== undefined) {
     try {

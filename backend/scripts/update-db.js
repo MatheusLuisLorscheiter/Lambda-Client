@@ -40,6 +40,7 @@ const run = async () => {
         "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'",
         "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'",
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS client_can_comment BOOLEAN NOT NULL DEFAULT TRUE',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS client_can_manage_effort BOOLEAN NOT NULL DEFAULT TRUE',
         "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS client_editable_fields JSONB NOT NULL DEFAULT '[]'",
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS is_client_visible BOOLEAN NOT NULL DEFAULT TRUE',
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ',
@@ -74,6 +75,14 @@ const run = async () => {
         "UPDATE process_items SET reference_code = 'LP-' || LPAD(id::text, 6, '0') WHERE reference_code IS NULL",
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_process_reference_code ON process_items(reference_code)',
         'CREATE INDEX IF NOT EXISTS idx_process_items_visibility ON process_items(company_id, archived_at, is_client_visible)',
+        'CREATE INDEX IF NOT EXISTS idx_process_effort_assessments ON process_effort_assessments(process_id, stage, measured_at DESC, id DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_process_effort_items ON process_effort_items(assessment_id, sort_order, id)',
+        'ALTER TABLE process_effort_items ADD COLUMN IF NOT EXISTS working_days_per_month NUMERIC(5, 2) NOT NULL DEFAULT 22',
+        `DO $$ BEGIN
+                    ALTER TABLE process_effort_items
+                    ADD CONSTRAINT chk_process_effort_working_days
+                    CHECK (working_days_per_month > 0 AND working_days_per_month <= 31);
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         'CREATE INDEX IF NOT EXISTS idx_mapping_sets_client_visibility ON integration_mapping_sets(company_id, integration_id, status)',
         `WITH ranked AS (
             SELECT id, ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY position NULLS LAST, created_at, id) AS next_position

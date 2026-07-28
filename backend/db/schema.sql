@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS process_items (
   tags JSONB NOT NULL DEFAULT '[]',
   custom_fields JSONB NOT NULL DEFAULT '{}',
   client_can_comment BOOLEAN NOT NULL DEFAULT TRUE,
+  client_can_manage_effort BOOLEAN NOT NULL DEFAULT TRUE,
   client_editable_fields JSONB NOT NULL DEFAULT '[]',
   is_client_visible BOOLEAN NOT NULL DEFAULT TRUE,
   archived_at TIMESTAMPTZ,
@@ -163,6 +164,47 @@ CREATE TABLE IF NOT EXISTS process_deliveries (
   delivered_at TIMESTAMPTZ,
   accepted_at TIMESTAMPTZ,
   accepted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS process_effort_assessments (
+  id SERIAL PRIMARY KEY,
+  process_id INTEGER NOT NULL REFERENCES process_items(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  stage TEXT NOT NULL
+    CHECK (stage IN ('baseline', 'post_automation')),
+  label TEXT NOT NULL,
+  measured_at DATE NOT NULL DEFAULT CURRENT_DATE,
+  source TEXT NOT NULL DEFAULT 'estimated'
+    CHECK (source IN ('estimated', 'observed', 'system')),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'confirmed')),
+  notes TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  confirmed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS process_effort_items (
+  id SERIAL PRIMARY KEY,
+  assessment_id INTEGER NOT NULL REFERENCES process_effort_assessments(id) ON DELETE CASCADE,
+  activity_name TEXT NOT NULL,
+  role_name TEXT,
+  execution_time_minutes NUMERIC(12, 2) NOT NULL CHECK (execution_time_minutes > 0),
+  executions_per_period NUMERIC(12, 2) NOT NULL CHECK (executions_per_period > 0),
+  period_unit TEXT NOT NULL
+    CHECK (period_unit IN ('day', 'week', 'month', 'quarter', 'year')),
+  working_days_per_month NUMERIC(5, 2) NOT NULL DEFAULT 22
+    CONSTRAINT chk_process_effort_working_days
+    CHECK (working_days_per_month > 0 AND working_days_per_month <= 31),
+  people_count NUMERIC(10, 2) NOT NULL CHECK (people_count > 0),
+  monthly_hours_per_employee NUMERIC(10, 2) NOT NULL DEFAULT 176
+    CHECK (monthly_hours_per_employee > 0),
+  notes TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -242,6 +284,10 @@ CREATE INDEX IF NOT EXISTS idx_process_integrations_integration ON process_integ
 CREATE INDEX IF NOT EXISTS idx_process_updates_process ON process_updates(process_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_process_checklist_process ON process_checklist_items(process_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_process_deliveries_process ON process_deliveries(process_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_process_effort_assessments
+  ON process_effort_assessments(process_id, stage, measured_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_process_effort_items
+  ON process_effort_items(assessment_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_sets_integration ON integration_mapping_sets(integration_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_entries_set ON integration_mapping_entries(mapping_set_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_attachments_set ON integration_mapping_attachments(mapping_set_id, created_at, id);

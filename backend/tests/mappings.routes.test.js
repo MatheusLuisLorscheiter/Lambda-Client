@@ -14,6 +14,9 @@ const query = async (sql, params = []) => {
   if (sql.includes('INSERT INTO integration_mapping_sets')) {
     return { rowCount: 1, rows: [{ id: 91 }] };
   }
+  if (sql.includes('SELECT id FROM process_items')) {
+    return { rowCount: 1, rows: [{ id: params[0] }] };
+  }
   if (sql.includes('FROM integration_mapping_sets mapping_sets') && sql.includes('ORDER BY')) {
     return {
       rowCount: 1,
@@ -161,7 +164,8 @@ test('admin creates a versioned mapping set for an integration company', async (
       name: 'Pedidos',
       sourceSystem: 'Omie',
       targetSystem: 'CRM',
-      description: 'Mapa oficial de pedidos'
+      description: 'Mapa oficial de pedidos',
+      processId: 55
     }
   });
 
@@ -170,6 +174,7 @@ test('admin creates a versioned mapping set for an integration company', async (
   const insert = queries.find(item => item.sql.includes('INSERT INTO integration_mapping_sets'));
   assert.equal(insert.params[0], 12);
   assert.equal(insert.params[1], 4);
+  assert.equal(insert.params[2], 55);
   assert.equal(insert.params[4], 'Pedidos');
 });
 

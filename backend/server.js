@@ -42,6 +42,7 @@ const { router: authRouter } = require('./routes/auth');
 const lambdaRouter = require('./routes/lambda');
 const auditRouter = require('./routes/audit');
 const processesRouter = require('./routes/processes');
+const processEffortRouter = require('./routes/process-effort.routes');
 
 app.use('/auth/login', authLimiter);
 app.use('/auth/admin/login', authLimiter);
@@ -51,6 +52,7 @@ app.use('/auth/password/reset', authLimiter);
 app.use('/auth', authRouter);
 app.use('/lambda', lambdaRouter);
 app.use('/audit', auditRouter);
+app.use('/processes', processEffortRouter);
 app.use('/processes', processesRouter);
 
 // Basic route

@@ -546,7 +546,11 @@
               </select>
             </label>
           </div>
-          <MappingWorkspace v-if="adminMappingIntegrationId" :integration-id="Number(adminMappingIntegrationId)" />
+          <MappingWorkspace
+            v-if="adminMappingIntegrationId"
+            :integration-id="Number(adminMappingIntegrationId)"
+            :process-options="adminMappingProcessOptions"
+          />
           <div v-else class="rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">Selecione uma integração para gerenciar seus mapas.</div>
         </div>
 
@@ -1240,6 +1244,13 @@ const clients = ref<ClientUser[]>([])
 const companies = ref<Company[]>([])
 const auditLogs = ref<AuditLog[]>([])
 const processOptions = ref<ProcessItem[]>([])
+const adminMappingProcessOptions = computed(() => {
+  const integration = integrations.value.find(item => String(item.id) === adminMappingIntegrationId.value)
+  if (!integration?.companyId) return []
+  return processOptions.value
+    .filter(process => process.companyId === integration.companyId && !process.archivedAt)
+    .map(process => ({ id: process.id, referenceCode: process.referenceCode, title: process.title }))
+})
 
 const integrationLoading = ref(false)
 const clientLoading = ref(false)

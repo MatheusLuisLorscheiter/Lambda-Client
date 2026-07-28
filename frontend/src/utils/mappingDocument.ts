@@ -22,8 +22,84 @@ const inlineMarkdown = (value: string) => {
 const isTableDivider = (line: string) =>
   /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)
 
-const tableCells = (line: string) =>
-  line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+const tableCells = (line: string) => {
+  const value = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const cells: string[] = []
+  let current = ''
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] || ''
+    if (character === '\\' && value[index + 1] === '|') {
+      current += '|'
+      index += 1
+    } else if (character === '|') {
+      cells.push(current.trim())
+      current = ''
+    } else {
+      current += character
+    }
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+const countDelimiter = (line: string, delimiter: string) => {
+  let count = 0
+  let quoted = false
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] || ''
+    if (character === '"' && line[index + 1] === '"') {
+      index += 1
+    } else if (character === '"') {
+      quoted = !quoted
+    } else if (character === delimiter && !quoted) {
+      count += 1
+    }
+  }
+  return count
+}
+
+const detectDelimiter = (text: string, extension: string) => {
+  if (extension === 'tsv') return '\t'
+  const sample = text.split(/\r?\n/, 5).find(line => line.trim()) || ''
+  const candidates = [',', ';', '\t']
+  return candidates.sort((left, right) => countDelimiter(sample, right) - countDelimiter(sample, left))[0] || ','
+}
+
+const parseDelimitedRows = (text: string, delimiter: string) => {
+  const rows: string[][] = []
+  let row: string[] = []
+  let current = ''
+  let quoted = false
+  const pushCell = () => {
+    row.push(current.trim())
+    current = ''
+  }
+  const pushRow = () => {
+    pushCell()
+    if (row.some(cell => cell.length)) rows.push(row)
+    row = []
+  }
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] || ''
+    if (character === '"' && quoted && text[index + 1] === '"') {
+      current += '"'
+      index += 1
+    } else if (character === '"') {
+      quoted = !quoted
+    } else if (character === delimiter && !quoted) {
+      pushCell()
+    } else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && text[index + 1] === '\n') index += 1
+      pushRow()
+      if (rows.length >= 2000) break
+    } else {
+      current += character
+    }
+  }
+  if (current.length || row.length) pushRow()
+  return rows
+}
 
 export const renderMappingMarkdown = (markdown: string) => {
   const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n')
@@ -250,7 +326,7 @@ export const readTextAttachment = async (file: File) => {
   if (!['md', 'markdown', 'txt', 'csv', 'tsv', 'json', 'html', 'htm', 'xml', 'yaml', 'yml'].includes(extension)) {
     return ''
   }
-  const text = (await file.text()).replace(/^\uFEFF/, '')
+  const text = (await file.text()).replace(/^\uFEFF/, '').slice(0, 250_000)
   if (extension === 'json') {
     try {
       return `## Conteúdo importado\n\n\`\`\`json\n${JSON.stringify(JSON.parse(text), null, 2)}\n\`\`\`\n`
@@ -259,30 +335,9 @@ export const readTextAttachment = async (file: File) => {
     }
   }
   if (extension === 'csv' || extension === 'tsv') {
-    const separator = extension === 'tsv' ? '\t' : ','
-    const rows = text.split(/\r?\n/).filter(Boolean).map(line => {
-      const values: string[] = []
-      let current = ''
-      let quoted = false
-      for (let index = 0; index < line.length; index += 1) {
-        const character = line[index] ?? ''
-        if (character === '"' && line[index + 1] === '"') {
-          current += '"'
-          index += 1
-        } else if (character === '"') {
-          quoted = !quoted
-        } else if (character === separator && !quoted) {
-          values.push(current.trim())
-          current = ''
-        } else {
-          current += character
-        }
-      }
-      values.push(current.trim())
-      return values
-    })
+    const rows = parseDelimitedRows(text, detectDelimiter(text, extension))
     if (!rows.length) return text
-    const width = Math.max(...rows.map(row => row.length))
+    const width = Math.min(100, Math.max(...rows.map(row => row.length)))
     const normalizedRows = rows.map(row => Array.from({ length: width }, (_, index) => (row[index] || '').replace(/\|/g, '\\|')))
     return [
       `| ${normalizedRows[0]?.join(' | ')} |`,

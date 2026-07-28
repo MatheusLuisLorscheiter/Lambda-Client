@@ -46,6 +46,27 @@ O plano de execução é composto por etapas persistidas com status, descrição
 
 O cliente recebe alterações em tempo real por Server-Sent Events autenticados. Uma sincronização periódica funciona como contingência para proxies que interrompam conexões longas.
 
+#### Linha de base e resultado da automação
+
+Cada processo pode manter um histórico de medições de esforço em dois momentos:
+
+- `baseline`: como a operação funciona antes da automação;
+- `post_automation`: como a operação passou a funcionar após a implantação.
+
+Uma medição reúne de 1 a 50 atividades ou funções. Para cada item são registrados:
+
+- atividade e função responsável;
+- tempo por execução;
+- quantidade de execuções por dia útil, semana, mês, trimestre ou ano;
+- dias de operação por mês, quando a frequência é diária (22 por padrão, configurável);
+- quantidade de pessoas envolvidas;
+- capacidade mensal de trabalho por pessoa;
+- observações e premissas.
+
+O sistema normaliza as frequências para uma base mensal e calcula automaticamente horas de trabalho por mês, pessoas equivalentes, horas liberadas por mês e por ano e percentual de redução. A comparação usa a medição confirmada mais recente de cada momento; na ausência de uma confirmação, apresenta o rascunho mais recente. Medições confirmadas são imutáveis para que o histórico não seja sobrescrito. Uma nova aferição deve ser registrada quando o processo mudar.
+
+O administrador pode habilitar ou desabilitar o preenchimento pelo cliente em cada processo. O isolamento por empresa, a visibilidade do processo, a auditoria e os eventos em tempo real também se aplicam às medições.
+
 ### 4. Colaboração
 
 A timeline diferencia:
@@ -131,6 +152,8 @@ Falhas de consulta não são convertidas em zeros “saudáveis”: a interface 
 - `POST|PATCH|DELETE /processes/:processId/comments[...]`
 - `POST|PATCH|DELETE /processes/:processId/checklist[...]`
 - `POST|PATCH /processes/:processId/deliveries[...]`
+- `GET|POST /processes/:processId/effort`
+- `PATCH|DELETE /processes/:processId/effort/:assessmentId`
 
 ### Integrações e mapas
 
@@ -162,6 +185,7 @@ O backend executa `npm run db:migrate` antes de iniciar. A migração é transac
 - gera códigos para processos legados;
 - normaliza posições de fila antes de criar a restrição de unicidade;
 - cria tabelas e índices dos novos módulos.
+- cria o histórico normalizado de medições de esforço e atividades sem alterar processos existentes.
 
 Variáveis obrigatórias e integrações externas estão documentadas em `backend/.env.example` e `frontend/.env.example`.
 

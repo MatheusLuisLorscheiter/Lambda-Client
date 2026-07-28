@@ -395,6 +395,11 @@
                 </div>
               </div>
             </div>
+            <ProcessEffortPanel
+              v-if="detailTab === 'effort'"
+              :process-id="selectedProcess.id"
+              @changed="fetchProcesses(true)"
+            />
           </div>
         </aside>
       </div>
@@ -450,6 +455,7 @@ import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { formatCalendarDate, formatInstant } from '@/utils/dates'
 import type { ProcessClientField, ProcessItem, ProcessStatus } from '@/types'
+import ProcessEffortPanel from '@/components/ProcessEffortPanel.vue'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
 const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number]; openMapping: [integrationId: number] }>()
@@ -462,7 +468,7 @@ const queueFilter = ref<'active' | 'delivered' | 'all'>('active')
 const queueSearch = ref('')
 const requestModalOpen = ref(false)
 const selectedProcess = ref<ProcessItem | null>(null)
-const detailTab = ref<'overview' | 'plan' | 'deliveries' | 'activity'>('overview')
+const detailTab = ref<'overview' | 'effort' | 'plan' | 'deliveries' | 'activity'>('overview')
 const submitting = ref(false)
 const requestError = ref('')
 const successMessage = ref('')
@@ -505,6 +511,7 @@ const queueFilters = computed(() => [
 ])
 const detailTabs = computed(() => [
   { value: 'overview' as const, label: 'Visão geral', count: 0 },
+  { value: 'effort' as const, label: 'Tempo e equipe', count: 0 },
   { value: 'plan' as const, label: 'Plano', count: selectedProcess.value?.checklist?.length || 0 },
   { value: 'deliveries' as const, label: 'Entregas', count: selectedProcess.value?.deliveries?.length || 0 },
   { value: 'activity' as const, label: 'Atividade', count: selectedProcess.value ? processUpdates(selectedProcess.value).length : 0 }

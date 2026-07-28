@@ -207,7 +207,7 @@
         </div>
       </section>
 
-      <section v-else class="pt-5">
+      <section v-else-if="activeTab === 'files'" class="pt-5">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h4 class="font-semibold text-slate-900">Arquivos de referência</h4>
@@ -231,6 +231,68 @@
         </div>
         <div v-else class="mt-5 rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
           Nenhum arquivo anexado a esta versão.
+        </div>
+      </section>
+
+      <section v-else class="pt-5">
+        <div class="grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4">
+          <div class="bg-white px-4 py-3">
+            <p class="text-xs text-slate-500">Cobertura do de-para</p>
+            <p class="mt-1 text-xl font-semibold text-slate-950">{{ mappingQuality.completionPercent }}%</p>
+          </div>
+          <div class="bg-white px-4 py-3">
+            <p class="text-xs text-slate-500">Mapeados</p>
+            <p class="mt-1 text-xl font-semibold text-emerald-700">{{ mappingQuality.mapped }}</p>
+          </div>
+          <div class="bg-white px-4 py-3">
+            <p class="text-xs text-slate-500">Exigem decisão</p>
+            <p class="mt-1 text-xl font-semibold" :class="mappingQuality.unresolved ? 'text-amber-700' : 'text-slate-950'">{{ mappingQuality.unresolved }}</p>
+          </div>
+          <div class="bg-white px-4 py-3">
+            <p class="text-xs text-slate-500">Possíveis duplicidades</p>
+            <p class="mt-1 text-xl font-semibold" :class="mappingQuality.duplicates.length ? 'text-red-700' : 'text-slate-950'">{{ mappingQuality.duplicates.length }}</p>
+          </div>
+        </div>
+
+        <div class="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div class="rounded-lg border border-slate-200 bg-white">
+            <header class="border-b border-slate-200 px-4 py-3">
+              <h4 class="text-sm font-semibold text-slate-900">Checklist de publicação</h4>
+            </header>
+            <ul class="divide-y divide-slate-100">
+              <li v-for="check in mappingQuality.checks" :key="check.label" class="flex items-start gap-3 px-4 py-3">
+                <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold" :class="check.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'">
+                  {{ check.ok ? '✓' : '!' }}
+                </span>
+                <span>
+                  <span class="block text-sm font-medium text-slate-800">{{ check.label }}</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-slate-500">{{ check.detail }}</span>
+                </span>
+              </li>
+            </ul>
+          </div>
+          <aside class="rounded-lg border border-slate-200 bg-white p-4">
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Prontidão</p>
+            <p class="mt-2 text-lg font-semibold" :class="mappingQuality.ready ? 'text-emerald-700' : 'text-amber-800'">
+              {{ mappingQuality.ready ? 'Pronto para publicar' : 'Revisão recomendada' }}
+            </p>
+            <p class="mt-2 text-xs leading-5 text-slate-500">
+              {{ mappingQuality.ready ? 'O documento tem conteúdo e não possui pendências estruturadas.' : 'Resolva os itens sinalizados ou publique conscientemente com as pendências registradas.' }}
+            </p>
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft'" type="button" class="mt-4 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white" @click="publishConfirmOpen = true">
+              Revisar publicação
+            </button>
+          </aside>
+        </div>
+
+        <div v-if="mappingQuality.duplicates.length" class="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-4">
+          <h4 class="text-sm font-semibold text-red-900">Origens repetidas</h4>
+          <p class="mt-1 text-xs leading-5 text-red-700">Confirme se a mesma origem realmente deve alimentar mais de um destino.</p>
+          <ul class="mt-3 space-y-1.5 text-xs text-red-800">
+            <li v-for="duplicate in mappingQuality.duplicates" :key="duplicate.key">
+              <code>{{ duplicate.sourcePath }}</code> aparece em {{ duplicate.count }} vínculos
+            </li>
+          </ul>
         </div>
       </section>
     </template>
@@ -268,6 +330,16 @@
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">Sistema de destino</label>
                 <input v-model="setForm.targetSystem" required maxlength="160" placeholder="Ex.: Omie" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900">
               </div>
+            </div>
+            <div v-if="props.processOptions?.length">
+              <label class="mb-1.5 block text-sm font-medium text-slate-700">Processo relacionado <span class="font-normal text-slate-400">(opcional)</span></label>
+              <select v-model="setForm.processId" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                <option value="">Sem vínculo com processo</option>
+                <option v-for="process in props.processOptions" :key="process.id" :value="String(process.id)">
+                  {{ process.referenceCode }} · {{ process.title }}
+                </option>
+              </select>
+              <p class="mt-1 text-xs text-slate-500">O de-para ficará acessível dentro do contexto desta demanda.</p>
             </div>
             <div v-if="createMode === 'template'">
               <label class="mb-1.5 block text-sm font-medium text-slate-700">Estrutura inicial</label>
@@ -335,6 +407,15 @@
             <div><label class="mb-1.5 block text-sm font-medium">Destino</label><input v-model="metadataForm.targetSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
           </div>
           <div><label class="mb-1.5 block text-sm font-medium">Descrição</label><textarea v-model="metadataForm.description" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
+          <div v-if="props.processOptions?.length">
+            <label class="mb-1.5 block text-sm font-medium">Processo relacionado</label>
+            <select v-model="metadataForm.processId" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+              <option value="">Sem vínculo com processo</option>
+              <option v-for="process in props.processOptions" :key="process.id" :value="String(process.id)">
+                {{ process.referenceCode }} · {{ process.title }}
+              </option>
+            </select>
+          </div>
           <div class="border-t border-slate-200 pt-4">
             <label class="mb-1.5 block text-sm font-medium">Edição pelo cliente</label>
             <select v-model="metadataForm.clientEditMode" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
@@ -472,12 +553,15 @@ import {
 } from '@/utils/mappingDocument'
 import type { MappingAttachment, MappingEntry, MappingEntryClientField, MappingSet } from '@/types'
 
-const props = defineProps<{ integrationId: number }>()
+const props = defineProps<{
+  integrationId: number
+  processOptions?: Array<{ id: number; referenceCode: string; title: string }>
+}>()
 const api = useApi()
 const auth = useAuthStore()
 const mappingSets = ref<MappingSet[]>([])
 const selectedSetId = ref('')
-const activeTab = ref<'document' | 'fields' | 'files'>('document')
+const activeTab = ref<'document' | 'fields' | 'files' | 'review'>('document')
 const entrySearch = ref('')
 const entryStatusFilter = ref('')
 const loading = ref(true)
@@ -504,9 +588,10 @@ const attachmentToDelete = ref<MappingAttachment | null>(null)
 const attachmentFile = ref<File | null>(null)
 const attachmentTextAvailable = ref(false)
 const appendAttachmentToDocument = ref(false)
-const setForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete' })
+const setForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete', processId: '' })
 const metadataForm = ref({
   name: '', sourceSystem: '', targetSystem: '', description: '',
+  processId: '',
   clientEditMode: 'none' as MappingSet['clientEditMode'],
   clientCanAddEntries: false,
   clientCanDeleteEntries: false,
@@ -577,6 +662,68 @@ const clientFieldOptions: Array<{ value: MappingEntryClientField; label: string 
 ]
 const renderedDocument = computed(() => renderMappingMarkdown(selectedSet.value?.contentMarkdown || ''))
 const pendingCount = computed(() => selectedSet.value?.entries.filter(entry => ['pending', 'attention'].includes(entry.mappingStatus)).length || 0)
+const mappingQuality = computed(() => {
+  const entries = selectedSet.value?.entries || []
+  const mapped = entries.filter(entry => entry.mappingStatus === 'mapped').length
+  const ignored = entries.filter(entry => entry.mappingStatus === 'ignored').length
+  const unresolved = entries.filter(entry => ['pending', 'attention'].includes(entry.mappingStatus)).length
+  const sourceCounts = new Map<string, { key: string; sourcePath: string; count: number }>()
+  for (const entry of entries) {
+    if (entry.mappingStatus === 'ignored') continue
+    const key = `${entry.section || ''}::${entry.sourcePath}`.trim().toLocaleLowerCase('pt-BR')
+    const current = sourceCounts.get(key)
+    sourceCounts.set(key, {
+      key,
+      sourcePath: entry.sourcePath,
+      count: (current?.count || 0) + 1
+    })
+  }
+  const duplicates = [...sourceCounts.values()].filter(item => item.count > 1)
+  const hasContent = Boolean(
+    selectedSet.value?.contentMarkdown?.trim() ||
+    entries.length ||
+    selectedSet.value?.attachments?.length
+  )
+  const completionPercent = entries.length ? Math.round(((mapped + ignored) / entries.length) * 100) : 0
+  const checks = [
+    {
+      ok: hasContent,
+      label: 'Conteúdo documentado',
+      detail: hasContent
+        ? 'Há documento, campos estruturados ou arquivos de referência.'
+        : 'Adicione conteúdo antes de publicar.'
+    },
+    {
+      ok: entries.length > 0,
+      label: 'Campos estruturados',
+      detail: entries.length
+        ? `${entries.length} vínculo${entries.length === 1 ? '' : 's'} disponível${entries.length === 1 ? '' : 'is'} para busca e exportação.`
+        : 'Estruture os principais vínculos para facilitar validação e exportação.'
+    },
+    {
+      ok: unresolved === 0,
+      label: 'Decisões resolvidas',
+      detail: unresolved
+        ? `${unresolved} vínculo${unresolved === 1 ? '' : 's'} ainda depende${unresolved === 1 ? '' : 'm'} de definição.`
+        : 'Nenhuma pendência estrutural aberta.'
+    },
+    {
+      ok: duplicates.length === 0,
+      label: 'Origens sem ambiguidade',
+      detail: duplicates.length
+        ? `${duplicates.length} origem${duplicates.length === 1 ? '' : 'ens'} aparece${duplicates.length === 1 ? '' : 'm'} mais de uma vez.`
+        : 'Nenhuma possível duplicidade encontrada.'
+    }
+  ]
+  return {
+    mapped,
+    unresolved,
+    duplicates,
+    completionPercent,
+    checks,
+    ready: hasContent && unresolved === 0 && duplicates.length === 0
+  }
+})
 const filteredEntries = computed(() => {
   if (!selectedSet.value) return []
   const search = entrySearch.value.trim().toLocaleLowerCase('pt-BR')
@@ -589,7 +736,8 @@ const filteredEntries = computed(() => {
 const workspaceTabs = computed(() => [
   { value: 'document' as const, label: 'Documento', count: null },
   { value: 'fields' as const, label: 'Campos estruturados', count: selectedSet.value?.entries.length || 0 },
-  { value: 'files' as const, label: 'Arquivos', count: selectedSet.value?.attachments?.length || 0 }
+  { value: 'files' as const, label: 'Arquivos', count: selectedSet.value?.attachments?.length || 0 },
+  { value: 'review' as const, label: 'Revisão', count: pendingCount.value || null }
 ])
 const editorSnippets = [
   { label: 'Seção', content: '\n\n## Nova seção\n\n' },
@@ -651,7 +799,7 @@ const openCreateModal = () => {
   createMode.value = 'template'
   createFile.value = null
   createFileText.value = ''
-  setForm.value = { name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete' }
+  setForm.value = { name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete', processId: '' }
   modalError.value = ''
   createModalOpen.value = true
 }
@@ -695,7 +843,8 @@ const createSet = async () => {
       sourceSystem: setForm.value.sourceSystem,
       targetSystem: setForm.value.targetSystem,
       description: setForm.value.description || null,
-      contentMarkdown: contentMarkdown || null
+      contentMarkdown: contentMarkdown || null,
+      processId: setForm.value.processId ? Number(setForm.value.processId) : null
     })
     if (createMode.value === 'import' && contentMarkdown) {
       const importedEntries = extractMappingEntries(contentMarkdown, setForm.value.sourceSystem, setForm.value.targetSystem)
@@ -771,6 +920,7 @@ const openMetadataModal = () => {
     sourceSystem: selectedSet.value.sourceSystem,
     targetSystem: selectedSet.value.targetSystem,
     description: selectedSet.value.description || '',
+    processId: selectedSet.value.processId ? String(selectedSet.value.processId) : '',
     clientEditMode: selectedSet.value.clientEditMode || 'none',
     clientCanAddEntries: selectedSet.value.clientCanAddEntries || false,
     clientCanDeleteEntries: selectedSet.value.clientCanDeleteEntries || false,
@@ -787,7 +937,8 @@ const saveMetadata = async () => {
     await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
       ...metadataForm.value,
       description: metadataForm.value.description || null,
-      clientInstructions: metadataForm.value.clientInstructions || null
+      clientInstructions: metadataForm.value.clientInstructions || null,
+      processId: metadataForm.value.processId ? Number(metadataForm.value.processId) : null
     })
     metadataModalOpen.value = false
     await fetchMappings()
