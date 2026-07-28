@@ -213,7 +213,9 @@ const statusClass = (status: ProcessStatus) => ({
   paused: 'bg-orange-100 text-orange-800', cancelled: 'bg-red-100 text-red-800'
 }[status])
 const formatDate = (date: string) => {
-  const parsed = new Date(`${date}T12:00:00`)
+  const parsed = /^\\d{4}-\\d{2}-\\d{2}$/.test(date)
+    ? new Date(`${date}T12:00:00`)
+    : new Date(date)
   return Number.isNaN(parsed.getTime())
     ? 'Data inválida'
     : new Intl.DateTimeFormat('pt-BR').format(parsed)
