@@ -344,10 +344,20 @@ const categoryLabel = (category: ProcessItem['category']) => ({
   automation: 'Automação', integration: 'Integração', maintenance: 'Manutenção', improvement: 'Melhoria', support: 'Suporte'
 }[category])
 const complexityLabel = (complexity: ProcessItem['complexity']) => complexity ? ({ simple: 'Simples', medium: 'Média', complex: 'Complexa' }[complexity]) : 'Em análise'
-const formatDate = (date: string) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(date))
-const formatDateTime = (date: string) => new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-}).format(new Date(date))
+const formatDate = (date: string) => {
+  const parsed = new Date(date)
+  return Number.isNaN(parsed.getTime())
+    ? 'Data inválida'
+    : new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(parsed)
+}
+const formatDateTime = (date: string) => {
+  const parsed = new Date(date)
+  return Number.isNaN(parsed.getTime())
+    ? 'Data inválida'
+    : new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    }).format(parsed)
+}
 const stageIndex = (status: ProcessStatus) => processStages.findIndex(stage => stage.value === status)
 const processUpdates = (item: ProcessItem) => {
   if (item.updates?.length) return item.updates

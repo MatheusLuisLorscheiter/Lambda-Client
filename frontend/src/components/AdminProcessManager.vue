@@ -212,10 +212,20 @@ const statusClass = (status: ProcessStatus) => ({
   in_progress: 'bg-indigo-100 text-indigo-800', validation: 'bg-violet-100 text-violet-800', delivered: 'bg-emerald-100 text-emerald-800',
   paused: 'bg-orange-100 text-orange-800', cancelled: 'bg-red-100 text-red-800'
 }[status])
-const formatDate = (date: string) => new Intl.DateTimeFormat('pt-BR').format(new Date(`${date}T12:00:00`))
-const formatDateTime = (date: string) => new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-}).format(new Date(date))
+const formatDate = (date: string) => {
+  const parsed = new Date(`${date}T12:00:00`)
+  return Number.isNaN(parsed.getTime())
+    ? 'Data inválida'
+    : new Intl.DateTimeFormat('pt-BR').format(parsed)
+}
+const formatDateTime = (date: string) => {
+  const parsed = new Date(date)
+  return Number.isNaN(parsed.getTime())
+    ? 'Data inválida'
+    : new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    }).format(parsed)
+}
 const fetchProcesses = async () => {
   loading.value = true
   loadError.value = ''
