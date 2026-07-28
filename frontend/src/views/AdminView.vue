@@ -126,6 +126,17 @@
               Processos
             </button>
             <button
+              @click="activeTab = 'mappings'"
+              :class="[
+                'px-6 py-4 text-sm font-medium border-b-2 transition-colors',
+                activeTab === 'mappings'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              ]"
+            >
+              Mapeamentos
+            </button>
+            <button
               @click="activeTab = 'audit'"
               :class="[
                 'px-6 py-4 text-sm font-medium border-b-2 transition-colors',
@@ -144,17 +155,20 @@
 
         <!-- Integrations Tab -->
         <div v-if="activeTab === 'integrations'" class="p-6">
+          <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <label class="block min-w-0 flex-1 sm:max-w-lg"><span class="mb-1 block text-xs font-medium text-slate-500">Buscar integração</span><input v-model="integrationSearch" type="search" placeholder="Nome, função, região ou empresa" class="min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm" /></label>
+            <button class="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-medium text-white" @click="integrationCreateModal = true">+ Nova integração</button>
+          </div>
           <!-- Add Integration Form -->
-          <div class="bg-slate-50 rounded-xl p-6 mb-8">
+          <div v-if="integrationCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div class="absolute inset-0 bg-slate-950/55" @click="integrationCreateModal = false"></div>
+            <div class="relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
             <div class="flex items-center justify-between mb-4">
               <h3 class="text-lg font-semibold text-slate-900">Adicionar nova integração</h3>
-              <button
-                type="button"
-                @click="showIntegrationHelp = true"
-                class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors"
-              >
-                Ajuda
-              </button>
+              <div class="flex items-center gap-2">
+                <button type="button" @click="showIntegrationHelp = true" class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors">Ajuda</button>
+                <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="integrationCreateModal = false">✕</button>
+              </div>
             </div>
             <form @submit.prevent="addIntegration" class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -396,12 +410,13 @@
                 </button>
               </div>
             </form>
+            </div>
           </div>
 
           <!-- Integrations List -->
-          <div v-if="integrations.length > 0" class="space-y-4">
+          <div v-if="filteredIntegrations.length > 0" class="space-y-4">
             <div
-              v-for="integration in integrations"
+              v-for="integration in filteredIntegrations"
               :key="integration.id"
               class="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow"
             >
@@ -413,7 +428,12 @@
                     </svg>
                   </div>
                   <div>
-                    <h4 class="text-base font-semibold text-slate-900">{{ integration.name }}</h4>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h4 class="text-base font-semibold text-slate-900">{{ integration.name }}</h4>
+                      <span v-if="integration.lastCheckStatus" class="rounded-full px-2 py-0.5 text-xs font-medium" :class="integration.lastCheckStatus === 'healthy' ? 'bg-emerald-100 text-emerald-800' : integration.lastCheckStatus === 'degraded' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'">
+                        {{ integration.lastCheckStatus === 'healthy' ? 'Saudável' : integration.lastCheckStatus === 'degraded' ? 'Atenção' : 'Indisponível' }}
+                      </span>
+                    </div>
                     <p class="text-sm text-slate-500">
                       <span class="font-mono">{{ integration.functionName }}</span>
                       <span class="mx-2">•</span>
@@ -438,6 +458,9 @@
                       >
                         {{ integration.companyName }}
                       </span>
+                    </p>
+                    <p v-if="integration.lastCheckMessage" class="mt-1 text-xs text-slate-400">
+                      {{ integration.lastCheckMessage }}<span v-if="integration.lastCheckedAt"> · {{ new Date(integration.lastCheckedAt).toLocaleString('pt-BR') }}</span>
                     </p>
                     <div class="mt-2 flex flex-wrap items-center gap-1.5">
                       <span
@@ -513,10 +536,32 @@
           <AdminProcessManager :companies="companies" />
         </div>
 
+        <div v-if="activeTab === 'mappings'" class="p-6">
+          <div class="mb-6 border-b border-slate-200 pb-5">
+            <h3 class="text-lg font-semibold text-slate-900">Mapeamentos de dados</h3>
+            <p class="mt-1 text-sm text-slate-500">Mantenha o de-para versionado que será apresentado ao cliente como fonte da verdade.</p>
+            <label class="mt-4 block max-w-xl">
+              <span class="mb-1.5 block text-sm font-medium text-slate-700">Integração</span>
+              <select v-model="adminMappingIntegrationId" class="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+                <option value="">Selecione uma integração</option>
+                <option v-for="integration in integrations" :key="integration.id" :value="String(integration.id)">{{ integration.companyName }} · {{ integration.name }} · {{ integration.functionName }}</option>
+              </select>
+            </label>
+          </div>
+          <MappingWorkspace v-if="adminMappingIntegrationId" :integration-id="Number(adminMappingIntegrationId)" />
+          <div v-else class="rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">Selecione uma integração para gerenciar seus mapas.</div>
+        </div>
+
         <div v-if="activeTab === 'clients'" class="p-6">
+          <div class="mb-5 flex flex-wrap justify-end gap-2">
+            <button class="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700" @click="companyCreateModal = true">+ Nova empresa</button>
+            <button class="rounded-md bg-slate-950 px-4 py-2.5 text-sm font-medium text-white" @click="clientCreateModal = true">+ Novo cliente</button>
+          </div>
           <!-- Add Company Form -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Criar empresa</h3>
+          <div v-if="companyCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div class="absolute inset-0 bg-slate-950/55" @click="companyCreateModal = false"></div>
+            <div class="relative w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <div class="mb-4 flex items-center justify-between"><h3 class="text-lg font-semibold text-slate-900">Criar empresa</h3><button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="companyCreateModal = false">✕</button></div>
             <form @submit.prevent="addCompany" class="flex flex-col md:flex-row md:items-end gap-4">
               <div class="flex-1">
                 <label class="block text-sm font-medium text-slate-700 mb-1">Nome da empresa</label>
@@ -543,11 +588,14 @@
                 Criar empresa
               </button>
             </form>
+            </div>
           </div>
 
           <!-- Add Client Form -->
-          <div class="bg-slate-50 rounded-xl p-6 mb-8">
-            <h3 class="text-lg font-semibold text-slate-900 mb-4">Criar cliente</h3>
+          <div v-if="clientCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div class="absolute inset-0 bg-slate-950/55" @click="clientCreateModal = false"></div>
+            <div class="relative w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <div class="mb-4 flex items-center justify-between"><h3 class="text-lg font-semibold text-slate-900">Criar cliente</h3><button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="clientCreateModal = false">✕</button></div>
             <form @submit.prevent="addClient" class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -619,6 +667,7 @@
                 </button>
               </div>
             </form>
+            </div>
           </div>
 
           <!-- Clients List -->
@@ -715,8 +764,11 @@
 
         <!-- Audit Logs Tab -->
         <div v-if="activeTab === 'audit'" class="p-6">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold text-slate-900">Atividade recente</h3>
+          <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row">
+              <div class="min-w-0 flex-1"><label class="mb-1 block text-xs font-medium text-slate-500">Buscar atividade</label><input v-model="auditSearch" type="search" placeholder="Ação, usuário ou recurso" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" @keyup.enter="fetchAuditLogs" /></div>
+              <div><label class="mb-1 block text-xs font-medium text-slate-500">Empresa</label><select v-model="auditCompanyFilter" class="min-w-52 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" @change="fetchAuditLogs"><option value="">Todas</option><option v-for="company in companies" :key="company.id" :value="String(company.id)">{{ company.name }}</option></select></div>
+            </div>
             <button
               @click="fetchAuditLogs"
               class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
@@ -753,7 +805,8 @@
                     </span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-900">
-                    {{ log.userId || 'Sistema' }}
+                    <span class="block">{{ log.userEmail || 'Sistema' }}</span>
+                    <span class="mt-0.5 block text-xs text-slate-400">{{ log.companyName }}</span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500">
                     {{ log.resourceType ? `${log.resourceType} #${log.resourceId}` : '-' }}
@@ -1156,12 +1209,20 @@ import { useApi } from '@/composables/useApi'
 import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import AdminProcessManager from '@/components/AdminProcessManager.vue'
+import MappingWorkspace from '@/components/MappingWorkspace.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
 
-const activeTab = ref<'integrations' | 'processes' | 'clients' | 'audit'>('integrations')
+const activeTab = ref<'integrations' | 'processes' | 'mappings' | 'clients' | 'audit'>('integrations')
+const adminMappingIntegrationId = ref('')
+const auditSearch = ref('')
+const auditCompanyFilter = ref('')
+const integrationSearch = ref('')
+const integrationCreateModal = ref(false)
+const companyCreateModal = ref(false)
+const clientCreateModal = ref(false)
 const integrations = ref<Integration[]>([])
 const clients = ref<ClientUser[]>([])
 const companies = ref<Company[]>([])
@@ -1204,6 +1265,14 @@ const transferSelection = ref<Record<number, string>>({})
 const newCompanyName = ref('')
 
 const defaultCompanyId = computed(() => auth.user?.companyId ?? null)
+const filteredIntegrations = computed(() => {
+  const search = integrationSearch.value.trim().toLocaleLowerCase('pt-BR')
+  if (!search) return integrations.value
+  return integrations.value.filter(integration =>
+    [integration.name, integration.functionName, integration.region, integration.companyName]
+      .some(value => value?.toLocaleLowerCase('pt-BR').includes(search))
+  )
+})
 
 interface Toast {
   id: number
@@ -1422,6 +1491,9 @@ const fetchIntegrations = async () => {
   try {
     const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations')
     integrations.value = data.integrations
+    if (!adminMappingIntegrationId.value && data.integrations[0]) {
+      adminMappingIntegrationId.value = String(data.integrations[0].id)
+    }
   } catch (error) {
     console.error('Falha ao buscar integrações:', error)
   }
@@ -1470,7 +1542,10 @@ const fetchProcesses = async () => {
 
 const fetchAuditLogs = async () => {
   try {
-    const data = await api.get<{ logs: AuditLog[] }>('/audit/logs?limit=50')
+    const params = new URLSearchParams({ limit: '100' })
+    if (auditSearch.value.trim()) params.set('search', auditSearch.value.trim())
+    if (auditCompanyFilter.value) params.set('companyId', auditCompanyFilter.value)
+    const data = await api.get<{ logs: AuditLog[] }>(`/audit/logs?${params}`)
     auditLogs.value = data.logs
   } catch (error) {
     console.error('Falha ao buscar logs de auditoria:', error)
@@ -1504,6 +1579,7 @@ const addIntegration = async () => {
     }
     newDocumentationLink.value = ''
     showDocsPreview.value = false
+    integrationCreateModal.value = false
     await Promise.all([fetchIntegrations(), fetchProcesses()])
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao adicionar integração')
@@ -1515,10 +1591,11 @@ const addIntegration = async () => {
 const testIntegration = async (integration: Integration) => {
   testingId.value = integration.id
   try {
-    await api.get(`/lambda/metrics/${integration.id}?days=1`)
-    showToast('success', `A integração "${integration.name}" está funcionando corretamente!`)
-  } catch {
-    showToast('error', `O teste da integração "${integration.name}" falhou. Verifique suas credenciais.`)
+    const result = await api.post<{ status: string; message: string }>(`/lambda/integrations/${integration.id}/health-check`)
+    showToast(result.status === 'healthy' ? 'success' : 'error', result.message)
+    await fetchIntegrations()
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : `O teste da integração "${integration.name}" falhou.`)
   } finally {
     testingId.value = null
   }
@@ -1694,6 +1771,7 @@ const addClient = async () => {
     showToast('success', 'Cliente criado com sucesso')
     newClient.value = { email: '', password: '', companyId: '', companyName: '' }
     createNewCompany.value = false
+    clientCreateModal.value = false
     await fetchCompanies()
     await fetchClients()
   } catch (error) {
@@ -1715,6 +1793,7 @@ const addCompany = async () => {
     await api.post('/auth/companies', { name: trimmedName })
     showToast('success', 'Empresa criada com sucesso')
     newCompanyName.value = ''
+    companyCreateModal.value = false
     await fetchCompanies()
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao criar empresa')

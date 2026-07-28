@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
+const crypto = require('crypto');
 
 dotenv.config();
 
@@ -19,6 +20,12 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  const requestId = req.get('x-request-id') || crypto.randomUUID();
+  req.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+  next();
+});
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -49,6 +56,35 @@ app.get('/', (req, res) => {
   res.json({ message: 'API Lambda Pulse' });
 });
 
+app.get('/health/live', (_req, res) => {
+  res.json({ status: 'ok', service: 'lambda-pulse-api', timestamp: new Date().toISOString() });
+});
+
+app.get('/health/ready', async (_req, res) => {
+  const { query } = require('./db');
+  const { client: redisClient, connectRedis } = require('./cache/redis');
+  const checks = { postgres: 'unavailable', redis: 'unavailable' };
+  try {
+    await query('SELECT 1');
+    checks.postgres = 'ok';
+  } catch {
+    checks.postgres = 'unavailable';
+  }
+  try {
+    await connectRedis();
+    await redisClient.ping();
+    checks.redis = 'ok';
+  } catch {
+    checks.redis = 'unavailable';
+  }
+  const ready = Object.values(checks).every(status => status === 'ok');
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    checks,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // 404 handler (JSON)
 app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
@@ -57,7 +93,7 @@ app.use((req, res) => {
 // Global JSON error handler
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error('[unhandled error]', err);
+  console.error('[unhandled error]', { requestId: req.requestId, message: err.message, stack: err.stack });
   if (res.headersSent) {
     return;
   }

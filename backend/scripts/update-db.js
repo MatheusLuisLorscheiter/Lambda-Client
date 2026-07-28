@@ -22,7 +22,45 @@ const run = async () => {
     const migrations = [
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS memory_mb INTEGER NOT NULL DEFAULT 128',
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS show_cost_estimate BOOLEAN NOT NULL DEFAULT TRUE',
+        "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'active'",
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_check_status TEXT',
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_check_message TEXT',
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ',
         "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS documentation_links JSONB NOT NULL DEFAULT '[]'",
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS reference_code TEXT',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS objective TEXT',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS scope TEXT',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS acceptance_criteria TEXT',
+        "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS impact TEXT NOT NULL DEFAULT 'medium'",
+        "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS health TEXT NOT NULL DEFAULT 'on_track'",
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS target_sla_at TIMESTAMPTZ',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS blocked_reason TEXT',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS next_action TEXT',
+        "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'",
+        "ALTER TABLE process_items ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'",
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS client_can_comment BOOLEAN NOT NULL DEFAULT TRUE',
+        'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1',
+        'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES process_updates(id) ON DELETE SET NULL',
+        "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'update'",
+        "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'client'",
+        "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'",
+        'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ',
+        'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ',
+        "UPDATE process_items SET reference_code = 'LP-' || LPAD(id::text, 6, '0') WHERE reference_code IS NULL",
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_process_reference_code ON process_items(reference_code)',
+        `WITH ranked AS (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY position NULLS LAST, created_at, id) AS next_position
+            FROM process_items
+            WHERE status = 'queued'
+         )
+         UPDATE process_items
+            SET position = ranked.next_position
+           FROM ranked
+          WHERE process_items.id = ranked.id`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_process_queue_position
+            ON process_items(company_id, position)
+         WHERE status = 'queued' AND position IS NOT NULL`,
         'ALTER TABLE users ALTER COLUMN company_id DROP NOT NULL',
         `DO $$ BEGIN
                     ALTER TABLE users ADD CONSTRAINT chk_clients_have_company CHECK (role <> 'client' OR company_id IS NOT NULL);

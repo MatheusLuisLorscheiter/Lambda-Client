@@ -2,7 +2,7 @@ const { query } = require('../db');
 
 const getIntegrationForUser = async (integrationId, user) => {
   const result = await query(
-    'SELECT id, name, function_name, region, memory_mb, show_cost_estimate, documentation_links, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id, company_id FROM integrations WHERE id = $1',
+    'SELECT id, name, function_name, region, memory_mb, show_cost_estimate, lifecycle_status, last_check_status, last_check_message, last_checked_at, documentation_links, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id, company_id FROM integrations WHERE id = $1',
     [integrationId]
   );
 

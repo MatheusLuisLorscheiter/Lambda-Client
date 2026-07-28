@@ -4,6 +4,8 @@ const { pool, query } = require('../db');
 const { encrypt } = require('../security/crypto');
 const { logAudit } = require('../audit/logger');
 const { getIntegrationForUser, normalizeDocumentationLinks } = require('../services/integrations');
+const { LambdaClient, GetFunctionCommand } = require('@aws-sdk/client-lambda');
+const { decrypt } = require('../security/crypto');
 
 const router = express.Router();
 const validProcessStatuses = new Set(['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused']);
@@ -126,6 +128,10 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.region,
               integrations.memory_mb AS "memoryMb",
               integrations.show_cost_estimate AS "showCostEstimate",
+              integrations.lifecycle_status AS "lifecycleStatus",
+              integrations.last_check_status AS "lastCheckStatus",
+              integrations.last_check_message AS "lastCheckMessage",
+              integrations.last_checked_at AS "lastCheckedAt",
               integrations.documentation_links AS "documentationLinks",
               integrations.company_id AS "companyId",
               companies.name AS "companyName",
@@ -146,6 +152,10 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.region,
               integrations.memory_mb AS "memoryMb",
               integrations.show_cost_estimate AS "showCostEstimate",
+              integrations.lifecycle_status AS "lifecycleStatus",
+              integrations.last_check_status AS "lastCheckStatus",
+              integrations.last_check_message AS "lastCheckMessage",
+              integrations.last_checked_at AS "lastCheckedAt",
               integrations.documentation_links AS "documentationLinks",
               integrations.company_id AS "companyId",
               companies.name AS "companyName",
@@ -278,6 +288,74 @@ router.post('/integrations', authenticateToken, async (req, res) => {
   });
 
   res.json({ integration: { ...result.rows[0], companyName, processes: linkedProcesses } });
+});
+
+router.post('/integrations/:integrationId/health-check', authenticateToken, async (req, res) => {
+  const integrationId = Number(req.params.integrationId);
+  if (!Number.isInteger(integrationId) || integrationId <= 0) {
+    return res.status(400).json({ error: 'IntegraÃ§Ã£o invÃ¡lida' });
+  }
+  const integration = await getIntegrationForUser(integrationId, req.user);
+  if (!integration) return res.status(404).json({ error: 'IntegraÃ§Ã£o nÃ£o encontrada' });
+
+  let status = 'healthy';
+  let message = 'Credenciais vÃ¡lidas e funÃ§Ã£o acessÃ­vel.';
+  let details = null;
+  try {
+    const lambdaClient = new LambdaClient({
+      region: integration.region,
+      credentials: {
+        accessKeyId: decrypt(integration.access_key_encrypted),
+        secretAccessKey: decrypt(integration.secret_key_encrypted)
+      }
+    });
+    const result = await lambdaClient.send(new GetFunctionCommand({
+      FunctionName: integration.function_name
+    }));
+    const configuration = result.Configuration || {};
+    details = {
+      functionName: configuration.FunctionName || integration.function_name,
+      state: configuration.State || null,
+      lastUpdateStatus: configuration.LastUpdateStatus || null,
+      runtime: configuration.Runtime || null,
+      memorySize: configuration.MemorySize || null,
+      timeout: configuration.Timeout || null,
+      lastModified: configuration.LastModified || null,
+      codeSize: configuration.CodeSize || null
+    };
+    if (configuration.State && configuration.State !== 'Active') {
+      status = 'degraded';
+      message = `A funÃ§Ã£o estÃ¡ no estado ${configuration.State}.`;
+    } else if (configuration.LastUpdateStatus === 'Failed') {
+      status = 'degraded';
+      message = 'A Ãºltima atualizaÃ§Ã£o da funÃ§Ã£o falhou.';
+    }
+  } catch (error) {
+    status = 'unavailable';
+    message = error.name === 'ResourceNotFoundException'
+      ? 'FunÃ§Ã£o nÃ£o encontrada na regiÃ£o configurada.'
+      : 'NÃ£o foi possÃ­vel acessar a funÃ§Ã£o com as credenciais configuradas.';
+  }
+
+  await query(
+    `UPDATE integrations
+        SET last_check_status = $1, last_check_message = $2, last_checked_at = NOW()
+      WHERE id = $3`,
+    [status, message, integrationId]
+  );
+  await logAudit({
+    companyId: integration.company_id,
+    userId: req.user.id,
+    action: 'integration.health_check',
+    resourceType: 'integration',
+    resourceId: String(integrationId),
+    metadata: { status, details },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+
+  const payload = { status, message, checkedAt: new Date().toISOString(), details };
+  res.json(payload);
 });
 
 // Delete integration

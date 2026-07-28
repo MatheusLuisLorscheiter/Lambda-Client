@@ -31,7 +31,7 @@ router.get('/logs/:integrationId', authenticateToken, async (req, res) => {
     });
 
     await logAudit({
-      companyId: req.user.companyId,
+      companyId: integration.company_id,
       userId: req.user.id,
       action: 'lambda.logs.fetch',
       resourceType: 'integration',
@@ -117,7 +117,7 @@ router.post('/logs/:integrationId/ai-summary/start', authenticateToken, async (r
         });
 
         await logAudit({
-          companyId: req.user.companyId,
+          companyId: integration.company_id,
           userId: req.user.id,
           action: 'lambda.logs.ai_summary',
           resourceType: 'integration',

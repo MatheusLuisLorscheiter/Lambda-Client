@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS integrations (
   region TEXT NOT NULL,
   memory_mb INTEGER NOT NULL DEFAULT 128,
   show_cost_estimate BOOLEAN NOT NULL DEFAULT TRUE,
+  lifecycle_status TEXT NOT NULL DEFAULT 'active'
+    CHECK (lifecycle_status IN ('active', 'paused', 'maintenance')),
+  last_check_status TEXT
+    CHECK (last_check_status IS NULL OR last_check_status IN ('healthy', 'degraded', 'unavailable')),
+  last_check_message TEXT,
+  last_checked_at TIMESTAMPTZ,
   documentation_links JSONB NOT NULL DEFAULT '[]',
   access_key_encrypted TEXT NOT NULL,
   secret_key_encrypted TEXT NOT NULL,
@@ -61,14 +67,23 @@ CREATE TABLE IF NOT EXISTS process_items (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reference_code TEXT UNIQUE,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
+  objective TEXT,
+  scope TEXT,
+  acceptance_criteria TEXT,
   category TEXT NOT NULL DEFAULT 'automation'
     CHECK (category IN ('automation', 'integration', 'maintenance', 'improvement', 'support')),
   status TEXT NOT NULL DEFAULT 'requested'
     CHECK (status IN ('requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused', 'cancelled')),
   priority TEXT NOT NULL DEFAULT 'normal'
     CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  impact TEXT NOT NULL DEFAULT 'medium'
+    CHECK (impact IN ('low', 'medium', 'high', 'critical')),
+  health TEXT NOT NULL DEFAULT 'on_track'
+    CHECK (health IN ('on_track', 'at_risk', 'off_track', 'blocked')),
   position INTEGER,
   complexity TEXT
     CHECK (complexity IS NULL OR complexity IN ('simple', 'medium', 'complex')),
@@ -76,7 +91,14 @@ CREATE TABLE IF NOT EXISTS process_items (
   estimate_business_days INTEGER CHECK (estimate_business_days IS NULL OR estimate_business_days > 0),
   planned_start DATE,
   due_date DATE,
+  target_sla_at TIMESTAMPTZ,
   delivered_at TIMESTAMPTZ,
+  blocked_reason TEXT,
+  next_action TEXT,
+  tags JSONB NOT NULL DEFAULT '[]',
+  custom_fields JSONB NOT NULL DEFAULT '{}',
+  client_can_comment BOOLEAN NOT NULL DEFAULT TRUE,
+  version INTEGER NOT NULL DEFAULT 1,
   latest_update TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -93,8 +115,90 @@ CREATE TABLE IF NOT EXISTS process_updates (
   id SERIAL PRIMARY KEY,
   process_id INTEGER NOT NULL REFERENCES process_items(id) ON DELETE CASCADE,
   author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  parent_id INTEGER REFERENCES process_updates(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL DEFAULT 'update'
+    CHECK (kind IN ('update', 'comment', 'status', 'decision', 'delivery', 'system')),
+  visibility TEXT NOT NULL DEFAULT 'client'
+    CHECK (visibility IN ('client', 'internal')),
   message TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  edited_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS process_checklist_items (
+  id SERIAL PRIMARY KEY,
+  process_id INTEGER NOT NULL REFERENCES process_items(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'todo'
+    CHECK (status IN ('todo', 'in_progress', 'done', 'blocked')),
+  assignee_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  due_date DATE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS process_deliveries (
+  id SERIAL PRIMARY KEY,
+  process_id INTEGER NOT NULL REFERENCES process_items(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  version TEXT,
+  environment TEXT NOT NULL DEFAULT 'production'
+    CHECK (environment IN ('development', 'staging', 'production')),
+  status TEXT NOT NULL DEFAULT 'ready'
+    CHECK (status IN ('draft', 'ready', 'accepted', 'rejected')),
+  artifact_links JSONB NOT NULL DEFAULT '[]',
+  release_notes TEXT,
+  rollback_plan TEXT,
+  acceptance_note TEXT,
+  delivered_at TIMESTAMPTZ,
+  accepted_at TIMESTAMPTZ,
+  accepted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS integration_mapping_sets (
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  integration_id INTEGER NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  process_id INTEGER REFERENCES process_items(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  source_system TEXT NOT NULL,
+  target_system TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'published', 'archived')),
+  published_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS integration_mapping_entries (
+  id SERIAL PRIMARY KEY,
+  mapping_set_id INTEGER NOT NULL REFERENCES integration_mapping_sets(id) ON DELETE CASCADE,
+  source_path TEXT NOT NULL,
+  source_type TEXT,
+  target_path TEXT NOT NULL,
+  target_type TEXT,
+  direction TEXT NOT NULL DEFAULT 'source_to_target'
+    CHECK (direction IN ('source_to_target', 'target_to_source', 'bidirectional')),
+  transformation TEXT,
+  fallback_value TEXT,
+  is_required BOOLEAN NOT NULL DEFAULT FALSE,
+  notes TEXT,
+  examples JSONB NOT NULL DEFAULT '{}',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
@@ -108,3 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_process_items_company ON process_items(company_id
 CREATE INDEX IF NOT EXISTS idx_process_items_status ON process_items(company_id, status);
 CREATE INDEX IF NOT EXISTS idx_process_integrations_integration ON process_integrations(integration_id);
 CREATE INDEX IF NOT EXISTS idx_process_updates_process ON process_updates(process_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_process_checklist_process ON process_checklist_items(process_id, sort_order, id);
+CREATE INDEX IF NOT EXISTS idx_process_deliveries_process ON process_deliveries(process_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mapping_sets_integration ON integration_mapping_sets(integration_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mapping_entries_set ON integration_mapping_entries(mapping_set_id, sort_order, id);

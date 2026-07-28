@@ -34,7 +34,7 @@ router.get('/functions/:integrationId', authenticateToken, async (req, res) => {
     const response = await lambdaClient.send(command);
 
     await logAudit({
-      companyId: req.user.companyId,
+      companyId: integration.company_id,
       userId: req.user.id,
       action: 'lambda.list_functions',
       resourceType: 'integration',
@@ -192,7 +192,7 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
     await redisClient.set(cacheKey, JSON.stringify(payload), { EX: 300 });
 
     await logAudit({
-      companyId: req.user.companyId,
+      companyId: integration.company_id,
       userId: req.user.id,
       action: 'lambda.metrics.fetch',
       resourceType: 'integration',
@@ -255,7 +255,7 @@ router.post('/invoke/:integrationId', authenticateToken, async (req, res) => {
     const logTail = response.LogResult ? Buffer.from(response.LogResult, 'base64').toString('utf8') : null;
 
     await logAudit({
-      companyId: req.user.companyId,
+      companyId: integration.company_id,
       userId: req.user.id,
       action: 'lambda.invoke.test',
       resourceType: 'integration',

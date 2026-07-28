@@ -31,15 +31,16 @@ export function useApi() {
             body: body ? JSON.stringify(body) : undefined
         })
 
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 401) {
+            const wasAdmin = auth.isAdmin
             await auth.logout()
-            router.push('/login')
-            throw new Error('Session expired')
+            await router.push(wasAdmin ? '/admin/login' : '/login')
+            throw new Error('Sua sessão expirou. Entre novamente.')
         }
 
         if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.error || 'Request failed')
+            const error = await response.json().catch(() => ({}))
+            throw new Error(error.error || 'Não foi possível concluir a solicitação')
         }
 
         return response.json()
