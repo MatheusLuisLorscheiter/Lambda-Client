@@ -101,9 +101,10 @@
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">Descrição</label>
                 <textarea v-model="editor.description" required rows="5" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea>
               </div>
-              <div v-if="editor.id" class="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <p class="text-xs font-medium text-slate-500">Solicitado em</p>
-                <p class="mt-1 text-sm font-medium text-slate-800">{{ formatDate(editor.createdAt) }}</p>
+              <div>
+                <label class="mb-1.5 block text-sm font-medium text-slate-700">Data da solicitação</label>
+                <input v-model="editor.createdAt" type="date" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" />
+                <p class="mt-1 text-xs text-slate-400">Deixe em branco para usar a data atual.</p>
               </div>
               <div class="grid gap-4">
                 <div>
@@ -172,6 +173,10 @@
                 <div>
                   <label class="mb-1.5 block text-sm font-medium text-slate-700">Previsão de entrega</label>
                   <input v-model="editor.dueDate" type="date" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" />
+                </div>
+                <div v-if="editor.status === 'delivered'">
+                  <label class="mb-1.5 block text-sm font-medium text-slate-700">Data da entrega</label>
+                  <input v-model="editor.deliveredAt" type="date" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" />
                 </div>
               </div>
               <div v-if="editor.health === 'blocked'">
@@ -327,7 +332,7 @@ const emptyEditor = () => ({
   priority: 'normal', impact: 'medium', health: 'on_track', complexity: '', position: null as number | null,
   estimateBusinessDays: null as number | null, plannedStart: '', dueDate: '', progress: 0, latestUpdate: '',
   blockedReason: '', nextAction: '', tagsText: '', clientCanComment: true,
-  createdAt: '',
+  createdAt: '', deliveredAt: '',
   updates: [] as NonNullable<ProcessItem['updates']>,
   checklist: [] as NonNullable<ProcessItem['checklist']>,
   deliveries: [] as NonNullable<ProcessItem['deliveries']>
@@ -400,7 +405,7 @@ const openEdit = (item: ProcessItem) => {
     plannedStart: toCalendarDateInput(item.plannedStart), dueDate: toCalendarDateInput(item.dueDate),
     progress: item.progress, latestUpdate: '', blockedReason: item.blockedReason || '',
     nextAction: item.nextAction || '', tagsText: (item.tags || []).join(', '),
-    clientCanComment: item.clientCanComment !== false, createdAt: item.createdAt,
+    clientCanComment: item.clientCanComment !== false, createdAt: toCalendarDateInput(item.createdAt), deliveredAt: toCalendarDateInput(item.deliveredAt),
     updates: item.updates || [], checklist: item.checklist || [], deliveries: item.deliveries || []
   }
   editorOpen.value = true
@@ -420,8 +425,9 @@ const saveProcess = async () => {
     category: editor.value.category, status: editor.value.status, priority: editor.value.priority,
     impact: editor.value.impact, health: editor.value.health,
     complexity: editor.value.complexity || null, position: editor.value.status === 'queued' ? (editor.value.position || undefined) : null,
-    estimateBusinessDays: editor.value.estimateBusinessDays || null, plannedStart: editor.value.plannedStart || null,
-    dueDate: editor.value.dueDate || null, progress: editor.value.progress,
+    estimateBusinessDays: editor.value.estimateBusinessDays || null, createdAt: editor.value.createdAt || undefined,
+    plannedStart: editor.value.plannedStart || null, dueDate: editor.value.dueDate || null,
+    deliveredAt: editor.value.deliveredAt || undefined, progress: editor.value.progress,
     blockedReason: editor.value.health === 'blocked' ? editor.value.blockedReason : null,
     nextAction: editor.value.nextAction || null,
     tags: editor.value.tagsText.split(',').map(tag => tag.trim()).filter(Boolean),

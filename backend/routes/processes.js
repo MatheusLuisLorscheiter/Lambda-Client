@@ -58,6 +58,13 @@ const normalizeOptionalDate = (value, fieldLabel) => {
   return normalized;
 };
 
+const normalizeOptionalDateTime = (value, fieldLabel) => {
+  const normalized = normalizeOptionalDate(value, fieldLabel);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split('-').map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+};
+
 const validatePlanningWindow = (plannedStart, dueDate) => {
   if (plannedStart && dueDate && dueDate < plannedStart) {
     throw new Error('A previsão de entrega não pode ser anterior ao início planejado');
@@ -465,6 +472,8 @@ router.post('/', authenticateToken, async (req, res) => {
   let position = null;
   let plannedStart = null;
   let dueDate = null;
+  let createdAt = null;
+  let deliveredAt = null;
   let targetSlaAt = req.user.role === 'client' ? addBusinessHours(new Date(), 48) : null;
   let blockedReason = null;
   let nextAction = null;
@@ -492,7 +501,18 @@ router.post('/', authenticateToken, async (req, res) => {
     try {
       plannedStart = normalizeOptionalDate(req.body.plannedStart, 'Data de início');
       dueDate = normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega');
+      createdAt = normalizeOptionalDateTime(req.body.createdAt, 'Data de solicitação');
+      deliveredAt = normalizeOptionalDateTime(req.body.deliveredAt, 'Data de entrega');
       validatePlanningWindow(plannedStart, dueDate);
+      if (createdAt && dueDate && new Date(dueDate) < createdAt) {
+        throw new Error('A previsão de entrega não pode ser anterior à data de solicitação');
+      }
+      if (createdAt && deliveredAt && deliveredAt < createdAt) {
+        throw new Error('A data de entrega não pode ser anterior à data de solicitação');
+      }
+      if (plannedStart && deliveredAt && deliveredAt < new Date(plannedStart)) {
+        throw new Error('A data de entrega não pode ser anterior ao início planejado');
+      }
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -534,10 +554,10 @@ router.post('/', authenticateToken, async (req, res) => {
       `INSERT INTO process_items
         (company_id, requested_by, title, description, category, status, priority, position,
          complexity, progress, estimate_business_days, planned_start, due_date, delivered_at, latest_update,
-         owner_user_id, objective, scope, acceptance_criteria, impact, health, target_sla_at,
+         created_at, owner_user_id, objective, scope, acceptance_criteria, impact, health, target_sla_at,
          blocked_reason, next_action, tags, client_can_comment)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+               COALESCE($16, NOW()), $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
        RETURNING id`,
       [
         companyId,
@@ -553,8 +573,9 @@ router.post('/', authenticateToken, async (req, res) => {
         estimateBusinessDays,
         plannedStart,
         dueDate,
-        status === 'delivered' ? new Date() : null,
+        status === 'delivered' ? (deliveredAt || new Date()) : null,
         latestUpdate,
+        createdAt,
         ownerUserId,
         objective,
         scope,
@@ -650,11 +671,14 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     if (!validCategories.has(req.body.category)) return res.status(400).json({ error: 'Categoria inválida' });
     add('category', req.body.category);
   }
+  const effectiveStatus = req.body.status || existing.status;
   if (req.body.status !== undefined) {
     if (!validStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status inválido' });
     add('status', req.body.status);
     if (req.body.status === 'delivered') {
-      add('delivered_at', existing.deliveredAt || new Date());
+      if (req.body.deliveredAt === undefined) {
+        add('delivered_at', existing.deliveredAt || new Date());
+      }
       if (req.body.progress === undefined) add('progress', 100);
     } else if (existing.status === 'delivered') {
       add('delivered_at', null);
@@ -705,6 +729,45 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Progresso deve estar entre 0 e 100' });
     }
     add('progress', progress);
+  }
+  if (req.body.createdAt !== undefined) {
+    if (req.body.createdAt === '' || req.body.createdAt === null) {
+      return res.status(400).json({ error: 'Data de solicitação inválida' });
+    }
+    try {
+      const createdAt = normalizeOptionalDateTime(req.body.createdAt, 'Data de solicitação');
+      add('created_at', createdAt);
+      const effectiveDueDate = req.body.dueDate !== undefined
+        ? normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega')
+        : existing.dueDate;
+      if (effectiveDueDate && new Date(effectiveDueDate) < createdAt) {
+        return res.status(400).json({ error: 'A previsão de entrega não pode ser anterior à data de solicitação' });
+      }
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+  if (req.body.deliveredAt !== undefined) {
+    try {
+      const deliveredAt = req.body.deliveredAt === '' || req.body.deliveredAt === null
+        ? null
+        : normalizeOptionalDateTime(req.body.deliveredAt, 'Data de entrega');
+      add('delivered_at', deliveredAt);
+      const effectiveCreatedAt = req.body.createdAt !== undefined && req.body.createdAt !== '' && req.body.createdAt !== null
+        ? normalizeOptionalDateTime(req.body.createdAt, 'Data de solicitação')
+        : existing.createdAt ? new Date(existing.createdAt) : null;
+      if (deliveredAt && effectiveCreatedAt && deliveredAt < effectiveCreatedAt) {
+        return res.status(400).json({ error: 'A data de entrega não pode ser anterior à data de solicitação' });
+      }
+      const effectivePlannedStart = req.body.plannedStart !== undefined
+        ? normalizeOptionalDate(req.body.plannedStart, 'Data de início')
+        : existing.plannedStart;
+      if (deliveredAt && effectivePlannedStart && deliveredAt < new Date(effectivePlannedStart)) {
+        return res.status(400).json({ error: 'A data de entrega não pode ser anterior ao início planejado' });
+      }
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
   }
   if (req.body.position !== undefined) {
     const position = req.body.position === null || req.body.position === ''
