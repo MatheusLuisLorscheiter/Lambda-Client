@@ -1256,7 +1256,7 @@ router.patch('/:processId/deliveries/:deliveryId', authenticateToken, async (req
       `UPDATE process_deliveries
           SET status = $1, acceptance_note = $2,
               accepted_at = CASE WHEN $1 = 'accepted' THEN NOW() ELSE NULL END,
-              accepted_by = CASE WHEN $1 = 'accepted' THEN $3 ELSE NULL END,
+              accepted_by = CASE WHEN $1 = 'accepted' THEN $3::INTEGER ELSE NULL END,
               delivered_at = CASE WHEN $1 = 'ready' THEN COALESCE(delivered_at, NOW()) ELSE delivered_at END,
               updated_at = NOW()
         WHERE id = $4

@@ -113,14 +113,19 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const user = jwt.verify(token, process.env.JWT_SECRET);
-    const userResult = await query('SELECT id, is_active FROM users WHERE id = $1', [user.id]);
+    const userId = Number(user.id);
+    if (!Number.isInteger(userId)) {
+      return res.status(403).json({ error: 'Token inválido' });
+    }
+
+    const userResult = await query('SELECT id, is_active FROM users WHERE id = $1', [userId]);
     const storedUser = userResult.rows[0];
 
     if (!storedUser || !storedUser.is_active) {
       return res.status(403).json({ error: 'Usuário inativo' });
     }
 
-    req.user = user;
+    req.user = { ...user, id: userId };
     next();
   } catch (error) {
     return res.status(403).json({ error: 'Token inválido' });
@@ -637,7 +642,7 @@ router.get('/me', authenticateToken, async (req, res) => {
 // SSO login via Chave Mestra
 router.post('/sso/chave-mestra', async (req, res) => {
   const { code, redirectUri } = req.body;
-  
+
   if (!code) {
     return res.status(400).json({ error: 'Código de autorização é obrigatório' });
   }
