@@ -293,13 +293,13 @@ router.post('/integrations', authenticateToken, async (req, res) => {
 router.post('/integrations/:integrationId/health-check', authenticateToken, async (req, res) => {
   const integrationId = Number(req.params.integrationId);
   if (!Number.isInteger(integrationId) || integrationId <= 0) {
-    return res.status(400).json({ error: 'IntegraÃ§Ã£o invÃ¡lida' });
+    return res.status(400).json({ error: 'Integração inválida' });
   }
   const integration = await getIntegrationForUser(integrationId, req.user);
-  if (!integration) return res.status(404).json({ error: 'IntegraÃ§Ã£o nÃ£o encontrada' });
+  if (!integration) return res.status(404).json({ error: 'Integração não encontrada' });
 
   let status = 'healthy';
-  let message = 'Credenciais vÃ¡lidas e funÃ§Ã£o acessÃ­vel.';
+  let message = 'Credenciais válidas e função acessível.';
   let details = null;
   try {
     const lambdaClient = new LambdaClient({
@@ -325,16 +325,16 @@ router.post('/integrations/:integrationId/health-check', authenticateToken, asyn
     };
     if (configuration.State && configuration.State !== 'Active') {
       status = 'degraded';
-      message = `A funÃ§Ã£o estÃ¡ no estado ${configuration.State}.`;
+      message = `A função está no estado ${configuration.State}.`;
     } else if (configuration.LastUpdateStatus === 'Failed') {
       status = 'degraded';
-      message = 'A Ãºltima atualizaÃ§Ã£o da funÃ§Ã£o falhou.';
+      message = 'A última atualização da função falhou.';
     }
   } catch (error) {
     status = 'unavailable';
     message = error.name === 'ResourceNotFoundException'
-      ? 'FunÃ§Ã£o nÃ£o encontrada na regiÃ£o configurada.'
-      : 'NÃ£o foi possÃ­vel acessar a funÃ§Ã£o com as credenciais configuradas.';
+      ? 'Função não encontrada na região configurada.'
+      : 'Não foi possível acessar a função com as credenciais configuradas.';
   }
 
   await query(

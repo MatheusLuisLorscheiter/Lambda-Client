@@ -10,7 +10,7 @@ const validDirections = new Set(['source_to_target', 'target_to_source', 'bidire
 
 const requireAdmin = (req, res) => {
   if (req.user.role !== 'admin') {
-    res.status(403).json({ error: 'Acesso de administrador obrigatÃ³rio' });
+    res.status(403).json({ error: 'Acesso de administrador obrigatório' });
     return false;
   }
   return true;
@@ -18,7 +18,7 @@ const requireAdmin = (req, res) => {
 
 const normalizeText = (value, label, max, required = false) => {
   const text = String(value || '').trim();
-  if (required && !text) throw new Error(`${label} Ã© obrigatÃ³rio`);
+  if (required && !text) throw new Error(`${label} é obrigatório`);
   if (text.length > max) throw new Error(`${label} excede ${max} caracteres`);
   return text || null;
 };
@@ -35,7 +35,7 @@ const getMappingSet = async (mappingSetId, user, { forUpdate = false } = {}) => 
   const item = result.rows[0];
   if (!item) return null;
   if (user.role === 'client' &&
-      (item.integration_company_id !== user.companyId || item.status !== 'published')) {
+    (item.integration_company_id !== user.companyId || item.status !== 'published')) {
     return null;
   }
   return item;
@@ -87,16 +87,16 @@ const mappingSetSelect = `
 router.get('/integrations/:integrationId/mappings', authenticateToken, async (req, res) => {
   const integrationId = Number(req.params.integrationId);
   if (!Number.isInteger(integrationId) || integrationId <= 0) {
-    return res.status(400).json({ error: 'IntegraÃ§Ã£o invÃ¡lida' });
+    return res.status(400).json({ error: 'Integração inválida' });
   }
   const integration = await getIntegrationForUser(integrationId, req.user);
-  if (!integration) return res.status(404).json({ error: 'IntegraÃ§Ã£o nÃ£o encontrada' });
+  if (!integration) return res.status(404).json({ error: 'Integração não encontrada' });
 
   const conditions = ['mapping_sets.integration_id = $1'];
   const values = [integrationId];
   if (req.user.role === 'client') conditions.push("mapping_sets.status = 'published'");
   if (req.query.status && req.user.role === 'admin') {
-    if (!validStatuses.has(req.query.status)) return res.status(400).json({ error: 'Status invÃ¡lido' });
+    if (!validStatuses.has(req.query.status)) return res.status(400).json({ error: 'Status inválido' });
     values.push(req.query.status);
     conditions.push(`mapping_sets.status = $${values.length}`);
   }
@@ -117,7 +117,7 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
   if (!requireAdmin(req, res)) return;
   const integrationId = Number(req.params.integrationId);
   const integration = await getIntegrationForUser(integrationId, req.user);
-  if (!integration) return res.status(404).json({ error: 'IntegraÃ§Ã£o nÃ£o encontrada' });
+  if (!integration) return res.status(404).json({ error: 'Integração não encontrada' });
 
   let name;
   let description;
@@ -125,7 +125,7 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
   let targetSystem;
   try {
     name = normalizeText(req.body.name, 'Nome', 160, true);
-    description = normalizeText(req.body.description, 'DescriÃ§Ã£o', 3000);
+    description = normalizeText(req.body.description, 'Descrição', 3000);
     sourceSystem = normalizeText(req.body.sourceSystem, 'Sistema de origem', 160, true);
     targetSystem = normalizeText(req.body.targetSystem, 'Sistema de destino', 160, true);
   } catch (error) {
@@ -137,7 +137,7 @@ router.post('/integrations/:integrationId/mappings', authenticateToken, async (r
       'SELECT id FROM process_items WHERE id = $1 AND company_id = $2',
       [processId, integration.company_id]
     );
-    if (!process.rowCount) return res.status(400).json({ error: 'Processo relacionado invÃ¡lido' });
+    if (!process.rowCount) return res.status(400).json({ error: 'Processo relacionado inválido' });
   }
 
   const result = await query(
@@ -167,7 +167,7 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
   const existing = await getMappingSet(mappingSetId, req.user);
-  if (!existing) return res.status(404).json({ error: 'Mapeamento nÃ£o encontrado' });
+  if (!existing) return res.status(404).json({ error: 'Mapeamento não encontrado' });
 
   const fields = [];
   const values = [];
@@ -178,7 +178,7 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
   try {
     if (req.body.name !== undefined) add('name', normalizeText(req.body.name, 'Nome', 160, true));
     if (req.body.description !== undefined) {
-      add('description', normalizeText(req.body.description, 'DescriÃ§Ã£o', 3000));
+      add('description', normalizeText(req.body.description, 'Descrição', 3000));
     }
     if (req.body.sourceSystem !== undefined) {
       add('source_system', normalizeText(req.body.sourceSystem, 'Sistema de origem', 160, true));
@@ -196,16 +196,16 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
         'SELECT id FROM process_items WHERE id = $1 AND company_id = $2',
         [processId, existing.company_id]
       );
-      if (!process.rowCount) return res.status(400).json({ error: 'Processo relacionado invÃ¡lido' });
+      if (!process.rowCount) return res.status(400).json({ error: 'Processo relacionado inválido' });
     }
     add('process_id', processId);
   }
   if (req.body.status !== undefined) {
-    if (!validStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status invÃ¡lido' });
+    if (!validStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status inválido' });
     add('status', req.body.status);
     add('published_at', req.body.status === 'published' ? new Date() : null);
   }
-  if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteraÃ§Ã£o informada' });
+  if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
   if (req.body.status === 'published') {
     await query(
       `UPDATE integration_mapping_sets
@@ -233,9 +233,9 @@ router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, re
   if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
-  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento nÃ£o encontrado' });
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
   if (mappingSet.status !== 'draft') {
-    return res.status(409).json({ error: 'Crie uma nova versÃ£o antes de alterar um mapa publicado' });
+    return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
   }
   let sourcePath;
   let targetPath;
@@ -266,9 +266,9 @@ router.post('/mappings/:mappingSetId/entries', authenticateToken, async (req, re
     [
       mappingSetId, sourcePath, normalizeText(req.body.sourceType, 'Tipo de origem', 80),
       targetPath, normalizeText(req.body.targetType, 'Tipo de destino', 80), direction,
-      normalizeText(req.body.transformation, 'TransformaÃ§Ã£o', 5000),
-      normalizeText(req.body.fallbackValue, 'Valor padrÃ£o', 2000),
-      Boolean(req.body.isRequired), normalizeText(req.body.notes, 'ObservaÃ§Ãµes', 3000),
+      normalizeText(req.body.transformation, 'Transformação', 5000),
+      normalizeText(req.body.fallbackValue, 'Valor padrão', 2000),
+      Boolean(req.body.isRequired), normalizeText(req.body.notes, 'Observações', 3000),
       JSON.stringify(examples), Number(sortResult.rows[0].sortOrder)
     ]
   );
@@ -284,9 +284,9 @@ router.patch('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asyn
   const mappingSetId = Number(req.params.mappingSetId);
   const entryId = Number(req.params.entryId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
-  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento nÃ£o encontrado' });
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
   if (mappingSet.status !== 'draft') {
-    return res.status(409).json({ error: 'Crie uma nova versÃ£o antes de alterar um mapa publicado' });
+    return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
   }
   const allowedFields = {
     sourcePath: ['source_path', 500],
@@ -313,22 +313,22 @@ router.patch('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asyn
     return res.status(400).json({ error: error.message });
   }
   if (req.body.direction !== undefined) {
-    if (!validDirections.has(req.body.direction)) return res.status(400).json({ error: 'DireÃ§Ã£o invÃ¡lida' });
+    if (!validDirections.has(req.body.direction)) return res.status(400).json({ error: 'Direção inválida' });
     add('direction', req.body.direction);
   }
   if (req.body.isRequired !== undefined) add('is_required', Boolean(req.body.isRequired));
   if (req.body.examples !== undefined) {
     if (!req.body.examples || typeof req.body.examples !== 'object' || Array.isArray(req.body.examples)) {
-      return res.status(400).json({ error: 'Exemplos invÃ¡lidos' });
+      return res.status(400).json({ error: 'Exemplos inválidos' });
     }
     add('examples', JSON.stringify(req.body.examples));
   }
   if (req.body.sortOrder !== undefined) {
     const sortOrder = Number(req.body.sortOrder);
-    if (!Number.isInteger(sortOrder) || sortOrder < 0) return res.status(400).json({ error: 'Ordem invÃ¡lida' });
+    if (!Number.isInteger(sortOrder) || sortOrder < 0) return res.status(400).json({ error: 'Ordem inválida' });
     add('sort_order', sortOrder);
   }
-  if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteraÃ§Ã£o informada' });
+  if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
   fields.push('updated_at = NOW()');
   values.push(entryId, mappingSetId);
   const result = await query(
@@ -342,7 +342,7 @@ router.patch('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asyn
                 created_at AS "createdAt", updated_at AS "updatedAt"`,
     values
   );
-  if (!result.rowCount) return res.status(404).json({ error: 'Campo nÃ£o encontrado' });
+  if (!result.rowCount) return res.status(404).json({ error: 'Campo não encontrado' });
   await query(
     'UPDATE integration_mapping_sets SET version = version + 1, status = $1, updated_at = NOW() WHERE id = $2',
     [mappingSet.status === 'published' ? 'draft' : mappingSet.status, mappingSetId]
@@ -355,15 +355,15 @@ router.delete('/mappings/:mappingSetId/entries/:entryId', authenticateToken, asy
   const mappingSetId = Number(req.params.mappingSetId);
   const entryId = Number(req.params.entryId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
-  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento nÃ£o encontrado' });
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
   if (mappingSet.status !== 'draft') {
-    return res.status(409).json({ error: 'Crie uma nova versÃ£o antes de alterar um mapa publicado' });
+    return res.status(409).json({ error: 'Crie uma nova versão antes de alterar um mapa publicado' });
   }
   const result = await query(
     'DELETE FROM integration_mapping_entries WHERE id = $1 AND mapping_set_id = $2 RETURNING id',
     [entryId, mappingSetId]
   );
-  if (!result.rowCount) return res.status(404).json({ error: 'Campo nÃ£o encontrado' });
+  if (!result.rowCount) return res.status(404).json({ error: 'Campo não encontrado' });
   await query(
     'UPDATE integration_mapping_sets SET version = version + 1, status = $1, updated_at = NOW() WHERE id = $2',
     [mappingSet.status === 'published' ? 'draft' : mappingSet.status, mappingSetId]
@@ -375,7 +375,7 @@ router.post('/mappings/:mappingSetId/clone', authenticateToken, async (req, res)
   if (!requireAdmin(req, res)) return;
   const mappingSetId = Number(req.params.mappingSetId);
   const mappingSet = await getMappingSet(mappingSetId, req.user);
-  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento nÃ£o encontrado' });
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
   const client = await pool.connect();
   let clonedId;
   try {

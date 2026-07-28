@@ -53,7 +53,7 @@ const query = async (sql, params = []) => {
     };
   }
   if (sql.includes('UPDATE integration_mapping_sets')) return { rowCount: 1, rows: [] };
-  throw new Error(`SQL nÃ£o previsto: ${sql}`);
+  throw new Error(`SQL não previsto: ${sql}`);
 };
 
 require.cache[dbPath] = {

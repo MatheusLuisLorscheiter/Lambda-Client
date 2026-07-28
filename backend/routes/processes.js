@@ -20,26 +20,26 @@ const validDeliveryEnvironments = new Set(['development', 'staging', 'production
 const normalizeText = (value, maxLength, { required = false } = {}) => {
   if (value === undefined) return undefined;
   const normalized = String(value || '').trim();
-  if (required && !normalized) throw new Error('Campo obrigatÃ³rio');
+  if (required && !normalized) throw new Error('Campo obrigatório');
   if (normalized.length > maxLength) throw new Error(`Limite de ${maxLength} caracteres excedido`);
   return normalized || null;
 };
 
 const normalizeTags = (value) => {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new Error('Tags invÃ¡lidas');
+  if (!Array.isArray(value)) throw new Error('Tags inválidas');
   const tags = [...new Set(value.map(item => String(item).trim().toLowerCase()).filter(Boolean))];
-  if (tags.length > 20 || tags.some(tag => tag.length > 40)) throw new Error('Tags invÃ¡lidas');
+  if (tags.length > 20 || tags.some(tag => tag.length > 40)) throw new Error('Tags inválidas');
   return tags;
 };
 
 const normalizeLinks = (value) => {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 20) throw new Error('Links invÃ¡lidos');
+  if (!Array.isArray(value) || value.length > 20) throw new Error('Links inválidos');
   return [...new Set(value.map(item => {
     const raw = String(item).trim();
     const parsed = new URL(raw);
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Links invÃ¡lidos');
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Links inválidos');
     return parsed.toString();
   }))];
 };
@@ -265,7 +265,7 @@ router.get('/', authenticateToken, async (req, res) => {
   if (req.query.status) {
     const statuses = String(req.query.status).split(',').map(value => value.trim()).filter(Boolean);
     if (!statuses.length || statuses.some(status => !validStatuses.has(status))) {
-      return res.status(400).json({ error: 'Status invÃ¡lido' });
+      return res.status(400).json({ error: 'Status inválido' });
     }
     values.push(statuses);
     conditions.push(`process_items.status = ANY($${values.length}::text[])`);
@@ -326,7 +326,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
   } else if (req.query.companyId) {
     const companyId = Number(req.query.companyId);
     if (!Number.isInteger(companyId) || companyId <= 0) {
-      return res.status(400).json({ error: 'Empresa invÃ¡lida' });
+      return res.status(400).json({ error: 'Empresa inválida' });
     }
     values.push(companyId);
     conditions.push(`company_id = $${values.length}`);
@@ -394,10 +394,10 @@ router.get('/stream/events', authenticateToken, (req, res) => {
 router.get('/:processId', authenticateToken, async (req, res) => {
   const processId = Number(req.params.processId);
   if (!Number.isInteger(processId) || processId <= 0) {
-    return res.status(400).json({ error: 'Demanda invÃ¡lida' });
+    return res.status(400).json({ error: 'Demanda inválida' });
   }
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   res.json({ process: item });
 });
 
@@ -457,7 +457,7 @@ router.post('/', authenticateToken, async (req, res) => {
     ? Number(req.body.ownerUserId)
     : null;
   if (ownerUserId !== null && (!Number.isInteger(ownerUserId) || ownerUserId <= 0)) {
-    return res.status(400).json({ error: 'ResponsÃ¡vel invÃ¡lido' });
+    return res.status(400).json({ error: 'Responsável inválido' });
   }
 
   let progress = 0;
@@ -504,7 +504,7 @@ router.post('/', authenticateToken, async (req, res) => {
     if (req.body.targetSlaAt) {
       targetSlaAt = new Date(req.body.targetSlaAt);
       if (Number.isNaN(targetSlaAt.getTime())) {
-        return res.status(400).json({ error: 'SLA invÃ¡lido' });
+        return res.status(400).json({ error: 'SLA inválido' });
       }
     }
 
@@ -677,11 +677,11 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     add('priority', req.body.priority);
   }
   if (req.body.impact !== undefined) {
-    if (!validImpacts.has(req.body.impact)) return res.status(400).json({ error: 'Impacto invÃ¡lido' });
+    if (!validImpacts.has(req.body.impact)) return res.status(400).json({ error: 'Impacto inválido' });
     add('impact', req.body.impact);
   }
   if (req.body.health !== undefined) {
-    if (!validHealth.has(req.body.health)) return res.status(400).json({ error: 'SaÃºde invÃ¡lida' });
+    if (!validHealth.has(req.body.health)) return res.status(400).json({ error: 'Saúde inválida' });
     add('health', req.body.health);
   }
   if (req.body.ownerUserId !== undefined) {
@@ -689,7 +689,7 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
       ? null
       : Number(req.body.ownerUserId);
     if (ownerUserId !== null && (!Number.isInteger(ownerUserId) || ownerUserId <= 0)) {
-      return res.status(400).json({ error: 'ResponsÃ¡vel invÃ¡lido' });
+      return res.status(400).json({ error: 'Responsável inválido' });
     }
     add('owner_user_id', ownerUserId);
   }
@@ -753,7 +753,7 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   if (req.body.targetSlaAt !== undefined) {
     const targetSlaAt = req.body.targetSlaAt ? new Date(req.body.targetSlaAt) : null;
     if (targetSlaAt && Number.isNaN(targetSlaAt.getTime())) {
-      return res.status(400).json({ error: 'SLA invÃ¡lido' });
+      return res.status(400).json({ error: 'SLA inválido' });
     }
     add('target_sla_at', targetSlaAt);
   }
@@ -776,7 +776,7 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   }
   if (req.body.customFields !== undefined) {
     if (!req.body.customFields || typeof req.body.customFields !== 'object' || Array.isArray(req.body.customFields)) {
-      return res.status(400).json({ error: 'Campos personalizados invÃ¡lidos' });
+      return res.status(400).json({ error: 'Campos personalizados inválidos' });
     }
     const serialized = JSON.stringify(req.body.customFields);
     if (serialized.length > 20_000) return res.status(400).json({ error: 'Campos personalizados excedem o limite' });
@@ -871,15 +871,15 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
 
 router.post('/queue/reorder', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Acesso de administrador obrigatÃ³rio' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
   const companyId = Number(req.body.companyId);
   const orderedIds = Array.isArray(req.body.orderedIds)
     ? [...new Set(req.body.orderedIds.map(Number))]
     : [];
   if (!Number.isInteger(companyId) || companyId <= 0 || !orderedIds.length ||
-      orderedIds.some(id => !Number.isInteger(id) || id <= 0)) {
-    return res.status(400).json({ error: 'Ordem da fila invÃ¡lida' });
+    orderedIds.some(id => !Number.isInteger(id) || id <= 0)) {
+    return res.status(400).json({ error: 'Ordem da fila inválida' });
   }
 
   const client = await pool.connect();
@@ -895,10 +895,10 @@ router.post('/queue/reorder', authenticateToken, async (req, res) => {
     );
     const currentIds = current.rows.map(row => Number(row.id));
     if (currentIds.length !== orderedIds.length ||
-        currentIds.some(id => !orderedIds.includes(id))) {
+      currentIds.some(id => !orderedIds.includes(id))) {
       await client.query('ROLLBACK');
       return res.status(409).json({
-        error: 'A fila mudou enquanto vocÃª organizava. Atualize a tela e tente novamente.'
+        error: 'A fila mudou enquanto você organizava. Atualize a tela e tente novamente.'
       });
     }
 
@@ -939,14 +939,14 @@ router.post('/queue/reorder', authenticateToken, async (req, res) => {
 router.post('/:processId/comments', authenticateToken, async (req, res) => {
   const processId = Number(req.params.processId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   if (req.user.role === 'client' && !item.clientCanComment) {
-    return res.status(403).json({ error: 'Os comentÃ¡rios estÃ£o desativados para esta demanda' });
+    return res.status(403).json({ error: 'Os comentários estão desativados para esta demanda' });
   }
 
   const message = String(req.body.message || '').trim();
   if (!message || message.length > 5000) {
-    return res.status(400).json({ error: 'ComentÃ¡rio invÃ¡lido' });
+    return res.status(400).json({ error: 'Comentário inválido' });
   }
   const visibility = req.user.role === 'admin' && req.body.visibility === 'internal'
     ? 'internal'
@@ -954,7 +954,7 @@ router.post('/:processId/comments', authenticateToken, async (req, res) => {
   const kind = validUpdateKinds.has(req.body.kind) ? req.body.kind : 'comment';
   const parentId = req.body.parentId ? Number(req.body.parentId) : null;
   if (parentId && (!Number.isInteger(parentId) || parentId <= 0)) {
-    return res.status(400).json({ error: 'Resposta invÃ¡lida' });
+    return res.status(400).json({ error: 'Resposta inválida' });
   }
   if (parentId) {
     const parent = await query(
@@ -962,7 +962,7 @@ router.post('/:processId/comments', authenticateToken, async (req, res) => {
       [parentId, processId]
     );
     if (!parent.rowCount || (req.user.role === 'client' && parent.rows[0].visibility !== 'client')) {
-      return res.status(404).json({ error: 'ComentÃ¡rio original nÃ£o encontrado' });
+      return res.status(404).json({ error: 'Comentário original não encontrado' });
     }
   }
 
@@ -1000,10 +1000,10 @@ router.patch('/:processId/comments/:commentId', authenticateToken, async (req, r
   const processId = Number(req.params.processId);
   const commentId = Number(req.params.commentId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   const message = String(req.body.message || '').trim();
   if (!message || message.length > 5000) {
-    return res.status(400).json({ error: 'ComentÃ¡rio invÃ¡lido' });
+    return res.status(400).json({ error: 'Comentário inválido' });
   }
   const result = await query(
     `UPDATE process_updates
@@ -1014,7 +1014,7 @@ router.patch('/:processId/comments/:commentId', authenticateToken, async (req, r
     [message, commentId, processId, req.user.id]
   );
   if (!result.rowCount) {
-    return res.status(404).json({ error: 'ComentÃ¡rio nÃ£o encontrado ou sem permissÃ£o para editar' });
+    return res.status(404).json({ error: 'Comentário não encontrado ou sem permissão para editar' });
   }
   res.json({ comment: result.rows[0] });
 });
@@ -1023,32 +1023,32 @@ router.delete('/:processId/comments/:commentId', authenticateToken, async (req, 
   const processId = Number(req.params.processId);
   const commentId = Number(req.params.commentId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   const values = [commentId, processId];
   const authorCondition = req.user.role === 'admin' ? '' : 'AND author_user_id = $3';
   if (req.user.role !== 'admin') values.push(req.user.id);
   const result = await query(
     `UPDATE process_updates
-        SET deleted_at = NOW(), message = '[comentÃ¡rio removido]'
+        SET deleted_at = NOW(), message = '[comentário removido]'
       WHERE id = $1 AND process_id = $2 ${authorCondition} AND kind = 'comment' AND deleted_at IS NULL
       RETURNING id`,
     values
   );
-  if (!result.rowCount) return res.status(404).json({ error: 'ComentÃ¡rio nÃ£o encontrado' });
+  if (!result.rowCount) return res.status(404).json({ error: 'Comentário não encontrado' });
   res.json({ success: true });
 });
 
 router.post('/:processId/checklist', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Acesso de administrador obrigatÃ³rio' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
   const processId = Number(req.params.processId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   const title = String(req.body.title || '').trim();
   const description = String(req.body.description || '').trim() || null;
   if (!title || title.length > 240 || (description && description.length > 3000)) {
-    return res.status(400).json({ error: 'Item da lista invÃ¡lido' });
+    return res.status(400).json({ error: 'Item da lista inválido' });
   }
   const status = validChecklistStatuses.has(req.body.status) ? req.body.status : 'todo';
   let dueDate;
@@ -1079,12 +1079,12 @@ router.post('/:processId/checklist', authenticateToken, async (req, res) => {
 
 router.patch('/:processId/checklist/:itemId', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Acesso de administrador obrigatÃ³rio' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
   const processId = Number(req.params.processId);
   const itemId = Number(req.params.itemId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
 
   const fields = [];
   const values = [];
@@ -1094,12 +1094,12 @@ router.patch('/:processId/checklist/:itemId', authenticateToken, async (req, res
   };
   if (req.body.title !== undefined) {
     const title = String(req.body.title || '').trim();
-    if (!title || title.length > 240) return res.status(400).json({ error: 'TÃ­tulo invÃ¡lido' });
+    if (!title || title.length > 240) return res.status(400).json({ error: 'Título inválido' });
     add('title', title);
   }
   if (req.body.description !== undefined) add('description', String(req.body.description || '').trim() || null);
   if (req.body.status !== undefined) {
-    if (!validChecklistStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status invÃ¡lido' });
+    if (!validChecklistStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status inválido' });
     add('status', req.body.status);
     add('completed_at', req.body.status === 'done' ? new Date() : null);
   }
@@ -1112,10 +1112,10 @@ router.patch('/:processId/checklist/:itemId', authenticateToken, async (req, res
   }
   if (req.body.sortOrder !== undefined) {
     const sortOrder = Number(req.body.sortOrder);
-    if (!Number.isInteger(sortOrder) || sortOrder < 0) return res.status(400).json({ error: 'Ordem invÃ¡lida' });
+    if (!Number.isInteger(sortOrder) || sortOrder < 0) return res.status(400).json({ error: 'Ordem inválida' });
     add('sort_order', sortOrder);
   }
-  if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteraÃ§Ã£o informada' });
+  if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
   fields.push('updated_at = NOW()');
   values.push(itemId, processId);
   const result = await query(
@@ -1126,47 +1126,47 @@ router.patch('/:processId/checklist/:itemId', authenticateToken, async (req, res
                 created_at AS "createdAt", updated_at AS "updatedAt"`,
     values
   );
-  if (!result.rowCount) return res.status(404).json({ error: 'Item nÃ£o encontrado' });
+  if (!result.rowCount) return res.status(404).json({ error: 'Item não encontrado' });
   publishProcessEvent({ companyId: item.companyId, processId, type: 'checklist.updated' });
   res.json({ checklistItem: result.rows[0] });
 });
 
 router.delete('/:processId/checklist/:itemId', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Acesso de administrador obrigatÃ³rio' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
   const processId = Number(req.params.processId);
   const itemId = Number(req.params.itemId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   const result = await query(
     'DELETE FROM process_checklist_items WHERE id = $1 AND process_id = $2 RETURNING id',
     [itemId, processId]
   );
-  if (!result.rowCount) return res.status(404).json({ error: 'Item nÃ£o encontrado' });
+  if (!result.rowCount) return res.status(404).json({ error: 'Item não encontrado' });
   publishProcessEvent({ companyId: item.companyId, processId, type: 'checklist.deleted' });
   res.json({ success: true });
 });
 
 router.post('/:processId/deliveries', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Acesso de administrador obrigatÃ³rio' });
+    return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
   const processId = Number(req.params.processId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   const title = String(req.body.title || '').trim();
   const summary = String(req.body.summary || '').trim();
   const status = validDeliveryStatuses.has(req.body.status) ? req.body.status : 'ready';
   const environment = validDeliveryEnvironments.has(req.body.environment) ? req.body.environment : 'production';
   if (!title || title.length > 240 || !summary || summary.length > 5000) {
-    return res.status(400).json({ error: 'Dados da entrega invÃ¡lidos' });
+    return res.status(400).json({ error: 'Dados da entrega inválidos' });
   }
   let artifactLinks;
   try {
     artifactLinks = normalizeLinks(req.body.artifactLinks) || [];
   } catch {
-    return res.status(400).json({ error: 'Links da entrega invÃ¡lidos' });
+    return res.status(400).json({ error: 'Links da entrega inválidos' });
   }
 
   const client = await pool.connect();
@@ -1197,7 +1197,7 @@ router.post('/:processId/deliveries', authenticateToken, async (req, res) => {
             SET status = 'validation', progress = GREATEST(progress, 95),
                 latest_update = $1, updated_at = NOW(), version = version + 1
           WHERE id = $2`,
-        [`Entrega "${title}" disponÃ­vel para validaÃ§Ã£o.`, processId]
+        [`Entrega "${title}" disponível para validação.`, processId]
       );
       await client.query(
         `INSERT INTO process_updates
@@ -1205,7 +1205,7 @@ router.post('/:processId/deliveries', authenticateToken, async (req, res) => {
          VALUES ($1, $2, 'delivery', 'client', $3, $4)`,
         [
           processId, req.user.id,
-          `Entrega "${title}" disponÃ­vel para validaÃ§Ã£o.`,
+          `Entrega "${title}" disponível para validação.`,
           JSON.stringify({ deliveryId: delivery.id, version: delivery.version, environment })
         ]
       );
@@ -1225,12 +1225,12 @@ router.patch('/:processId/deliveries/:deliveryId', authenticateToken, async (req
   const processId = Number(req.params.processId);
   const deliveryId = Number(req.params.deliveryId);
   const item = await getAuthorizedProcess(processId, req.user);
-  if (!item) return res.status(404).json({ error: 'Demanda nÃ£o encontrada' });
+  if (!item) return res.status(404).json({ error: 'Demanda não encontrada' });
   const status = req.body.status;
   const allowed = req.user.role === 'client'
     ? new Set(['accepted', 'rejected'])
     : validDeliveryStatuses;
-  if (!allowed.has(status)) return res.status(400).json({ error: 'Status da entrega invÃ¡lido' });
+  if (!allowed.has(status)) return res.status(400).json({ error: 'Status da entrega inválido' });
   const acceptanceNote = String(req.body.acceptanceNote || '').trim() || null;
   if (status === 'rejected' && !acceptanceNote) {
     return res.status(400).json({ error: 'Informe o que precisa ser ajustado' });
@@ -1246,11 +1246,11 @@ router.patch('/:processId/deliveries/:deliveryId', authenticateToken, async (req
     );
     if (!existing.rowCount) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Entrega nÃ£o encontrada' });
+      return res.status(404).json({ error: 'Entrega não encontrada' });
     }
     if (req.user.role === 'client' && existing.rows[0].status !== 'ready') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Esta entrega nÃ£o estÃ¡ aguardando validaÃ§Ã£o' });
+      return res.status(409).json({ error: 'Esta entrega não está aguardando validação' });
     }
     const result = await client.query(
       `UPDATE process_deliveries
