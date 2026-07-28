@@ -101,6 +101,10 @@
                 <label class="mb-1.5 block text-sm font-medium text-slate-700">Descrição</label>
                 <textarea v-model="editor.description" required rows="5" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea>
               </div>
+              <div v-if="editor.id" class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-medium text-slate-500">Solicitado em</p>
+                <p class="mt-1 text-sm font-medium text-slate-800">{{ formatDate(editor.createdAt) }}</p>
+              </div>
               <div class="grid gap-4">
                 <div>
                   <label class="mb-1.5 block text-sm font-medium text-slate-700">Resultado esperado</label>
@@ -323,6 +327,7 @@ const emptyEditor = () => ({
   priority: 'normal', impact: 'medium', health: 'on_track', complexity: '', position: null as number | null,
   estimateBusinessDays: null as number | null, plannedStart: '', dueDate: '', progress: 0, latestUpdate: '',
   blockedReason: '', nextAction: '', tagsText: '', clientCanComment: true,
+  createdAt: '',
   updates: [] as NonNullable<ProcessItem['updates']>,
   checklist: [] as NonNullable<ProcessItem['checklist']>,
   deliveries: [] as NonNullable<ProcessItem['deliveries']>
@@ -395,8 +400,8 @@ const openEdit = (item: ProcessItem) => {
     plannedStart: toCalendarDateInput(item.plannedStart), dueDate: toCalendarDateInput(item.dueDate),
     progress: item.progress, latestUpdate: '', blockedReason: item.blockedReason || '',
     nextAction: item.nextAction || '', tagsText: (item.tags || []).join(', '),
-    clientCanComment: item.clientCanComment !== false, updates: item.updates || [],
-    checklist: item.checklist || [], deliveries: item.deliveries || []
+    clientCanComment: item.clientCanComment !== false, createdAt: item.createdAt,
+    updates: item.updates || [], checklist: item.checklist || [], deliveries: item.deliveries || []
   }
   editorOpen.value = true
 }

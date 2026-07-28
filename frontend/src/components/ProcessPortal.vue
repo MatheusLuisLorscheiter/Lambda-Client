@@ -519,8 +519,8 @@ const completedChecklistCount = computed(() =>
   selectedProcess.value?.checklist?.filter(item => item.status === 'done').length || 0
 )
 const deliveryLabel = (item: ProcessItem) => {
-  if (item.status === 'delivered' && item.deliveredAt) return formatDate(item.deliveredAt)
   if (item.dueDate) return formatDueDate(item.dueDate)
+  if (item.status === 'delivered' && item.deliveredAt) return formatDate(item.deliveredAt)
   if (item.estimateBusinessDays) return `${item.estimateBusinessDays} dias úteis`
   return item.status === 'requested' || item.status === 'analysis' ? 'Após análise' : 'A definir'
 }
