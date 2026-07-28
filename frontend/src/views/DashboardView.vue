@@ -145,6 +145,7 @@ import logoDark from '@/assets/logos/logo-dark.svg'
 import ProcessPortal from '@/components/ProcessPortal.vue'
 import { Bar, Line } from 'vue-chartjs'
 import { BarElement, CategoryScale, Chart as ChartJS, Filler, Legend, LineElement, LinearScale, PointElement, Title, Tooltip } from 'chart.js'
+import type { TooltipItem } from 'chart.js'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler)
 
@@ -227,9 +228,9 @@ const commonChartOptions = {
   plugins: { legend: { display: false }, tooltip: { enabled: true, displayColors: false, padding: 10, backgroundColor: '#0f172a', titleColor: '#ffffff', bodyColor: '#ffffff' } },
   scales: { y: { beginAtZero: true, grid: { color: '#e2e8f0' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0, autoSkip: true } } }
 }
-const lineChartOptions = { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: any) => ` ${formatNumber(context.parsed.y || 0)} invocações` } } } }
-const errorChartOptions = { ...commonChartOptions, scales: { ...commonChartOptions.scales, y: { ...commonChartOptions.scales.y, max: 100, ticks: { color: '#64748b', callback: (value: string | number) => `${value}%` } } }, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: any) => ` ${(context.parsed.y || 0).toFixed(2)}% de erros` } } } }
-const durationChartOptions = { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: any) => ` ${formatDuration(context.parsed.y || 0)}` } } } }
+const lineChartOptions = { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: TooltipItem<'line'>) => ` ${formatNumber(context.parsed.y || 0)} invocações` } } } }
+const errorChartOptions = { ...commonChartOptions, scales: { ...commonChartOptions.scales, y: { ...commonChartOptions.scales.y, max: 100, ticks: { color: '#64748b', callback: (value: string | number) => `${value}%` } } }, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: TooltipItem<'line'>) => ` ${(context.parsed.y || 0).toFixed(2)}% de erros` } } } }
+const durationChartOptions = { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, tooltip: { ...commonChartOptions.plugins.tooltip, callbacks: { label: (context: TooltipItem<'bar'>) => ` ${formatDuration(context.parsed.y || 0)}` } } } }
 
 async function fetchIntegrations() { try { const data = await api.get<{ integrations: Integration[] }>('/lambda/integrations'); integrations.value = data.integrations; if (!selectedIntegrationId.value && data.integrations[0]) selectedIntegrationId.value = String(data.integrations[0].id) } catch (error) { console.error('Falha ao buscar integrações:', error) } }
 async function loadData() { if (!selectedIntegrationId.value) return; isLoading.value = true; try { await Promise.all([loadMetrics(), loadLogs()]) } finally { isLoading.value = false } }

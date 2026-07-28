@@ -286,6 +286,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { formatCalendarDate, formatInstant } from '@/utils/dates'
 import type { ProcessItem, ProcessStatus } from '@/types'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
@@ -344,20 +345,14 @@ const categoryLabel = (category: ProcessItem['category']) => ({
   automation: 'Automação', integration: 'Integração', maintenance: 'Manutenção', improvement: 'Melhoria', support: 'Suporte'
 }[category])
 const complexityLabel = (complexity: ProcessItem['complexity']) => complexity ? ({ simple: 'Simples', medium: 'Média', complex: 'Complexa' }[complexity]) : 'Em análise'
-const formatDate = (date: string) => {
-  const parsed = new Date(date)
-  return Number.isNaN(parsed.getTime())
-    ? 'Data inválida'
-    : new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(parsed)
+const dateOptions: Intl.DateTimeFormatOptions = {
+  day: '2-digit', month: 'short', year: 'numeric'
 }
-const formatDateTime = (date: string) => {
-  const parsed = new Date(date)
-  return Number.isNaN(parsed.getTime())
-    ? 'Data inválida'
-    : new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-    }).format(parsed)
-}
+const formatDate = (date: string) => formatInstant(date, dateOptions)
+const formatDueDate = (date: string) => formatCalendarDate(date, dateOptions)
+const formatDateTime = (date: string) => formatInstant(date, {
+  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+})
 const stageIndex = (status: ProcessStatus) => processStages.findIndex(stage => stage.value === status)
 const processUpdates = (item: ProcessItem) => {
   if (item.updates?.length) return item.updates
@@ -368,7 +363,7 @@ const processUpdates = (item: ProcessItem) => {
 }
 const deliveryLabel = (item: ProcessItem) => {
   if (item.status === 'delivered' && item.deliveredAt) return formatDate(item.deliveredAt)
-  if (item.dueDate) return formatDate(item.dueDate)
+  if (item.dueDate) return formatDueDate(item.dueDate)
   if (item.estimateBusinessDays) return `${item.estimateBusinessDays} dias úteis`
   return item.status === 'requested' || item.status === 'analysis' ? 'Após análise' : 'A definir'
 }

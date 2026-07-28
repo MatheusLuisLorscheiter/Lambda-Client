@@ -118,6 +118,30 @@ const invokePost = async (user, body) => {
   return { statusCode, body: responseBody };
 };
 
+const invokePatch = async (processId, body) => {
+  let responseBody;
+  let statusCode = 200;
+  const req = {
+    user: { id: 7, role: 'admin', companyId: null },
+    params: { processId: String(processId) },
+    body,
+    ip: '127.0.0.1',
+    get: () => 'node-test'
+  };
+  const res = {
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(payload) {
+      responseBody = payload;
+      return this;
+    }
+  };
+  await patchHandler(req, res);
+  return { statusCode, body: responseBody };
+};
+
 test('admin creation persists queue planning fields', async () => {
   capturedInsertParams = null;
   const response = await invokePost(
@@ -175,6 +199,95 @@ test('client creation cannot override workflow status or priority', async () => 
   assert.equal(capturedInsertParams[9], 0);
 });
 
+test('creation rejects a delivery date before the planned start', async () => {
+  capturedInsertParams = null;
+  const response = await invokePost(
+    { id: 7, role: 'admin', companyId: null },
+    {
+      companyId: 12,
+      title: 'Janela inválida',
+      description: 'A previsão não pode terminar antes do início.',
+      plannedStart: '2026-08-13',
+      dueDate: '2026-08-03'
+    }
+  );
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.error, 'A previsão de entrega não pode ser anterior ao início planejado');
+  assert.equal(capturedInsertParams, null);
+});
+
+test('updating planning dates persists date-only values', async () => {
+  currentItem = {
+    id: 42,
+    companyId: 12,
+    status: 'analysis',
+    position: null,
+    progress: 0,
+    plannedStart: null,
+    dueDate: null,
+    deliveredAt: null,
+    latestUpdate: null
+  };
+  capturedUpdateSql = null;
+  capturedUpdateParams = null;
+
+  const response = await invokePatch(42, {
+    plannedStart: '2026-09-01',
+    dueDate: '2026-09-15'
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(capturedUpdateSql, /planned_start =/);
+  assert.match(capturedUpdateSql, /due_date =/);
+  assert.ok(capturedUpdateParams.includes('2026-09-01'));
+  assert.ok(capturedUpdateParams.includes('2026-09-15'));
+});
+
+test('updating one planning date validates it against the saved date', async () => {
+  currentItem = {
+    id: 42,
+    companyId: 12,
+    status: 'analysis',
+    position: null,
+    progress: 0,
+    plannedStart: '2026-09-01',
+    dueDate: '2026-09-15',
+    deliveredAt: null,
+    latestUpdate: null
+  };
+  capturedUpdateSql = null;
+  capturedUpdateParams = null;
+
+  const response = await invokePatch(42, { plannedStart: '2026-09-20' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.error, 'A previsão de entrega não pode ser anterior ao início planejado');
+  assert.equal(capturedUpdateSql, null);
+});
+
+test('entering the queue without a manual position assigns the next position', async () => {
+  currentItem = {
+    id: 42,
+    companyId: 12,
+    status: 'analysis',
+    position: null,
+    progress: 0,
+    plannedStart: null,
+    dueDate: null,
+    deliveredAt: null,
+    latestUpdate: null
+  };
+  capturedUpdateSql = null;
+  capturedUpdateParams = null;
+
+  const response = await invokePatch(42, { status: 'queued', position: null });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(capturedUpdateSql, /position =/);
+  assert.ok(capturedUpdateParams.includes(3));
+});
+
 test('marking a process as delivered forces 100% progress and stores an update', async () => {
   currentItem = {
     id: 42,
@@ -203,27 +316,13 @@ test('marking a process as delivered forces 100% progress and stores an update',
   capturedUpdateSql = null;
   capturedUpdateParams = null;
 
-  let statusCode = 200;
-  const req = {
-    user: { id: 7, role: 'admin', companyId: null },
-    params: { processId: '42' },
-    body: { status: 'delivered', progress: 40, latestUpdate: 'Entrega validada.' },
-    ip: '127.0.0.1',
-    get: () => 'node-test'
-  };
-  const res = {
-    status(code) {
-      statusCode = code;
-      return this;
-    },
-    json() {
-      return this;
-    }
-  };
+  const response = await invokePatch(42, {
+    status: 'delivered',
+    progress: 40,
+    latestUpdate: 'Entrega validada.'
+  });
 
-  await patchHandler(req, res);
-
-  assert.equal(statusCode, 200);
+  assert.equal(response.statusCode, 200);
   assert.match(capturedUpdateSql, /progress =/);
   assert.ok(capturedUpdateParams.includes(100));
   assert.ok(!capturedUpdateParams.includes(40));

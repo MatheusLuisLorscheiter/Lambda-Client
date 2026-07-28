@@ -172,6 +172,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { formatCalendarDate, formatInstant, toCalendarDateInput } from '@/utils/dates'
 import type { Company, ProcessItem, ProcessStatus } from '@/types'
 
 defineProps<{ companies: Company[] }>()
@@ -212,22 +213,10 @@ const statusClass = (status: ProcessStatus) => ({
   in_progress: 'bg-indigo-100 text-indigo-800', validation: 'bg-violet-100 text-violet-800', delivered: 'bg-emerald-100 text-emerald-800',
   paused: 'bg-orange-100 text-orange-800', cancelled: 'bg-red-100 text-red-800'
 }[status])
-const formatDate = (date: string) => {
-  const parsed = /^\\d{4}-\\d{2}-\\d{2}$/.test(date)
-    ? new Date(`${date}T12:00:00`)
-    : new Date(date)
-  return Number.isNaN(parsed.getTime())
-    ? 'Data inválida'
-    : new Intl.DateTimeFormat('pt-BR').format(parsed)
-}
-const formatDateTime = (date: string) => {
-  const parsed = new Date(date)
-  return Number.isNaN(parsed.getTime())
-    ? 'Data inválida'
-    : new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-    }).format(parsed)
-}
+const formatDate = (date: string) => formatCalendarDate(date)
+const formatDateTime = (date: string) => formatInstant(date, {
+  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+})
 const fetchProcesses = async () => {
   loading.value = true
   loadError.value = ''
@@ -244,19 +233,23 @@ const openEdit = (item: ProcessItem) => {
     id: item.id, companyId: String(item.companyId), title: item.title, description: item.description,
     category: item.category, status: item.status, priority: item.priority, complexity: item.complexity || '',
     position: item.position, estimateBusinessDays: item.estimateBusinessDays,
-    plannedStart: item.plannedStart?.slice(0, 10) || '', dueDate: item.dueDate?.slice(0, 10) || '',
+    plannedStart: toCalendarDateInput(item.plannedStart), dueDate: toCalendarDateInput(item.dueDate),
     progress: item.progress, latestUpdate: '', updates: item.updates || []
   }
   editorOpen.value = true
 }
 const closeEditor = () => { editorOpen.value = false; formError.value = '' }
 const saveProcess = async () => {
-  saving.value = true
   formError.value = ''
+  if (editor.value.plannedStart && editor.value.dueDate && editor.value.dueDate < editor.value.plannedStart) {
+    formError.value = 'A previsão de entrega não pode ser anterior ao início planejado'
+    return
+  }
+  saving.value = true
   const payload: Record<string, unknown> = {
     companyId: Number(editor.value.companyId), title: editor.value.title, description: editor.value.description,
     category: editor.value.category, status: editor.value.status, priority: editor.value.priority,
-    complexity: editor.value.complexity || null, position: editor.value.status === 'queued' ? (editor.value.position || null) : null,
+    complexity: editor.value.complexity || null, position: editor.value.status === 'queued' ? (editor.value.position || undefined) : null,
     estimateBusinessDays: editor.value.estimateBusinessDays || null, plannedStart: editor.value.plannedStart || null,
     dueDate: editor.value.dueDate || null, progress: editor.value.progress
   }

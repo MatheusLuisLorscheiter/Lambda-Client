@@ -24,6 +24,12 @@ const normalizeOptionalDate = (value, fieldLabel) => {
   return normalized;
 };
 
+const validatePlanningWindow = (plannedStart, dueDate) => {
+  if (plannedStart && dueDate && dueDate < plannedStart) {
+    throw new Error('A previsão de entrega não pode ser anterior ao início planejado');
+  }
+};
+
 const selectFields = `
   process_items.id,
   process_items.company_id AS "companyId",
@@ -39,8 +45,8 @@ const selectFields = `
   process_items.complexity,
   process_items.progress,
   process_items.estimate_business_days AS "estimateBusinessDays",
-  process_items.planned_start AS "plannedStart",
-  process_items.due_date AS "dueDate",
+  to_char(process_items.planned_start, 'YYYY-MM-DD') AS "plannedStart",
+  to_char(process_items.due_date, 'YYYY-MM-DD') AS "dueDate",
   process_items.delivered_at AS "deliveredAt",
   process_items.latest_update AS "latestUpdate",
   process_items.created_at AS "createdAt",
@@ -201,6 +207,7 @@ router.post('/', authenticateToken, async (req, res) => {
     try {
       plannedStart = normalizeOptionalDate(req.body.plannedStart, 'Data de início');
       dueDate = normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega');
+      validatePlanningWindow(plannedStart, dueDate);
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -289,6 +296,9 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
   }
 
   const processId = Number(req.params.processId);
+  if (!Number.isInteger(processId) || processId <= 0) {
+    return res.status(400).json({ error: 'Demanda inválida' });
+  }
   const existing = await getProcessItem(processId);
   if (!existing) {
     return res.status(404).json({ error: 'Demanda não encontrada' });
@@ -355,12 +365,26 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     add('progress', progress);
   }
   if (req.body.position !== undefined) {
-    const position = req.body.position === null ? null : Number(req.body.position);
+    const position = req.body.position === null || req.body.position === ''
+      ? null
+      : Number(req.body.position);
     if (position !== null && (!Number.isInteger(position) || position <= 0)) {
       return res.status(400).json({ error: 'Posição inválida' });
     }
     const effectiveStatus = req.body.status || existing.status;
-    add('position', effectiveStatus === 'queued' ? position : null);
+    if (effectiveStatus !== 'queued') {
+      add('position', null);
+    } else if (position !== null) {
+      add('position', position);
+    } else if (!existing.position) {
+      const nextPosition = await query(
+        `SELECT COALESCE(MAX(position), 0) + 1 AS position
+           FROM process_items
+          WHERE company_id = $1 AND status = 'queued' AND id <> $2`,
+        [existing.companyId, processId]
+      );
+      add('position', Number(nextPosition.rows[0].position));
+    }
   }
   if (req.body.estimateBusinessDays !== undefined) {
     const days = req.body.estimateBusinessDays === null ? null : Number(req.body.estimateBusinessDays);
@@ -369,20 +393,21 @@ router.patch('/:processId', authenticateToken, async (req, res) => {
     }
     add('estimate_business_days', days);
   }
-  if (req.body.plannedStart !== undefined) {
-    try {
-      add('planned_start', normalizeOptionalDate(req.body.plannedStart, 'Data de início'));
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
+  let nextPlannedStart = existing.plannedStart;
+  let nextDueDate = existing.dueDate;
+  try {
+    if (req.body.plannedStart !== undefined) {
+      nextPlannedStart = normalizeOptionalDate(req.body.plannedStart, 'Data de início');
     }
-  }
-  if (req.body.dueDate !== undefined) {
-    try {
-      add('due_date', normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega'));
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
+    if (req.body.dueDate !== undefined) {
+      nextDueDate = normalizeOptionalDate(req.body.dueDate, 'Previsão de entrega');
     }
+    validatePlanningWindow(nextPlannedStart, nextDueDate);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
   }
+  if (req.body.plannedStart !== undefined) add('planned_start', nextPlannedStart);
+  if (req.body.dueDate !== undefined) add('due_date', nextDueDate);
   const nextUpdateMessage = req.body.latestUpdate !== undefined
     ? String(req.body.latestUpdate || '').trim() || null
     : undefined;

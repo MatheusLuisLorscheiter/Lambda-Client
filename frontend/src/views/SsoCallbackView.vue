@@ -22,7 +22,7 @@ const authStore = useAuthStore()
 const message = ref('Aguarde enquanto processamos seu login.')
 
 onMounted(async () => {
-  const code = route.query.code as string
+  const code = typeof route.query.code === 'string' ? route.query.code : ''
 
   if (!code) {
     message.value = 'Código de autorização não encontrado.'
@@ -31,7 +31,7 @@ onMounted(async () => {
   }
 
   try {
-    const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+    const apiBase = import.meta.env.VITE_API_BASE_URL || ''
     const response = await fetch(`${apiBase}/auth/sso/chave-mestra`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -41,10 +41,13 @@ onMounted(async () => {
       })
     })
 
-    const data = await response.json()
+    const data = await response.json() as { token?: string; user?: unknown; error?: string }
 
     if (!response.ok) {
       throw new Error(data.error || 'Erro na autenticação')
+    }
+    if (!data.token || !data.user) {
+      throw new Error('Resposta de autenticação inválida')
     }
 
     // Set token in auth store
@@ -55,8 +58,8 @@ onMounted(async () => {
     localStorage.setItem('user', JSON.stringify(data.user))
 
     router.push('/dashboard')
-  } catch (error: any) {
-    message.value = error.message || 'Erro ao processar SSO.'
+  } catch (error: unknown) {
+    message.value = error instanceof Error ? error.message : 'Erro ao processar SSO.'
     setTimeout(() => router.push('/login'), 3000)
   }
 })
