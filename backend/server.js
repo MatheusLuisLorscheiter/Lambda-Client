@@ -19,7 +19,9 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
-app.use(express.json({ limit: '1mb' }));
+// Mapping documents may include a base64 attachment. The mapping route applies
+// its own stricter 10 MB decoded-file limit.
+app.use(express.json({ limit: '15mb' }));
 app.use((req, res, next) => {
   const requestId = req.get('x-request-id') || crypto.randomUUID();
   req.requestId = requestId;

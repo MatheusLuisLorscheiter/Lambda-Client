@@ -172,12 +172,14 @@ CREATE TABLE IF NOT EXISTS integration_mapping_sets (
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   name TEXT NOT NULL,
   description TEXT,
+  content_markdown TEXT,
   source_system TEXT NOT NULL,
   target_system TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft', 'published', 'archived')),
   published_at TIMESTAMPTZ,
+  closed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -196,9 +198,24 @@ CREATE TABLE IF NOT EXISTS integration_mapping_entries (
   is_required BOOLEAN NOT NULL DEFAULT FALSE,
   notes TEXT,
   examples JSONB NOT NULL DEFAULT '{}',
+  section TEXT,
+  mapping_status TEXT NOT NULL DEFAULT 'mapped'
+    CHECK (mapping_status IN ('mapped', 'pending', 'attention', 'ignored')),
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS integration_mapping_attachments (
+  id SERIAL PRIMARY KEY,
+  mapping_set_id INTEGER NOT NULL REFERENCES integration_mapping_sets(id) ON DELETE CASCADE,
+  uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL CHECK (file_size >= 0 AND file_size <= 10485760),
+  file_data BYTEA NOT NULL,
+  extracted_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
@@ -216,3 +233,4 @@ CREATE INDEX IF NOT EXISTS idx_process_checklist_process ON process_checklist_it
 CREATE INDEX IF NOT EXISTS idx_process_deliveries_process ON process_deliveries(process_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_sets_integration ON integration_mapping_sets(integration_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_entries_set ON integration_mapping_entries(mapping_set_id, sort_order, id);
+CREATE INDEX IF NOT EXISTS idx_mapping_attachments_set ON integration_mapping_attachments(mapping_set_id, created_at, id);

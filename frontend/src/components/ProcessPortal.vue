@@ -52,7 +52,7 @@
               v-for="item in activeProcesses"
               :key="item.id"
               class="block w-full px-5 py-4 text-left transition hover:bg-slate-50"
-              @click="selectedProcess = item"
+              @click="openProcess(item)"
             >
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -138,7 +138,7 @@
             v-for="item in filteredProcesses"
             :key="item.id"
             class="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 md:grid-cols-[minmax(0,1fr)_150px_140px]"
-            @click="selectedProcess = item"
+            @click="openProcess(item)"
           >
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -231,9 +231,20 @@
               <h3 class="mt-3 text-xl font-semibold text-slate-950">{{ selectedProcess.title }}</h3>
             </div>
             <button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Fechar" @click="selectedProcess = null">✕</button>
-          </div>
+           </div>
+          <nav class="sticky top-0 z-10 flex gap-5 overflow-x-auto border-b border-slate-200 bg-white px-6 pt-3" aria-label="Detalhes do processo">
+            <button
+              v-for="tab in detailTabs"
+              :key="tab.value"
+              class="whitespace-nowrap border-b-2 pb-3 text-sm font-medium"
+              :class="detailTab === tab.value ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500 hover:text-slate-800'"
+              @click="detailTab = tab.value"
+            >
+              {{ tab.label }}<span v-if="tab.count" class="ml-1 text-xs text-slate-400">{{ tab.count }}</span>
+            </button>
+          </nav>
           <div class="space-y-6 p-6">
-            <div v-if="!['paused', 'cancelled'].includes(selectedProcess.status)">
+            <div v-if="detailTab === 'overview' && !['paused', 'cancelled'].includes(selectedProcess.status)">
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Etapa atual</p>
               <ol class="mt-3 grid grid-cols-3 gap-x-2 gap-y-4 sm:grid-cols-6">
                 <li v-for="(stage, index) in processStages" :key="stage.value" class="relative">
@@ -256,11 +267,11 @@
                 </li>
               </ol>
             </div>
-            <div>
+            <div v-if="detailTab === 'overview'">
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Solicitação</p>
               <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{{ selectedProcess.description }}</p>
             </div>
-            <div v-if="selectedProcess.objective || selectedProcess.scope || selectedProcess.acceptanceCriteria" class="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div v-if="detailTab === 'overview' && (selectedProcess.objective || selectedProcess.scope || selectedProcess.acceptanceCriteria)" class="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div v-if="selectedProcess.objective">
                 <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Resultado esperado</p>
                 <p class="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-slate-700">{{ selectedProcess.objective }}</p>
@@ -274,7 +285,7 @@
                 <p class="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-slate-700">{{ selectedProcess.acceptanceCriteria }}</p>
               </div>
             </div>
-            <div v-if="selectedProcess.blockedReason || selectedProcess.nextAction" class="grid gap-3 border-y border-slate-200 py-4">
+            <div v-if="detailTab === 'overview' && (selectedProcess.blockedReason || selectedProcess.nextAction)" class="grid gap-3 border-y border-slate-200 py-4">
               <div v-if="selectedProcess.blockedReason">
                 <p class="text-xs font-medium text-red-700">Bloqueio</p>
                 <p class="mt-1 text-sm text-slate-700">{{ selectedProcess.blockedReason }}</p>
@@ -284,7 +295,7 @@
                 <p class="mt-1 text-sm font-medium text-slate-800">{{ selectedProcess.nextAction }}</p>
               </div>
             </div>
-            <div v-if="selectedProcess.checklist?.length">
+            <div v-if="detailTab === 'plan' && selectedProcess.checklist?.length">
               <div class="flex items-center justify-between gap-3">
                 <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Plano de execução</p>
                 <span class="text-xs text-slate-500">{{ completedChecklistCount }}/{{ selectedProcess.checklist.length }} concluídos</span>
@@ -303,7 +314,11 @@
                 </li>
               </ul>
             </div>
-            <div v-if="selectedProcess.deliveries?.length">
+            <div v-else-if="detailTab === 'plan'" class="rounded-md border border-dashed border-slate-300 px-5 py-10 text-center">
+              <p class="text-sm font-medium text-slate-700">Plano ainda não detalhado</p>
+              <p class="mt-1 text-xs text-slate-500">As etapas verificáveis aparecerão aqui.</p>
+            </div>
+            <div v-if="detailTab === 'deliveries' && selectedProcess.deliveries?.length">
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Entregas</p>
               <div class="mt-3 space-y-3">
                 <article v-for="delivery in selectedProcess.deliveries" :key="delivery.id" class="rounded-lg border border-slate-200 p-4">
@@ -326,7 +341,11 @@
                 </article>
               </div>
             </div>
-            <div v-if="processUpdates(selectedProcess).length">
+            <div v-else-if="detailTab === 'deliveries'" class="rounded-md border border-dashed border-slate-300 px-5 py-10 text-center">
+              <p class="text-sm font-medium text-slate-700">Nenhuma entrega registrada</p>
+              <p class="mt-1 text-xs text-slate-500">Versões prontas para validação aparecerão aqui.</p>
+            </div>
+            <div v-if="detailTab === 'activity' && processUpdates(selectedProcess).length">
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Atividade e comentários</p>
               <ol class="mt-3 space-y-4 border-l border-slate-200 pl-4">
                 <li v-for="update in processUpdates(selectedProcess)" :key="update.id" class="relative">
@@ -336,7 +355,8 @@
                 </li>
               </ol>
             </div>
-            <form v-if="selectedProcess.clientCanComment" class="rounded-lg border border-slate-200 p-4" @submit.prevent="submitComment">
+            <p v-else-if="detailTab === 'activity'" class="rounded-md border border-dashed border-slate-300 px-5 py-8 text-center text-sm text-slate-500">Nenhuma atividade registrada.</p>
+            <form v-if="detailTab === 'activity' && selectedProcess.clientCanComment" class="rounded-lg border border-slate-200 p-4" @submit.prevent="submitComment">
               <label class="text-sm font-medium text-slate-800">Comentar ou tirar uma dúvida</label>
               <textarea v-model="commentMessage" required maxlength="5000" rows="3" placeholder="Escreva uma mensagem para a equipe responsável" class="mt-2 w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"></textarea>
               <div class="mt-2 flex items-center justify-between gap-3">
@@ -345,27 +365,31 @@
                 <button :disabled="commentSubmitting || !commentMessage.trim()" class="shrink-0 rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-50">{{ commentSubmitting ? 'Enviando…' : 'Enviar comentário' }}</button>
               </div>
             </form>
-            <dl class="grid grid-cols-2 gap-4 border-t border-slate-200 pt-5">
+            <dl v-if="detailTab === 'overview'" class="grid grid-cols-2 gap-4 border-t border-slate-200 pt-5">
               <div><dt class="text-xs text-slate-400">Posição</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ selectedProcess.position ? `#${selectedProcess.position}` : '—' }}</dd></div>
               <div><dt class="text-xs text-slate-400">Previsão</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ deliveryLabel(selectedProcess) }}</dd></div>
               <div><dt class="text-xs text-slate-400">Complexidade</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ complexityLabel(selectedProcess.complexity) }}</dd></div>
               <div><dt class="text-xs text-slate-400">Solicitado em</dt><dd class="mt-1 text-sm font-medium text-slate-800">{{ formatDate(selectedProcess.createdAt) }}</dd></div>
             </dl>
-            <div v-if="selectedProcess.integrations?.length" class="border-t border-slate-200 pt-5">
+            <div v-if="detailTab === 'overview' && selectedProcess.integrations?.length" class="border-t border-slate-200 pt-5">
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Automações relacionadas</p>
               <div class="mt-3 space-y-2">
-                <button
+                <div
                   v-for="integration in selectedProcess.integrations"
                   :key="integration.id"
-                  class="flex w-full items-center justify-between rounded-md border border-slate-200 px-3 py-3 text-left hover:bg-slate-50"
-                  @click="openAutomation(integration.id)"
+                  class="rounded-md border border-slate-200 px-3 py-3"
                 >
-                  <span>
+                  <div class="flex items-start justify-between gap-3">
+                    <span>
                     <span class="block text-sm font-medium text-slate-900">{{ integration.name }}</span>
                     <span class="mt-0.5 block font-mono text-xs text-slate-500">{{ integration.functionName }}</span>
-                  </span>
-                  <span class="text-xs font-medium text-indigo-600">Ver monitoramento</span>
-                </button>
+                    </span>
+                    <div class="flex shrink-0 gap-3">
+                      <button class="text-xs font-medium text-slate-600 hover:text-slate-950" @click="openMapping(integration.id)">Ver de-para</button>
+                      <button class="text-xs font-medium text-indigo-600 hover:text-indigo-700" @click="openAutomation(integration.id)">Monitoramento</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -403,7 +427,7 @@ import { formatCalendarDate, formatInstant } from '@/utils/dates'
 import type { ProcessItem, ProcessStatus } from '@/types'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
-const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number] }>()
+const emit = defineEmits<{ openQueue: []; openAutomation: [integrationId: number]; openMapping: [integrationId: number] }>()
 
 const api = useApi()
 const auth = useAuthStore()
@@ -413,6 +437,7 @@ const queueFilter = ref<'active' | 'delivered' | 'all'>('active')
 const queueSearch = ref('')
 const requestModalOpen = ref(false)
 const selectedProcess = ref<ProcessItem | null>(null)
+const detailTab = ref<'overview' | 'plan' | 'deliveries' | 'activity'>('overview')
 const submitting = ref(false)
 const requestError = ref('')
 const successMessage = ref('')
@@ -448,6 +473,12 @@ const queueFilters = computed(() => [
   { value: 'active' as const, label: 'Em andamento', count: processes.value.filter(item => activeStatuses.includes(item.status)).length },
   { value: 'delivered' as const, label: 'Entregues', count: statusCount('delivered') },
   { value: 'all' as const, label: 'Todas', count: processes.value.length }
+])
+const detailTabs = computed(() => [
+  { value: 'overview' as const, label: 'Visão geral', count: 0 },
+  { value: 'plan' as const, label: 'Plano', count: selectedProcess.value?.checklist?.length || 0 },
+  { value: 'deliveries' as const, label: 'Entregas', count: selectedProcess.value?.deliveries?.length || 0 },
+  { value: 'activity' as const, label: 'Atividade', count: selectedProcess.value ? processUpdates(selectedProcess.value).length : 0 }
 ])
 const workflowSteps = [
   { title: 'Solicitação', description: 'Você registra o gargalo e o resultado esperado.' },
@@ -540,9 +571,19 @@ const fetchProcesses = async (silent = false) => {
     if (!silent) loading.value = false
   }
 }
+const openProcess = (item: ProcessItem) => {
+  selectedProcess.value = item
+  detailTab.value = 'overview'
+  commentMessage.value = ''
+  commentError.value = ''
+}
 const openAutomation = (integrationId: number) => {
   selectedProcess.value = null
   emit('openAutomation', integrationId)
+}
+const openMapping = (integrationId: number) => {
+  selectedProcess.value = null
+  emit('openMapping', integrationId)
 }
 const closeRequestModal = () => {
   requestModalOpen.value = false

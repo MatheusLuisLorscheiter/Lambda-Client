@@ -9,6 +9,7 @@ const auditPath = require.resolve('../audit/logger');
 let queries = [];
 const query = async (sql, params = []) => {
   queries.push({ sql, params });
+  if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return { rowCount: 0, rows: [] };
   if (sql.includes('INSERT INTO integration_mapping_sets')) {
     return { rowCount: 1, rows: [{ id: 91 }] };
   }
@@ -49,6 +50,19 @@ const query = async (sql, params = []) => {
         targetPath: 'order.externalId',
         direction: 'source_to_target',
         isRequired: true
+      }]
+    };
+  }
+  if (sql.includes('INSERT INTO integration_mapping_attachments')) {
+    return {
+      rowCount: 1,
+      rows: [{
+        id: 13,
+        fileName: 'de-para.md',
+        mimeType: 'text/markdown',
+        fileSize: 22,
+        hasExtractedText: true,
+        createdAt: new Date().toISOString()
       }]
     };
   }
@@ -97,6 +111,12 @@ const createSetHandler = router.stack
   .route.stack.at(-1).handle;
 const createEntryHandler = router.stack
   .find(layer => layer.route?.path === '/mappings/:mappingSetId/entries' && layer.route.methods.post)
+  .route.stack.at(-1).handle;
+const uploadAttachmentHandler = router.stack
+  .find(layer => layer.route?.path === '/mappings/:mappingSetId/attachments' && layer.route.methods.post)
+  .route.stack.at(-1).handle;
+const bulkEntriesHandler = router.stack
+  .find(layer => layer.route?.path === '/mappings/:mappingSetId/entries/bulk' && layer.route.methods.post)
   .route.stack.at(-1).handle;
 
 const invoke = async (handler, { user, params = {}, query: queryParams = {}, body = {} }) => {
@@ -173,4 +193,61 @@ test('entry creation persists transformation contract and marks required fields'
   assert.equal(insert.params[1], 'pedido.codigo');
   assert.equal(insert.params[3], 'order.externalId');
   assert.equal(insert.params[8], true);
+});
+
+test('admin can attach a prepared Markdown mapping to a draft version', async () => {
+  queries = [];
+  const markdown = '# DE-PARA · Pedidos';
+  const response = await invoke(uploadAttachmentHandler, {
+    user: { id: 7, role: 'admin', companyId: null },
+    params: { mappingSetId: '91' },
+    body: {
+      fileName: 'de-para.md',
+      mimeType: 'text/markdown',
+      contentBase64: Buffer.from(markdown, 'utf8').toString('base64'),
+      appendToDocument: true
+    }
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.attachment.id, 13);
+  assert.equal(response.body.appendedToDocument, true);
+  const insert = queries.find(item => item.sql.includes('INSERT INTO integration_mapping_attachments'));
+  assert.equal(insert.params[2], 'de-para.md');
+  assert.equal(insert.params[6], markdown);
+  assert.ok(queries.some(item => item.sql.includes('content_markdown = CONCAT_WS')));
+});
+
+test('Markdown table import can create structured mapping entries in bulk', async () => {
+  queries = [];
+  const response = await invoke(bulkEntriesHandler, {
+    user: { id: 7, role: 'admin', companyId: null },
+    params: { mappingSetId: '91' },
+    body: {
+      entries: [
+        {
+          section: 'Condições de pagamento',
+          sourcePath: '28 dias',
+          targetPath: 'A28',
+          mappingStatus: 'mapped'
+        },
+        {
+          section: 'Condições de pagamento',
+          sourcePath: '35 dias',
+          targetPath: 'Criar',
+          mappingStatus: 'pending',
+          notes: 'Criar a parcela na Omie'
+        }
+      ]
+    }
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.imported, 2);
+  const insert = queries.find(item => item.sql.includes('INSERT INTO integration_mapping_entries'));
+  assert.equal(insert.params.length, 28);
+  assert.equal(insert.params[1], '28 dias');
+  assert.equal(insert.params[13], 'mapped');
+  assert.equal(insert.params[15], '35 dias');
+  assert.equal(insert.params[27], 'pending');
 });

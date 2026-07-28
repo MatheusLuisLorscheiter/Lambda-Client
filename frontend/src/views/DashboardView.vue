@@ -35,7 +35,7 @@
         </div>
       </header>
 
-      <ProcessPortal v-if="activeTab === 'overview' || activeTab === 'queue'" :mode="activeTab" @open-queue="activeTab = 'queue'" @open-automation="openDashboard" />
+      <ProcessPortal v-if="activeTab === 'overview' || activeTab === 'queue'" :mode="activeTab" @open-queue="activeTab = 'queue'" @open-automation="openDashboard" @open-mapping="openMapping" />
 
       <section v-if="activeTab === 'dashboard'" class="space-y-6">
         <div class="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
@@ -252,6 +252,7 @@ function refreshData() { void loadData() }
 function refreshLogs() { void loadLogs() }
 function loadMoreLogs() { void loadLogs(true) }
 function openDashboard(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'dashboard' }
+function openMapping(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'docs' }
 function focusErrors() { logFilter.value = 'errors'; void loadLogs(); document.getElementById('recent-events')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 function formatNumber(value: number) { return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1, notation: value >= 10000 ? 'compact' : 'standard' }).format(value) }
 function formatDuration(value: number) { return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms` }

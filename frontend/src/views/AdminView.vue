@@ -33,15 +33,13 @@
     <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 flex-1 w-full">
       <!-- Header with Stats -->
       <div class="mb-8">
-        <h2 class="text-2xl font-bold text-slate-900">Integrações Lambda</h2>
-        <p class="mt-1 text-sm text-slate-600">
-          Configure funções AWS Lambda para monitoramento de clientes
-        </p>
+        <h2 class="text-2xl font-semibold tracking-tight text-slate-900">{{ adminPageTitle }}</h2>
+        <p class="mt-1 text-sm text-slate-600">{{ adminPageDescription }}</p>
       </div>
 
       <!-- Quick Stats -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <div v-if="activeTab === 'integrations'" class="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 md:grid-cols-3">
+        <div class="bg-white p-5">
           <div class="flex items-center">
             <div class="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
               <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -54,7 +52,7 @@
             </div>
           </div>
         </div>
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div class="bg-white p-5">
           <div class="flex items-center">
             <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
               <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -67,7 +65,7 @@
             </div>
           </div>
         </div>
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div class="bg-white p-5">
           <div class="flex items-center">
             <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
               <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1216,6 +1214,20 @@ const router = useRouter()
 const api = useApi()
 
 const activeTab = ref<'integrations' | 'processes' | 'mappings' | 'clients' | 'audit'>('integrations')
+const adminPageTitle = computed(() => ({
+  integrations: 'Integrações Lambda',
+  processes: 'Processos',
+  mappings: 'Mapeamentos',
+  clients: 'Clientes e empresas',
+  audit: 'Auditoria'
+}[activeTab.value]))
+const adminPageDescription = computed(() => ({
+  integrations: 'Configure funções AWS Lambda e acompanhe a saúde das automações.',
+  processes: 'Priorize demandas, planeje etapas e conduza cada entrega com contexto.',
+  mappings: 'Crie, importe, versione e publique os de-paras de cada integração.',
+  clients: 'Gerencie empresas e as pessoas com acesso ao Lambda Pulse.',
+  audit: 'Consulte as alterações administrativas e eventos relevantes do portal.'
+}[activeTab.value]))
 const adminMappingIntegrationId = ref('')
 const auditSearch = ref('')
 const auditCompanyFilter = ref('')

@@ -47,6 +47,15 @@ const run = async () => {
         "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'",
         'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ',
         'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS content_markdown TEXT',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ',
+        'ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS section TEXT',
+        "ALTER TABLE integration_mapping_entries ADD COLUMN IF NOT EXISTS mapping_status TEXT NOT NULL DEFAULT 'mapped'",
+        `DO $$ BEGIN
+                    ALTER TABLE integration_mapping_entries
+                    ADD CONSTRAINT chk_mapping_entry_status
+                    CHECK (mapping_status IN ('mapped', 'pending', 'attention', 'ignored'));
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         "UPDATE process_items SET reference_code = 'LP-' || LPAD(id::text, 6, '0') WHERE reference_code IS NULL",
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_process_reference_code ON process_items(reference_code)',
         `WITH ranked AS (

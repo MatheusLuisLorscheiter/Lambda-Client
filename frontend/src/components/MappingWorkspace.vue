@@ -1,160 +1,531 @@
 <template>
-  <section>
-    <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div class="min-w-0 flex-1">
-        <label class="mb-1 block text-xs font-medium text-slate-500">Mapa de dados</label>
-        <select v-model="selectedSetId" class="min-h-10 w-full max-w-xl rounded-md border border-slate-300 bg-white px-3 text-sm">
-          <option value="">Selecione um mapeamento</option>
+  <section class="mapping-workspace">
+    <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-end lg:justify-between">
+      <label class="min-w-0 flex-1">
+        <span class="mb-1.5 block text-xs font-medium text-slate-500">Documento ativo</span>
+        <select v-model="selectedSetId" class="min-h-11 w-full max-w-2xl rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-900">
+          <option value="">Selecione um de-para</option>
           <option v-for="mappingSet in mappingSets" :key="mappingSet.id" :value="String(mappingSet.id)">
             {{ mappingSet.name }} · {{ mappingSet.sourceSystem }} → {{ mappingSet.targetSystem }} · v{{ mappingSet.version }}
           </option>
         </select>
-      </div>
+      </label>
       <div class="flex flex-wrap gap-2">
-        <button v-if="selectedSet" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="exportCsv">Exportar CSV</button>
-        <button v-if="auth.isAdmin" class="min-h-10 rounded-md bg-slate-950 px-3 text-sm font-medium text-white hover:bg-slate-800" @click="openSetModal">Novo mapa</button>
+        <button v-if="selectedSet" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="exportMarkdown">
+          Exportar .md
+        </button>
+        <button v-if="selectedSet" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="exportCsv">
+          Exportar CSV
+        </button>
+        <button v-if="auth.isAdmin" class="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-medium text-white hover:bg-slate-800" @click="openCreateModal">
+          Novo de-para
+        </button>
       </div>
     </div>
 
-    <div v-if="loading" class="rounded-lg border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500">Carregando mapeamentos…</div>
-    <div v-else-if="errorMessage" class="rounded-lg border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">{{ errorMessage }}</div>
-    <div v-else-if="!mappingSets.length" class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+    <div v-if="loading" class="flex min-h-64 items-center justify-center text-sm text-slate-500" aria-live="polite">
+      Carregando mapeamentos…
+    </div>
+    <div v-else-if="errorMessage" class="mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div class="flex items-center justify-between gap-3">
+        <span>{{ errorMessage }}</span>
+        <button class="font-medium underline underline-offset-2" @click="fetchMappings()">Tentar novamente</button>
+      </div>
+    </div>
+    <div v-else-if="!mappingSets.length" class="mt-5 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
       <h3 class="font-semibold text-slate-900">Nenhum de-para disponível</h3>
-      <p class="mt-1 text-sm text-slate-500">{{ auth.isAdmin ? 'Crie o primeiro mapa para documentar a transformação entre os sistemas.' : 'A equipe ainda não publicou o mapeamento desta automação.' }}</p>
-      <button v-if="auth.isAdmin" class="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white" @click="openSetModal">Criar mapa</button>
+      <p class="mx-auto mt-1 max-w-lg text-sm leading-6 text-slate-500">
+        {{ auth.isAdmin ? 'Crie um documento do zero ou importe um arquivo pronto para manter decisões, regras e campos em uma única fonte da verdade.' : 'A equipe ainda não publicou o mapeamento desta automação.' }}
+      </p>
+      <button v-if="auth.isAdmin" class="mt-4 rounded-md bg-slate-950 px-4 py-2.5 text-sm font-medium text-white" @click="openCreateModal">
+        Criar ou importar
+      </button>
     </div>
 
     <template v-else-if="selectedSet">
-      <header class="mb-4 border-y border-slate-200 py-4">
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+      <header class="py-5">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <h3 class="font-semibold text-slate-950">{{ selectedSet.name }}</h3>
+              <h3 class="text-lg font-semibold tracking-tight text-slate-950">{{ selectedSet.name }}</h3>
               <span :class="setStatusClass(selectedSet.status)" class="rounded-full px-2 py-0.5 text-xs font-medium">{{ setStatusLabel(selectedSet.status) }}</span>
-              <span class="text-xs text-slate-400">versão {{ selectedSet.version }}</span>
+              <span class="text-xs text-slate-400">v{{ selectedSet.version }}</span>
             </div>
-            <p class="mt-1 text-sm text-slate-500">{{ selectedSet.description || `${selectedSet.sourceSystem} para ${selectedSet.targetSystem}` }}</p>
+            <p class="mt-1 text-sm text-slate-500">
+              <span class="font-medium text-slate-700">{{ selectedSet.sourceSystem }}</span>
+              <span class="mx-1.5" aria-hidden="true">→</span>
+              <span class="font-medium text-slate-700">{{ selectedSet.targetSystem }}</span>
+              <span v-if="selectedSet.description"> · {{ selectedSet.description }}</span>
+            </p>
             <p v-if="selectedSet.processTitle" class="mt-1 text-xs text-slate-400">Processo relacionado: {{ selectedSet.processTitle }}</p>
           </div>
           <div v-if="auth.isAdmin" class="flex flex-wrap gap-2">
-            <button v-if="selectedSet.status !== 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" @click="cloneSet">Criar nova versão</button>
-            <button v-if="selectedSet.status === 'draft'" class="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800" @click="publishSet">Publicar para o cliente</button>
-            <button v-if="selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white" @click="openEntryModal()">+ Adicionar campo</button>
+            <button class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openMetadataModal">
+              Configurações
+            </button>
+            <button v-if="selectedSet.status !== 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="cloneSet">
+              Criar nova versão
+            </button>
+            <button v-if="selectedSet.status === 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openDocumentEditor">
+              Editar documento
+            </button>
+            <button v-if="selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
+              Publicar para o cliente
+            </button>
           </div>
         </div>
+
+        <dl class="mt-5 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4">
+          <div class="bg-white px-4 py-3">
+            <dt class="text-xs text-slate-500">Vínculos estruturados</dt>
+            <dd class="mt-1 text-xl font-semibold text-slate-950">{{ selectedSet.entries.length }}</dd>
+          </div>
+          <div class="bg-white px-4 py-3">
+            <dt class="text-xs text-slate-500">Pendências</dt>
+            <dd class="mt-1 text-xl font-semibold" :class="pendingCount ? 'text-amber-700' : 'text-slate-950'">{{ pendingCount }}</dd>
+          </div>
+          <div class="bg-white px-4 py-3">
+            <dt class="text-xs text-slate-500">Arquivos anexados</dt>
+            <dd class="mt-1 text-xl font-semibold text-slate-950">{{ selectedSet.attachments?.length || 0 }}</dd>
+          </div>
+          <div class="bg-white px-4 py-3">
+            <dt class="text-xs text-slate-500">{{ selectedSet.status === 'published' ? 'Fechado para edições' : 'Última alteração' }}</dt>
+            <dd class="mt-1 text-sm font-medium text-slate-800">{{ formatDate(selectedSet.closedAt || selectedSet.updatedAt) }}</dd>
+          </div>
+        </dl>
       </header>
 
-      <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <input v-model="entrySearch" type="search" placeholder="Buscar campo, transformação ou observação" class="min-h-10 w-full max-w-xl rounded-md border border-slate-300 bg-white px-3 text-sm" />
-        <p class="text-xs text-slate-500">{{ filteredEntries.length }} campo{{ filteredEntries.length === 1 ? '' : 's' }}</p>
-      </div>
+      <nav class="flex gap-5 overflow-x-auto border-b border-slate-200" aria-label="Conteúdo do de-para">
+        <button
+          v-for="tab in workspaceTabs"
+          :key="tab.value"
+          class="whitespace-nowrap border-b-2 px-0.5 pb-3 text-sm font-medium transition-colors"
+          :class="activeTab === tab.value ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500 hover:text-slate-800'"
+          @click="activeTab = tab.value"
+        >
+          {{ tab.label }}
+          <span v-if="tab.count !== null" class="ml-1 text-xs text-slate-400">{{ tab.count }}</span>
+        </button>
+      </nav>
 
-      <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table class="w-full min-w-[900px] text-left">
-          <thead class="border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
-            <tr><th class="px-4 py-3">Origem</th><th class="px-4 py-3">Regra</th><th class="px-4 py-3">Destino</th><th class="px-4 py-3">Obrigatório</th><th class="px-4 py-3">Observações</th><th v-if="auth.isAdmin && selectedSet.status === 'draft'" class="w-24 px-4 py-3"></th></tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100 text-sm">
-            <tr v-for="entry in filteredEntries" :key="entry.id" class="align-top">
-              <td class="px-4 py-3"><code class="font-mono text-xs text-slate-900">{{ entry.sourcePath }}</code><p v-if="entry.sourceType" class="mt-1 text-xs text-slate-400">{{ entry.sourceType }}</p></td>
-              <td class="px-4 py-3"><p class="max-w-xs whitespace-pre-wrap text-xs leading-5 text-slate-600">{{ entry.transformation || 'Cópia direta' }}</p><p v-if="entry.fallbackValue" class="mt-1 text-xs text-slate-400">Padrão: {{ entry.fallbackValue }}</p></td>
-              <td class="px-4 py-3"><code class="font-mono text-xs text-slate-900">{{ entry.targetPath }}</code><p v-if="entry.targetType" class="mt-1 text-xs text-slate-400">{{ entry.targetType }}</p></td>
-              <td class="px-4 py-3"><span :class="entry.isRequired ? 'text-red-700' : 'text-slate-400'" class="text-xs font-medium">{{ entry.isRequired ? 'Sim' : 'Não' }}</span></td>
-              <td class="px-4 py-3"><p class="max-w-xs whitespace-pre-wrap text-xs leading-5 text-slate-500">{{ entry.notes || '—' }}</p></td>
-              <td v-if="auth.isAdmin && selectedSet.status === 'draft'" class="px-4 py-3"><div class="flex gap-2"><button class="text-xs font-medium text-indigo-600" @click="openEntryModal(entry)">Editar</button><button class="text-xs font-medium text-red-600" @click="requestDeleteEntry(entry)">Excluir</button></div></td>
-            </tr>
-            <tr v-if="!filteredEntries.length"><td :colspan="auth.isAdmin && selectedSet.status === 'draft' ? 6 : 5" class="px-5 py-12 text-center text-sm text-slate-500">Nenhum campo encontrado.</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <section v-if="activeTab === 'document'" class="pt-5">
+        <div v-if="selectedSet.status === 'published'" class="mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Fechado para edições em {{ formatDate(selectedSet.closedAt || selectedSet.publishedAt || selectedSet.updatedAt) }}. Para alterar, crie uma nova versão.
+        </div>
+        <div v-if="selectedSet.contentMarkdown" class="mapping-document rounded-lg border border-slate-200 bg-white px-5 py-6 sm:px-8 sm:py-8" v-html="renderedDocument"></div>
+        <div v-else class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+          <h4 class="font-semibold text-slate-900">O documento ainda está vazio</h4>
+          <p class="mx-auto mt-1 max-w-lg text-sm leading-6 text-slate-500">Registre tabelas, perguntas, decisões, regras e pré-requisitos com total liberdade usando Markdown.</p>
+          <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white" @click="openDocumentEditor">
+            Começar documento
+          </button>
+        </div>
+      </section>
+
+      <section v-else-if="activeTab === 'fields'" class="pt-5">
+        <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row">
+            <label class="min-w-0 flex-1">
+              <span class="mb-1 block text-xs font-medium text-slate-500">Buscar</span>
+              <input v-model="entrySearch" type="search" placeholder="Origem, destino, seção, regra ou observação" class="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-900" />
+            </label>
+            <label>
+              <span class="mb-1 block text-xs font-medium text-slate-500">Situação</span>
+              <select v-model="entryStatusFilter" class="min-h-10 min-w-44 rounded-md border border-slate-300 bg-white px-3 text-sm">
+                <option value="">Todas</option>
+                <option value="mapped">Mapeado</option>
+                <option value="pending">Pendente</option>
+                <option value="attention">Requer atenção</option>
+                <option value="ignored">Desconsiderado</option>
+              </select>
+            </label>
+          </div>
+          <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="min-h-10 rounded-md bg-slate-950 px-3 text-sm font-medium text-white" @click="openEntryModal()">
+            Adicionar vínculo
+          </button>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table class="w-full min-w-[980px] text-left">
+            <thead class="border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
+              <tr>
+                <th class="px-4 py-3">Origem</th>
+                <th class="px-4 py-3">Destino</th>
+                <th class="px-4 py-3">Regra</th>
+                <th class="px-4 py-3">Situação</th>
+                <th class="px-4 py-3">Observações</th>
+                <th v-if="auth.isAdmin && selectedSet.status === 'draft'" class="w-36 px-4 py-3"><span class="sr-only">Ações</span></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm">
+              <tr v-for="entry in filteredEntries" :key="entry.id" class="align-top hover:bg-slate-50/70">
+                <td class="px-4 py-3">
+                  <p v-if="entry.section" class="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">{{ entry.section }}</p>
+                  <code class="font-mono text-xs text-slate-900">{{ entry.sourcePath }}</code>
+                  <p v-if="entry.sourceType" class="mt-1 text-xs text-slate-400">{{ entry.sourceType }}</p>
+                </td>
+                <td class="px-4 py-3">
+                  <code class="font-mono text-xs text-slate-900">{{ entry.targetPath }}</code>
+                  <p v-if="entry.targetType" class="mt-1 text-xs text-slate-400">{{ entry.targetType }}</p>
+                </td>
+                <td class="px-4 py-3">
+                  <p class="max-w-xs whitespace-pre-wrap text-xs leading-5 text-slate-600">{{ entry.transformation || 'Cópia direta' }}</p>
+                  <p v-if="entry.fallbackValue" class="mt-1 text-xs text-slate-400">Fallback: {{ entry.fallbackValue }}</p>
+                  <p v-if="entry.isRequired" class="mt-1 text-xs font-medium text-red-700">Obrigatório</p>
+                </td>
+                <td class="px-4 py-3">
+                  <span :class="entryStatusClass(entry.mappingStatus)" class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium">{{ entryStatusLabel(entry.mappingStatus) }}</span>
+                </td>
+                <td class="px-4 py-3"><p class="max-w-xs whitespace-pre-wrap text-xs leading-5 text-slate-500">{{ entry.notes || '—' }}</p></td>
+                <td v-if="auth.isAdmin && selectedSet.status === 'draft'" class="px-4 py-3">
+                  <div class="flex items-center justify-end gap-2">
+                    <button class="text-xs font-medium text-slate-700 hover:text-slate-950" @click="openEntryModal(entry)">Editar</button>
+                    <button class="text-xs font-medium text-red-600 hover:text-red-700" @click="entryToDelete = entry">Excluir</button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!filteredEntries.length">
+                <td :colspan="auth.isAdmin && selectedSet.status === 'draft' ? 6 : 5" class="px-5 py-12 text-center">
+                  <p class="text-sm font-medium text-slate-700">{{ selectedSet.entries.length ? 'Nenhum vínculo corresponde aos filtros.' : 'Nenhum vínculo estruturado.' }}</p>
+                  <p v-if="!selectedSet.entries.length" class="mt-1 text-xs text-slate-500">Use esta visão quando precisar filtrar, exportar ou validar campos individualmente.</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-else class="pt-5">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 class="font-semibold text-slate-900">Arquivos de referência</h4>
+            <p class="mt-1 text-sm text-slate-500">Originais importados e materiais usados para construir este de-para.</p>
+          </div>
+          <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white" @click="attachmentModalOpen = true">
+            Anexar arquivo
+          </button>
+        </div>
+        <div v-if="selectedSet.attachments?.length" class="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <article v-for="attachment in selectedSet.attachments" :key="attachment.id" class="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium text-slate-900">{{ attachment.fileName }}</p>
+              <p class="mt-1 text-xs text-slate-500">{{ formatFileSize(attachment.fileSize) }} · {{ formatDate(attachment.createdAt) }}<span v-if="attachment.hasExtractedText"> · texto importável</span></p>
+            </div>
+            <div class="flex shrink-0 gap-2">
+              <button class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="downloadAttachment(attachment.id, attachment.fileName)">Baixar</button>
+              <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="rounded-md px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50" @click="attachmentToDelete = attachment">Remover</button>
+            </div>
+          </article>
+        </div>
+        <div v-else class="mt-5 rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
+          Nenhum arquivo anexado a esta versão.
+        </div>
+      </section>
     </template>
 
-    <div v-if="setModalOpen" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-slate-950/55" @click="setModalOpen = false"></div>
-      <form class="relative w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="createSet">
-        <h3 class="text-lg font-semibold text-slate-950">Novo mapa de dados</h3>
-        <p class="mt-1 text-sm text-slate-500">Defina a origem, o destino e o contexto desta transformação.</p>
+    <div v-if="createModalOpen" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="closeCreateModal"></div>
+      <form class="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl" @submit.prevent="createSet">
+        <header class="border-b border-slate-200 px-6 py-5">
+          <h3 class="text-lg font-semibold text-slate-950">Novo de-para</h3>
+          <p class="mt-1 text-sm text-slate-500">Comece com uma estrutura inteligente ou aproveite um documento pronto.</p>
+        </header>
+        <div class="p-6">
+          <div class="grid grid-cols-2 gap-1 rounded-md bg-slate-100 p-1">
+            <button type="button" class="rounded px-3 py-2 text-sm font-medium" :class="createMode === 'template' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="createMode = 'template'">Criar do zero</button>
+            <button type="button" class="rounded px-3 py-2 text-sm font-medium" :class="createMode === 'import' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="createMode = 'import'">Importar arquivo</button>
+          </div>
+
+          <label v-if="createMode === 'import'" class="mt-5 block rounded-lg border border-dashed border-slate-300 px-5 py-7 text-center hover:border-slate-400">
+            <input ref="createFileInput" class="sr-only" type="file" accept=".md,.markdown,.txt,.pdf,.csv,.tsv,.json,.html,.htm,.xml,.yaml,.yml,.doc,.docx,.odt,.xls,.xlsx,.ods,.png,.jpg,.jpeg,.webp" @change="selectCreateFile">
+            <span class="block text-sm font-medium text-slate-800">{{ createFile?.name || 'Escolher um arquivo' }}</span>
+            <span class="mt-1 block text-xs text-slate-500">Documentos, planilhas, imagens, PDF, MD, TXT, CSV ou JSON · até 10 MB</span>
+          </label>
+
+          <div class="mt-5 space-y-4">
+            <div>
+              <label class="mb-1.5 block text-sm font-medium text-slate-700">Nome do de-para</label>
+              <input v-model="setForm.name" required maxlength="160" placeholder="Ex.: Contas a pagar e a receber" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900">
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="mb-1.5 block text-sm font-medium text-slate-700">Sistema de origem</label>
+                <input v-model="setForm.sourceSystem" required maxlength="160" placeholder="Ex.: Bling" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900">
+              </div>
+              <div>
+                <label class="mb-1.5 block text-sm font-medium text-slate-700">Sistema de destino</label>
+                <input v-model="setForm.targetSystem" required maxlength="160" placeholder="Ex.: Omie" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900">
+              </div>
+            </div>
+            <div v-if="createMode === 'template'">
+              <label class="mb-1.5 block text-sm font-medium text-slate-700">Estrutura inicial</label>
+              <select v-model="setForm.template" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                <option value="complete">De-para completo</option>
+                <option value="migration">Migração de dados</option>
+                <option value="empty">Documento vazio</option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-sm font-medium text-slate-700">Descrição curta <span class="font-normal text-slate-400">(opcional)</span></label>
+              <textarea v-model="setForm.description" rows="2" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+            </div>
+          </div>
+          <p v-if="modalError" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ modalError }}</p>
+        </div>
+        <footer class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
+          <button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" @click="closeCreateModal">Cancelar</button>
+          <button :disabled="saving || (createMode === 'import' && !createFile)" class="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Criando…' : createMode === 'import' ? 'Importar de-para' : 'Criar de-para' }}</button>
+        </footer>
+      </form>
+    </div>
+
+    <div v-if="documentEditorOpen && selectedSet" class="fixed inset-0 z-[70]">
+      <div class="absolute inset-0 bg-slate-950/45" @click="closeDocumentEditor"></div>
+      <aside class="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-slate-200 bg-white shadow-xl">
+        <header class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 class="font-semibold text-slate-950">Editar documento</h3>
+            <p class="mt-0.5 text-xs text-slate-500">Markdown · {{ documentDraft.length.toLocaleString('pt-BR') }} caracteres</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" @click="closeDocumentEditor">Cancelar</button>
+            <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-50" @click="saveDocument">{{ saving ? 'Salvando…' : 'Salvar documento' }}</button>
+          </div>
+        </header>
+        <div class="flex flex-wrap gap-1 border-b border-slate-200 px-4 py-2">
+          <button v-for="snippet in editorSnippets" :key="snippet.label" type="button" class="rounded px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900" @click="insertSnippet(snippet.content)">
+            {{ snippet.label }}
+          </button>
+        </div>
+        <div class="grid min-h-0 flex-1 lg:grid-cols-2">
+          <div class="flex min-h-0 flex-col border-r border-slate-200">
+            <p class="border-b border-slate-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">Conteúdo</p>
+            <textarea ref="documentTextarea" v-model="documentDraft" class="min-h-[45vh] flex-1 resize-none border-0 p-5 font-mono text-sm leading-6 outline-none" spellcheck="true"></textarea>
+          </div>
+          <div class="min-h-0 overflow-y-auto bg-slate-50">
+            <p class="sticky top-0 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">Pré-visualização</p>
+            <div v-if="documentDraft.trim()" class="mapping-document m-4 rounded-lg border border-slate-200 bg-white p-6" v-html="renderMappingMarkdown(documentDraft)"></div>
+            <p v-else class="p-10 text-center text-sm text-slate-500">Comece a escrever para visualizar o documento.</p>
+          </div>
+        </div>
+        <p v-if="modalError" class="border-t border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700">{{ modalError }}</p>
+      </aside>
+    </div>
+
+    <div v-if="metadataModalOpen && selectedSet" class="fixed inset-0 z-[75] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="metadataModalOpen = false"></div>
+      <form class="relative w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="saveMetadata">
+        <h3 class="text-lg font-semibold text-slate-950">Configurações do de-para</h3>
         <div class="mt-5 space-y-4">
-          <div><label class="mb-1.5 block text-sm font-medium">Nome</label><input v-model="setForm.name" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></div>
-          <div class="grid gap-4 sm:grid-cols-2"><div><label class="mb-1.5 block text-sm font-medium">Sistema de origem</label><input v-model="setForm.sourceSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></div><div><label class="mb-1.5 block text-sm font-medium">Sistema de destino</label><input v-model="setForm.targetSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></div></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Descrição</label><textarea v-model="setForm.description" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Nome</label><input v-model="metadataForm.name" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div><label class="mb-1.5 block text-sm font-medium">Origem</label><input v-model="metadataForm.sourceSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+            <div><label class="mb-1.5 block text-sm font-medium">Destino</label><input v-model="metadataForm.targetSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          </div>
+          <div><label class="mb-1.5 block text-sm font-medium">Descrição</label><textarea v-model="metadataForm.description" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
         </div>
         <p v-if="modalError" class="mt-3 text-sm text-red-700">{{ modalError }}</p>
-        <div class="mt-5 flex justify-end gap-2"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="setModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Criando…' : 'Criar mapa' }}</button></div>
+        <div class="mt-5 flex justify-end gap-2"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="metadataModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar' }}</button></div>
       </form>
     </div>
 
-    <div v-if="entryModalOpen" class="fixed inset-0 z-[70] flex items-center justify-center p-4">
+    <div v-if="entryModalOpen && selectedSet" class="fixed inset-0 z-[75] flex items-center justify-center p-4">
       <div class="absolute inset-0 bg-slate-950/55" @click="entryModalOpen = false"></div>
-      <form class="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="saveEntry">
-        <h3 class="text-lg font-semibold text-slate-950">{{ entryForm.id ? 'Editar campo' : 'Adicionar campo' }}</h3>
-        <div class="mt-5 grid gap-4 sm:grid-cols-2">
-          <div><label class="mb-1.5 block text-sm font-medium">Caminho de origem</label><input v-model="entryForm.sourcePath" required maxlength="500" placeholder="pedido.cliente.cnpj" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm" /></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Tipo de origem</label><input v-model="entryForm.sourceType" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Caminho de destino</label><input v-model="entryForm.targetPath" required maxlength="500" placeholder="customer.document" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm" /></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Tipo de destino</label><input v-model="entryForm.targetType" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></div>
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Transformação</label><textarea v-model="entryForm.transformation" rows="3" maxlength="5000" placeholder="Remover pontuação e preencher com zeros à esquerda até 14 caracteres." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor padrão</label><input v-model="entryForm.fallbackValue" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></div>
+      <form class="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl" @submit.prevent="saveEntry">
+        <header class="border-b border-slate-200 px-6 py-5">
+          <h3 class="text-lg font-semibold text-slate-950">{{ entryForm.id ? 'Editar vínculo' : 'Adicionar vínculo' }}</h3>
+          <p class="mt-1 text-sm text-slate-500">Documente o valor, a regra e o que ainda depende de decisão.</p>
+        </header>
+        <div class="grid gap-4 p-6 sm:grid-cols-2">
+          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Seção</label><input v-model="entryForm.section" maxlength="240" placeholder="Ex.: Condições de pagamento" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de origem</label><input v-model="entryForm.sourcePath" required maxlength="500" placeholder="Ex.: 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de destino</label><input v-model="entryForm.targetPath" required maxlength="500" placeholder="Ex.: A28 - Para 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Tipo de origem <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.sourceType" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Tipo de destino <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.targetType" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Situação</label><select v-model="entryForm.mappingStatus" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="mapped">Mapeado</option><option value="pending">Pendente</option><option value="attention">Requer atenção</option><option value="ignored">Desconsiderado</option></select></div>
           <div><label class="mb-1.5 block text-sm font-medium">Direção</label><select v-model="entryForm.direction" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="source_to_target">Origem → destino</option><option value="target_to_source">Destino → origem</option><option value="bidirectional">Bidirecional</option></select></div>
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Observações</label><textarea v-model="entryForm.notes" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
-          <label class="sm:col-span-2 flex items-center gap-2 text-sm font-medium"><input v-model="entryForm.isRequired" type="checkbox" class="h-4 w-4 rounded border-slate-300" /> Campo obrigatório</label>
+          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Regra ou transformação</label><textarea v-model="entryForm.transformation" rows="3" maxlength="5000" placeholder="Ex.: remover pontuação e completar com zeros à esquerda." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Valor padrão (fallback)</label><input v-model="entryForm.fallbackValue" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <label class="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2.5 text-sm font-medium"><input v-model="entryForm.isRequired" type="checkbox" class="h-4 w-4 rounded border-slate-300"> Campo obrigatório</label>
+          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de origem</label><input v-model="entryForm.sourceExample" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de destino</label><input v-model="entryForm.targetExample" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
+          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Observações e ações</label><textarea v-model="entryForm.notes" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
+          <p v-if="modalError" class="sm:col-span-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ modalError }}</p>
         </div>
-        <p v-if="modalError" class="mt-3 text-sm text-red-700">{{ modalError }}</p>
-        <div class="mt-5 flex justify-end gap-2"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="entryModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar campo' }}</button></div>
+        <footer class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="entryModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar vínculo' }}</button></footer>
       </form>
     </div>
 
-    <div v-if="entryToDelete" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-slate-950/55" @click="entryToDelete = null"></div>
+    <div v-if="attachmentModalOpen && selectedSet" class="fixed inset-0 z-[75] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="attachmentModalOpen = false"></div>
+      <form class="relative w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="uploadAttachment">
+        <h3 class="text-lg font-semibold text-slate-950">Anexar arquivo</h3>
+        <p class="mt-1 text-sm text-slate-500">O original ficará preservado nesta versão do de-para.</p>
+        <label class="mt-5 block rounded-lg border border-dashed border-slate-300 px-5 py-7 text-center">
+          <input class="sr-only" type="file" accept=".md,.markdown,.txt,.pdf,.csv,.tsv,.json,.html,.htm,.xml,.yaml,.yml,.doc,.docx,.odt,.xls,.xlsx,.ods,.png,.jpg,.jpeg,.webp" required @change="selectAttachmentFile">
+          <span class="block text-sm font-medium text-slate-800">{{ attachmentFile?.name || 'Escolher arquivo' }}</span>
+          <span class="mt-1 block text-xs text-slate-500">até 10 MB</span>
+        </label>
+        <label v-if="attachmentTextAvailable" class="mt-4 flex items-start gap-3 rounded-md border border-slate-200 px-3 py-3">
+          <input v-model="appendAttachmentToDocument" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300">
+          <span><span class="block text-sm font-medium text-slate-800">Adicionar o texto ao documento</span><span class="mt-0.5 block text-xs text-slate-500">O conteúdo será incluído no final do Markdown atual.</span></span>
+        </label>
+        <p v-if="modalError" class="mt-3 text-sm text-red-700">{{ modalError }}</p>
+        <div class="mt-5 flex justify-end gap-2"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="attachmentModalOpen = false">Cancelar</button><button :disabled="saving || !attachmentFile" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Enviando…' : 'Anexar' }}</button></div>
+      </form>
+    </div>
+
+    <div v-if="publishConfirmOpen && selectedSet" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="publishConfirmOpen = false"></div>
       <div class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
-        <h3 class="text-lg font-semibold text-slate-950">Excluir campo do mapa?</h3>
-        <p class="mt-2 text-sm text-slate-500">O vínculo {{ entryToDelete.sourcePath }} → {{ entryToDelete.targetPath }} será removido desta versão.</p>
-        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="entryToDelete = null">Cancelar</button><button :disabled="saving" class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="deleteEntry">Excluir campo</button></div>
+        <h3 class="text-lg font-semibold text-slate-950">Publicar e fechar para edições?</h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">O cliente passará a ver esta versão. Novas alterações exigirão uma nova versão, preservando o histórico publicado.</p>
+        <p v-if="pendingCount" class="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">Há {{ pendingCount }} vínculo{{ pendingCount === 1 ? '' : 's' }} pendente{{ pendingCount === 1 ? '' : 's' }} ou com atenção.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="publishConfirmOpen = false">Revisar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="publishSet">{{ saving ? 'Publicando…' : 'Publicar versão' }}</button></div>
       </div>
     </div>
+
+    <div v-if="entryToDelete && selectedSet" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="entryToDelete = null"></div>
+      <div class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+        <h3 class="text-lg font-semibold text-slate-950">Excluir este vínculo?</h3>
+        <p class="mt-2 text-sm text-slate-500">{{ entryToDelete.sourcePath }} → {{ entryToDelete.targetPath }} será removido desta versão.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="entryToDelete = null">Cancelar</button><button :disabled="saving" class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="deleteEntry">Excluir vínculo</button></div>
+      </div>
+    </div>
+
+    <div v-if="attachmentToDelete && selectedSet" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-950/55" @click="attachmentToDelete = null"></div>
+      <div class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+        <h3 class="text-lg font-semibold text-slate-950">Remover arquivo?</h3>
+        <p class="mt-2 text-sm text-slate-500">{{ attachmentToDelete.fileName }} deixará de fazer parte desta versão.</p>
+        <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="attachmentToDelete = null">Cancelar</button><button :disabled="saving" class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="deleteAttachment">Remover</button></div>
+      </div>
+    </div>
+
+    <div v-if="successMessage" class="fixed bottom-5 right-5 z-[90] rounded-md bg-slate-950 px-4 py-3 text-sm font-medium text-white shadow-lg" aria-live="polite">{{ successMessage }}</div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
-import type { MappingEntry, MappingSet } from '@/types'
+import {
+  blankMappingTemplate,
+  extractMappingEntries,
+  fileToBase64,
+  inferMappingMetadata,
+  migrationMappingTemplate,
+  readTextAttachment,
+  renderMappingMarkdown
+} from '@/utils/mappingDocument'
+import type { MappingAttachment, MappingEntry, MappingSet } from '@/types'
 
 const props = defineProps<{ integrationId: number }>()
 const api = useApi()
 const auth = useAuthStore()
 const mappingSets = ref<MappingSet[]>([])
 const selectedSetId = ref('')
+const activeTab = ref<'document' | 'fields' | 'files'>('document')
 const entrySearch = ref('')
+const entryStatusFilter = ref('')
 const loading = ref(true)
 const saving = ref(false)
 const errorMessage = ref('')
 const modalError = ref('')
-const setModalOpen = ref(false)
+const successMessage = ref('')
+const createModalOpen = ref(false)
+const createMode = ref<'template' | 'import'>('template')
+const createFile = ref<File | null>(null)
+const createFileText = ref('')
+const createFileInput = ref<HTMLInputElement | null>(null)
+const documentEditorOpen = ref(false)
+const documentDraft = ref('')
+const documentTextarea = ref<HTMLTextAreaElement | null>(null)
+const metadataModalOpen = ref(false)
 const entryModalOpen = ref(false)
+const attachmentModalOpen = ref(false)
+const publishConfirmOpen = ref(false)
 const entryToDelete = ref<MappingEntry | null>(null)
-const setForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '' })
+const attachmentToDelete = ref<MappingAttachment | null>(null)
+const attachmentFile = ref<File | null>(null)
+const attachmentTextAvailable = ref(false)
+const appendAttachmentToDocument = ref(false)
+const setForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete' })
+const metadataForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '' })
 const emptyEntryForm = () => ({
-  id: null as number | null, sourcePath: '', sourceType: '', targetPath: '', targetType: '',
-  direction: 'source_to_target' as MappingEntry['direction'], transformation: '', fallbackValue: '',
-  isRequired: false, notes: ''
+  id: null as number | null,
+  section: '',
+  sourcePath: '',
+  sourceType: '',
+  targetPath: '',
+  targetType: '',
+  direction: 'source_to_target' as MappingEntry['direction'],
+  transformation: '',
+  fallbackValue: '',
+  isRequired: false,
+  notes: '',
+  mappingStatus: 'mapped' as MappingEntry['mappingStatus'],
+  sourceExample: '',
+  targetExample: ''
 })
 const entryForm = ref(emptyEntryForm())
 
 const selectedSet = computed(() => mappingSets.value.find(item => String(item.id) === selectedSetId.value) || null)
+const renderedDocument = computed(() => renderMappingMarkdown(selectedSet.value?.contentMarkdown || ''))
+const pendingCount = computed(() => selectedSet.value?.entries.filter(entry => ['pending', 'attention'].includes(entry.mappingStatus)).length || 0)
 const filteredEntries = computed(() => {
+  if (!selectedSet.value) return []
   const search = entrySearch.value.trim().toLocaleLowerCase('pt-BR')
-  if (!selectedSet.value || !search) return selectedSet.value?.entries || []
   return selectedSet.value.entries.filter(entry =>
-    [entry.sourcePath, entry.targetPath, entry.transformation, entry.notes]
-      .some(value => value?.toLocaleLowerCase('pt-BR').includes(search))
+    (!entryStatusFilter.value || entry.mappingStatus === entryStatusFilter.value) &&
+    (!search || [entry.section, entry.sourcePath, entry.targetPath, entry.transformation, entry.fallbackValue, entry.notes]
+      .some(value => value?.toLocaleLowerCase('pt-BR').includes(search)))
   )
 })
+const workspaceTabs = computed(() => [
+  { value: 'document' as const, label: 'Documento', count: null },
+  { value: 'fields' as const, label: 'Campos estruturados', count: selectedSet.value?.entries.length || 0 },
+  { value: 'files' as const, label: 'Arquivos', count: selectedSet.value?.attachments?.length || 0 }
+])
+const editorSnippets = [
+  { label: 'Seção', content: '\n\n## Nova seção\n\n' },
+  { label: 'Aviso', content: '\n\n:::warning\nEscreva o aviso aqui.\n:::\n\n' },
+  { label: 'Tabela', content: '\n\n| Origem | Destino | Status | Observações / ações |\n| --- | --- | --- | --- |\n| [origem] | [destino] | ⚠️ | [preencher] |\n\n' },
+  { label: 'Pergunta', content: '\n\n### Pergunta — [título]\n\n[contexto da decisão]\n\n**Resposta:** [preencher]\n\n' },
+  { label: 'Checklist', content: '\n\n- [ ] Item a validar\n- [ ] Item a configurar\n\n' },
+  { label: 'Divisor', content: '\n\n---\n\n' }
+]
+
 const setStatusLabel = (status: MappingSet['status']) => ({ draft: 'Rascunho', published: 'Publicado', archived: 'Arquivado' }[status])
 const setStatusClass = (status: MappingSet['status']) => ({
-  draft: 'bg-amber-100 text-amber-800', published: 'bg-emerald-100 text-emerald-800', archived: 'bg-slate-100 text-slate-600'
+  draft: 'bg-amber-100 text-amber-800',
+  published: 'bg-emerald-100 text-emerald-800',
+  archived: 'bg-slate-100 text-slate-600'
 }[status])
+const entryStatusLabel = (status: MappingEntry['mappingStatus']) => ({
+  mapped: 'Mapeado',
+  pending: 'Pendente',
+  attention: 'Requer atenção',
+  ignored: 'Desconsiderado'
+}[status])
+const entryStatusClass = (status: MappingEntry['mappingStatus']) => ({
+  mapped: 'bg-emerald-50 text-emerald-700',
+  pending: 'bg-amber-100 text-amber-800',
+  attention: 'bg-red-50 text-red-700',
+  ignored: 'bg-slate-100 text-slate-600'
+}[status])
+const formatDate = (value: string | null) => value
+  ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value))
+  : '—'
+const formatFileSize = (bytes: number) => bytes < 1024 * 1024
+  ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+  : `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`
+const showSuccess = (message: string) => {
+  successMessage.value = message
+  window.setTimeout(() => { successMessage.value = '' }, 3200)
+}
 
 const fetchMappings = async (preserveSelection = true) => {
   loading.value = true
@@ -172,31 +543,167 @@ const fetchMappings = async (preserveSelection = true) => {
     loading.value = false
   }
 }
-const openSetModal = () => {
-  setForm.value = { name: '', sourceSystem: '', targetSystem: '', description: '' }
+
+const openCreateModal = () => {
+  createMode.value = 'template'
+  createFile.value = null
+  createFileText.value = ''
+  setForm.value = { name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete' }
   modalError.value = ''
-  setModalOpen.value = true
+  createModalOpen.value = true
+}
+const closeCreateModal = () => {
+  createModalOpen.value = false
+  createFile.value = null
+  createFileText.value = ''
+  modalError.value = ''
+}
+const selectCreateFile = async (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0] || null
+  createFile.value = file
+  createFileText.value = ''
+  modalError.value = ''
+  if (!file) return
+  if (file.size > 10 * 1024 * 1024) {
+    modalError.value = 'O arquivo deve ter no máximo 10 MB'
+    createFile.value = null
+    return
+  }
+  createFileText.value = (await readTextAttachment(file)).slice(0, 250_000)
+  const inferred = inferMappingMetadata(createFileText.value, file.name)
+  setForm.value.name = inferred.name
+  if (inferred.sourceSystem) setForm.value.sourceSystem = inferred.sourceSystem
+  if (inferred.targetSystem) setForm.value.targetSystem = inferred.targetSystem
 }
 const createSet = async () => {
   saving.value = true
   modalError.value = ''
   try {
-    const data = await api.post<{ mappingSetId: number }>(`/lambda/integrations/${props.integrationId}/mappings`, setForm.value)
-    setModalOpen.value = false
+    let contentMarkdown = ''
+    if (createMode.value === 'import') {
+      contentMarkdown = createFileText.value || `# DE-PARA · ${setForm.value.name} (${setForm.value.sourceSystem} → ${setForm.value.targetSystem})\n\n:::warning\nO documento original está anexado a esta versão. Revise as decisões antes de publicar.\n:::\n`
+    } else if (setForm.value.template === 'complete') {
+      contentMarkdown = blankMappingTemplate(setForm.value.name, setForm.value.sourceSystem, setForm.value.targetSystem)
+    } else if (setForm.value.template === 'migration') {
+      contentMarkdown = migrationMappingTemplate(setForm.value.name, setForm.value.sourceSystem, setForm.value.targetSystem)
+    }
+    const data = await api.post<{ mappingSetId: number }>(`/lambda/integrations/${props.integrationId}/mappings`, {
+      name: setForm.value.name,
+      sourceSystem: setForm.value.sourceSystem,
+      targetSystem: setForm.value.targetSystem,
+      description: setForm.value.description || null,
+      contentMarkdown: contentMarkdown || null
+    })
+    if (createMode.value === 'import' && contentMarkdown) {
+      const importedEntries = extractMappingEntries(contentMarkdown, setForm.value.sourceSystem, setForm.value.targetSystem)
+      if (importedEntries.length) {
+        await api.post(`/lambda/mappings/${data.mappingSetId}/entries/bulk`, { entries: importedEntries })
+      }
+    }
+    if (createMode.value === 'import' && createFile.value) {
+      await api.post(`/lambda/mappings/${data.mappingSetId}/attachments`, {
+        fileName: createFile.value.name,
+        mimeType: createFile.value.type || 'application/octet-stream',
+        contentBase64: await fileToBase64(createFile.value),
+        appendToDocument: false
+      })
+    }
+    closeCreateModal()
     await fetchMappings(false)
     selectedSetId.value = String(data.mappingSetId)
+    activeTab.value = 'document'
+    showSuccess(createMode.value === 'import' ? 'De-para importado com sucesso' : 'De-para criado com sucesso')
   } catch (error) {
-    modalError.value = error instanceof Error ? error.message : 'Não foi possível criar o mapa'
+    modalError.value = error instanceof Error ? error.message : 'Não foi possível criar o de-para'
   } finally {
     saving.value = false
   }
 }
+
+const openDocumentEditor = () => {
+  documentDraft.value = selectedSet.value?.contentMarkdown || ''
+  modalError.value = ''
+  documentEditorOpen.value = true
+}
+const closeDocumentEditor = () => {
+  documentEditorOpen.value = false
+  modalError.value = ''
+}
+const insertSnippet = async (content: string) => {
+  const textarea = documentTextarea.value
+  if (!textarea) {
+    documentDraft.value += content
+    return
+  }
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  documentDraft.value = `${documentDraft.value.slice(0, start)}${content}${documentDraft.value.slice(end)}`
+  await nextTick()
+  textarea.focus()
+  textarea.setSelectionRange(start + content.length, start + content.length)
+}
+const saveDocument = async () => {
+  if (!selectedSet.value) return
+  saving.value = true
+  modalError.value = ''
+  try {
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, { contentMarkdown: documentDraft.value || null })
+    closeDocumentEditor()
+    await fetchMappings()
+    showSuccess('Documento salvo')
+  } catch (error) {
+    modalError.value = error instanceof Error ? error.message : 'Não foi possível salvar o documento'
+  } finally {
+    saving.value = false
+  }
+}
+
+const openMetadataModal = () => {
+  if (!selectedSet.value) return
+  metadataForm.value = {
+    name: selectedSet.value.name,
+    sourceSystem: selectedSet.value.sourceSystem,
+    targetSystem: selectedSet.value.targetSystem,
+    description: selectedSet.value.description || ''
+  }
+  modalError.value = ''
+  metadataModalOpen.value = true
+}
+const saveMetadata = async () => {
+  if (!selectedSet.value) return
+  saving.value = true
+  modalError.value = ''
+  try {
+    await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
+      ...metadataForm.value,
+      description: metadataForm.value.description || null
+    })
+    metadataModalOpen.value = false
+    await fetchMappings()
+    showSuccess('Configurações atualizadas')
+  } catch (error) {
+    modalError.value = error instanceof Error ? error.message : 'Não foi possível atualizar o de-para'
+  } finally {
+    saving.value = false
+  }
+}
+
 const openEntryModal = (entry?: MappingEntry) => {
   entryForm.value = entry ? {
-    id: entry.id, sourcePath: entry.sourcePath, sourceType: entry.sourceType || '',
-    targetPath: entry.targetPath, targetType: entry.targetType || '', direction: entry.direction,
-    transformation: entry.transformation || '', fallbackValue: entry.fallbackValue || '',
-    isRequired: entry.isRequired, notes: entry.notes || ''
+    id: entry.id,
+    section: entry.section || '',
+    sourcePath: entry.sourcePath,
+    sourceType: entry.sourceType || '',
+    targetPath: entry.targetPath,
+    targetType: entry.targetType || '',
+    direction: entry.direction,
+    transformation: entry.transformation || '',
+    fallbackValue: entry.fallbackValue || '',
+    isRequired: entry.isRequired,
+    notes: entry.notes || '',
+    mappingStatus: entry.mappingStatus || 'mapped',
+    sourceExample: typeof entry.examples?.source === 'string' ? entry.examples.source : '',
+    targetExample: typeof entry.examples?.target === 'string' ? entry.examples.target : ''
   } : emptyEntryForm()
   modalError.value = ''
   entryModalOpen.value = true
@@ -206,31 +713,119 @@ const saveEntry = async () => {
   saving.value = true
   modalError.value = ''
   const payload = {
-    sourcePath: entryForm.value.sourcePath, sourceType: entryForm.value.sourceType || null,
-    targetPath: entryForm.value.targetPath, targetType: entryForm.value.targetType || null,
-    direction: entryForm.value.direction, transformation: entryForm.value.transformation || null,
-    fallbackValue: entryForm.value.fallbackValue || null, isRequired: entryForm.value.isRequired,
-    notes: entryForm.value.notes || null
+    section: entryForm.value.section || null,
+    sourcePath: entryForm.value.sourcePath,
+    sourceType: entryForm.value.sourceType || null,
+    targetPath: entryForm.value.targetPath,
+    targetType: entryForm.value.targetType || null,
+    direction: entryForm.value.direction,
+    transformation: entryForm.value.transformation || null,
+    fallbackValue: entryForm.value.fallbackValue || null,
+    isRequired: entryForm.value.isRequired,
+    notes: entryForm.value.notes || null,
+    mappingStatus: entryForm.value.mappingStatus,
+    examples: {
+      ...(entryForm.value.sourceExample ? { source: entryForm.value.sourceExample } : {}),
+      ...(entryForm.value.targetExample ? { target: entryForm.value.targetExample } : {})
+    }
   }
   try {
     if (entryForm.value.id) await api.patch(`/lambda/mappings/${selectedSet.value.id}/entries/${entryForm.value.id}`, payload)
     else await api.post(`/lambda/mappings/${selectedSet.value.id}/entries`, payload)
     entryModalOpen.value = false
     await fetchMappings()
+    showSuccess(entryForm.value.id ? 'Vínculo atualizado' : 'Vínculo adicionado')
   } catch (error) {
-    modalError.value = error instanceof Error ? error.message : 'Não foi possível salvar o campo'
+    modalError.value = error instanceof Error ? error.message : 'Não foi possível salvar o vínculo'
   } finally {
     saving.value = false
   }
 }
+const deleteEntry = async () => {
+  if (!selectedSet.value || !entryToDelete.value) return
+  saving.value = true
+  try {
+    await api.del(`/lambda/mappings/${selectedSet.value.id}/entries/${entryToDelete.value.id}`)
+    entryToDelete.value = null
+    await fetchMappings()
+    showSuccess('Vínculo excluído')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível excluir o vínculo'
+  } finally {
+    saving.value = false
+  }
+}
+
+const selectAttachmentFile = async (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0] || null
+  attachmentFile.value = file
+  appendAttachmentToDocument.value = false
+  attachmentTextAvailable.value = Boolean(file && await readTextAttachment(file))
+}
+const uploadAttachment = async () => {
+  if (!selectedSet.value || !attachmentFile.value) return
+  if (attachmentFile.value.size > 10 * 1024 * 1024) {
+    modalError.value = 'O arquivo deve ter no máximo 10 MB'
+    return
+  }
+  saving.value = true
+  modalError.value = ''
+  try {
+    await api.post(`/lambda/mappings/${selectedSet.value.id}/attachments`, {
+      fileName: attachmentFile.value.name,
+      mimeType: attachmentFile.value.type || 'application/octet-stream',
+      contentBase64: await fileToBase64(attachmentFile.value),
+      appendToDocument: appendAttachmentToDocument.value
+    })
+    attachmentModalOpen.value = false
+    attachmentFile.value = null
+    await fetchMappings()
+    showSuccess('Arquivo anexado')
+  } catch (error) {
+    modalError.value = error instanceof Error ? error.message : 'Não foi possível anexar o arquivo'
+  } finally {
+    saving.value = false
+  }
+}
+const downloadAttachment = async (attachmentId: number, fileName: string) => {
+  if (!selectedSet.value) return
+  try {
+    const blob = await api.download(`/lambda/mappings/${selectedSet.value.id}/attachments/${attachmentId}`)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível baixar o arquivo'
+  }
+}
+const deleteAttachment = async () => {
+  if (!selectedSet.value || !attachmentToDelete.value) return
+  saving.value = true
+  try {
+    await api.del(`/lambda/mappings/${selectedSet.value.id}/attachments/${attachmentToDelete.value.id}`)
+    attachmentToDelete.value = null
+    await fetchMappings()
+    showSuccess('Arquivo removido')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível remover o arquivo'
+  } finally {
+    saving.value = false
+  }
+}
+
 const publishSet = async () => {
   if (!selectedSet.value) return
   saving.value = true
   try {
     await api.patch(`/lambda/mappings/${selectedSet.value.id}`, { status: 'published' })
+    publishConfirmOpen.value = false
     await fetchMappings()
+    showSuccess('Versão publicada para o cliente')
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível publicar o mapa'
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível publicar o de-para'
   } finally {
     saving.value = false
   }
@@ -242,44 +837,123 @@ const cloneSet = async () => {
     const data = await api.post<{ mappingSetId: number }>(`/lambda/mappings/${selectedSet.value.id}/clone`)
     await fetchMappings(false)
     selectedSetId.value = String(data.mappingSetId)
+    activeTab.value = 'document'
+    showSuccess('Nova versão criada')
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível duplicar o mapa'
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível criar uma nova versão'
   } finally {
     saving.value = false
   }
 }
-const requestDeleteEntry = (entry: MappingEntry) => { entryToDelete.value = entry }
-const deleteEntry = async () => {
-  if (!selectedSet.value || !entryToDelete.value) return
-  saving.value = true
-  try {
-    await api.del(`/lambda/mappings/${selectedSet.value.id}/entries/${entryToDelete.value.id}`)
-    entryToDelete.value = null
-    await fetchMappings()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível excluir o campo'
-  } finally {
-    saving.value = false
-  }
+
+const downloadText = (content: string, fileName: string, type: string) => {
+  const url = URL.createObjectURL(new Blob([content], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.click()
+  URL.revokeObjectURL(url)
+}
+const safeFileName = (value: string) => value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+const exportMarkdown = () => {
+  if (!selectedSet.value) return
+  downloadText(selectedSet.value.contentMarkdown || `# ${selectedSet.value.name}\n`, `de-para-${safeFileName(selectedSet.value.name)}.md`, 'text/markdown;charset=utf-8')
 }
 const exportCsv = () => {
   if (!selectedSet.value) return
   const rows = [
-    ['Origem', 'Tipo origem', 'Transformação', 'Valor padrão', 'Destino', 'Tipo destino', 'Obrigatório', 'Observações'],
+    ['Seção', 'Origem', 'Tipo origem', 'Destino', 'Tipo destino', 'Situação', 'Transformação', 'Fallback', 'Obrigatório', 'Observações'],
     ...selectedSet.value.entries.map(entry => [
-      entry.sourcePath, entry.sourceType || '', entry.transformation || '', entry.fallbackValue || '',
-      entry.targetPath, entry.targetType || '', entry.isRequired ? 'Sim' : 'Não', entry.notes || ''
+      entry.section || '',
+      entry.sourcePath,
+      entry.sourceType || '',
+      entry.targetPath,
+      entry.targetType || '',
+      entryStatusLabel(entry.mappingStatus),
+      entry.transformation || '',
+      entry.fallbackValue || '',
+      entry.isRequired ? 'Sim' : 'Não',
+      entry.notes || ''
     ])
   ]
   const csv = '\uFEFF' + rows.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(',')).join('\r\n')
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `de-para-${selectedSet.value.name.toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, '-')}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadText(csv, `de-para-${safeFileName(selectedSet.value.name)}.csv`, 'text/csv;charset=utf-8')
 }
 
 watch(() => props.integrationId, () => void fetchMappings(false))
+watch(selectedSetId, () => {
+  activeTab.value = 'document'
+  entrySearch.value = ''
+  entryStatusFilter.value = ''
+})
 onMounted(() => void fetchMappings(false))
 </script>
+
+<style scoped>
+.mapping-document {
+  color: #334155;
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.mapping-document :deep(h1) {
+  margin: 0 0 1rem;
+  color: #020617;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.mapping-document :deep(h2) {
+  margin: 2rem 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  color: #0f172a;
+  font-size: 1.125rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.mapping-document :deep(h3) {
+  margin: 1.5rem 0 0.5rem;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.mapping-document :deep(h4) {
+  margin: 1.25rem 0 0.5rem;
+  color: #0f172a;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.mapping-document :deep(p) { margin: 0.625rem 0; }
+.mapping-document :deep(strong) { color: #0f172a; font-weight: 650; }
+.mapping-document :deep(code) { border-radius: 0.25rem; background: #f1f5f9; padding: 0.125rem 0.3rem; color: #0f172a; font-size: 0.8em; }
+.mapping-document :deep(pre) { margin: 1rem 0; overflow-x: auto; border-radius: 0.5rem; background: #0f172a; padding: 1rem; color: #e2e8f0; }
+.mapping-document :deep(pre code) { background: transparent; padding: 0; color: inherit; font-size: 0.75rem; line-height: 1.6; }
+.mapping-document :deep(a) { color: #4f46e5; text-decoration: underline; text-underline-offset: 2px; }
+.mapping-document :deep(hr) { margin: 1.75rem 0; border: 0; border-top: 1px solid #e2e8f0; }
+.mapping-document :deep(ul),
+.mapping-document :deep(ol) { margin: 0.75rem 0; padding-left: 1.5rem; }
+.mapping-document :deep(ul) { list-style: disc; }
+.mapping-document :deep(ol) { list-style: decimal; }
+.mapping-document :deep(li) { margin: 0.3rem 0; }
+.mapping-document :deep(.mapping-check) { display: flex; list-style: none; gap: 0.5rem; margin-left: -1.5rem; }
+.mapping-document :deep(.mapping-check span) { color: #64748b; font-weight: 700; }
+.mapping-document :deep(blockquote) { margin: 1rem 0; border-left: 3px solid #cbd5e1; padding: 0.25rem 0 0.25rem 1rem; color: #475569; }
+.mapping-document :deep(.mapping-callout) { margin: 1rem 0; border: 1px solid #e2e8f0; border-left-width: 3px; border-radius: 0.375rem; padding: 0.75rem 1rem; background: #f8fafc; }
+.mapping-document :deep(.mapping-callout--warning) { border-color: #fcd34d; background: #fffbeb; color: #78350f; }
+.mapping-document :deep(.mapping-callout--danger) { border-color: #fca5a5; background: #fef2f2; color: #7f1d1d; }
+.mapping-document :deep(.mapping-callout--success) { border-color: #86efac; background: #f0fdf4; color: #14532d; }
+.mapping-document :deep(.mapping-callout--info) { border-color: #93c5fd; background: #eff6ff; color: #1e3a8a; }
+.mapping-document :deep(.mapping-callout p:first-child) { margin-top: 0; }
+.mapping-document :deep(.mapping-callout p:last-child) { margin-bottom: 0; }
+.mapping-document :deep(.mapping-table-wrap) { margin: 1rem 0; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 0.5rem; }
+.mapping-document :deep(table) { width: 100%; min-width: 640px; border-collapse: collapse; text-align: left; }
+.mapping-document :deep(th) { border-bottom: 1px solid #e2e8f0; background: #f8fafc; padding: 0.65rem 0.75rem; color: #475569; font-size: 0.75rem; font-weight: 650; }
+.mapping-document :deep(td) { border-bottom: 1px solid #f1f5f9; padding: 0.7rem 0.75rem; vertical-align: top; }
+.mapping-document :deep(tr:last-child td) { border-bottom: 0; }
+</style>

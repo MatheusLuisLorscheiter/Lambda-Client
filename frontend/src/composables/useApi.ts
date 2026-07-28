@@ -61,12 +61,30 @@ export function useApi() {
     const del = <T>(endpoint: string, headers?: Record<string, string>) =>
         request<T>(endpoint, { method: 'DELETE', headers })
 
+    const download = async (endpoint: string): Promise<Blob> => {
+        const headers: Record<string, string> = {}
+        if (auth.token) headers.Authorization = `Bearer ${auth.token}`
+        const response = await fetch(`${apiBaseUrl}${endpoint}`, { headers })
+        if (response.status === 401) {
+            const wasAdmin = auth.isAdmin
+            await auth.logout()
+            await router.push(wasAdmin ? '/admin/login' : '/login')
+            throw new Error('Sua sessão expirou. Entre novamente.')
+        }
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}))
+            throw new Error(error.error || 'Não foi possível baixar o arquivo')
+        }
+        return response.blob()
+    }
+
     return {
         request,
         get,
         post,
         put,
         patch,
-        del
+        del,
+        download
     }
 }

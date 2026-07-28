@@ -35,9 +35,20 @@ export interface MappingEntry {
   isRequired: boolean
   notes: string | null
   examples: Record<string, unknown>
+  section: string | null
+  mappingStatus: 'mapped' | 'pending' | 'attention' | 'ignored'
   sortOrder: number
   createdAt: string
   updatedAt: string
+}
+
+export interface MappingAttachment {
+  id: number
+  fileName: string
+  mimeType: string
+  fileSize: number
+  hasExtractedText: boolean
+  createdAt: string
 }
 
 export interface MappingSet {
@@ -48,14 +59,17 @@ export interface MappingSet {
   processTitle: string | null
   name: string
   description: string | null
+  contentMarkdown: string | null
   sourceSystem: string
   targetSystem: string
   version: number
   status: 'draft' | 'published' | 'archived'
   publishedAt: string | null
+  closedAt: string | null
   createdAt: string
   updatedAt: string
   entries: MappingEntry[]
+  attachments: MappingAttachment[]
 }
 
 export interface ClientUser {
