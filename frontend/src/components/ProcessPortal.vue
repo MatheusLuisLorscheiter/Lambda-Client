@@ -235,11 +235,11 @@
           <div class="space-y-6 p-6">
             <div v-if="!['paused', 'cancelled'].includes(selectedProcess.status)">
               <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Etapa atual</p>
-              <ol class="mt-3 grid grid-cols-3 gap-y-3 sm:grid-cols-6">
+              <ol class="mt-3 grid grid-cols-3 gap-x-2 gap-y-4 sm:grid-cols-6">
                 <li v-for="(stage, index) in processStages" :key="stage.value" class="relative">
                   <div class="flex items-center">
                     <span
-                      class="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold"
+                      class="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold"
                       :class="stageIndex(selectedProcess.status) > index
                         ? 'border-indigo-600 bg-indigo-600 text-white'
                         : stageIndex(selectedProcess.status) === index
@@ -250,7 +250,7 @@
                     </span>
                     <span v-if="index < processStages.length - 1" class="h-px flex-1" :class="stageIndex(selectedProcess.status) > index ? 'bg-indigo-600' : 'bg-slate-200'"></span>
                   </div>
-                  <p class="mt-1 pr-2 text-[10px] leading-4" :class="stageIndex(selectedProcess.status) === index ? 'font-semibold text-indigo-700' : 'text-slate-500'">
+                  <p class="mt-1 break-words pr-1 text-[10px] leading-tight" :class="stageIndex(selectedProcess.status) === index ? 'font-semibold text-indigo-700' : 'text-slate-500'">
                     {{ stage.label }}
                   </p>
                 </li>
