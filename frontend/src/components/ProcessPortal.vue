@@ -332,7 +332,7 @@
                 <li v-for="update in processUpdates(selectedProcess)" :key="update.id" class="relative">
                   <span class="absolute -left-[1.29rem] top-1.5 h-2 w-2 rounded-full ring-4 ring-white" :class="update.kind === 'comment' ? 'bg-slate-500' : update.kind === 'delivery' ? 'bg-emerald-600' : 'bg-indigo-600'"></span>
                   <p class="text-sm leading-6 text-slate-700">{{ update.message }}</p>
-                  <p class="mt-1 text-xs text-slate-400">{{ update.authorRole === 'client' ? 'Sua equipe' : 'Chave Mestra' }} · {{ formatDateTime(update.createdAt) }}<span v-if="update.editedAt"> · editado</span></p>
+                  <p class="mt-1 text-xs text-slate-400">{{ update.authorRole === 'client' ? 'Sua equipe' : 'Chave Mestra Gestão' }} · {{ formatDateTime(update.createdAt) }}<span v-if="update.editedAt"> · editado</span></p>
                 </li>
               </ol>
             </div>
