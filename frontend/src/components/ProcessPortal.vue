@@ -240,7 +240,11 @@
                   <div class="flex items-center">
                     <span
                       class="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold"
-                      :class="stageIndex(selectedProcess.status) >= index ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-slate-400'"
+                      :class="stageIndex(selectedProcess.status) > index
+                        ? 'border-indigo-600 bg-indigo-600 text-white'
+                        : stageIndex(selectedProcess.status) === index
+                          ? 'border-indigo-600 bg-white text-indigo-700'
+                          : 'border-slate-300 bg-white text-slate-400'"
                     >
                       {{ stageIndex(selectedProcess.status) > index ? '✓' : index + 1 }}
                     </span>
