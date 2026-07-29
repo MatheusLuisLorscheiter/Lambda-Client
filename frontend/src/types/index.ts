@@ -202,6 +202,7 @@ export interface ProcessItem {
   customFields?: Record<string, unknown>
   clientCanComment: boolean
   clientCanManageEffort: boolean
+  effortAssessmentCount: number
   clientEditableFields: ProcessClientField[]
   isClientVisible: boolean
   archivedAt: string | null

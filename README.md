@@ -111,11 +111,12 @@ migração falhar, a API não inicia com um schema incompatível.
 - O cliente acessa a automação relacionada diretamente pelos detalhes do processo.
 - Cada nova atualização administrativa é preservada em uma linha do tempo visível ao cliente.
 - O cliente pode registrar tempo, frequência e pessoas envolvidas por atividade antes e depois da automação.
+- A nova solicitação pode incluir uma linha de base operacional opcional, gravada atomicamente com o processo.
 - O Lambda Pulse calcula horas mensais, pessoas equivalentes e redução de esforço sem perder o histórico das medições.
 
 ## 🧭 Mapeamentos de dados
 
-- De-paras combinam documento Markdown, vínculos estruturados, exemplos, regras e arquivos de referência.
+- De-paras combinam documento Markdown, campos estruturados embutidos na mesma área, exemplos, regras e arquivos de referência.
 - Versões publicadas e revisões de edição são controladas separadamente.
 - Administradores configuram exatamente o que o cliente pode editar e quais validações bloqueiam uma publicação.
 - Toda alteração relevante possui linha do tempo com autor, data, antes/depois e restauração auditável.
@@ -124,6 +125,7 @@ migração falhar, a API não inicia com um schema incompatível.
 - Mapas vinculados aparecem diretamente no contexto da demanda em Processos.
 
 O contrato completo está em [docs/MAPPINGS_MODULE.md](docs/MAPPINGS_MODULE.md).
+O desenho integrado de Processos, Mapeamentos e Esforço Operacional está em [docs/PROCESSOS_E_MAPEAMENTOS.md](docs/PROCESSOS_E_MAPEAMENTOS.md).
 
 ---
 

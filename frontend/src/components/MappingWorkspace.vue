@@ -49,9 +49,9 @@
             <div class="flex flex-wrap items-center gap-2">
               <h3 class="text-lg font-semibold tracking-tight text-slate-950">{{ selectedSet.name }}</h3>
               <span :class="setStatusClass(selectedSet.status)" class="rounded-full px-2 py-0.5 text-xs font-medium">{{ setStatusLabel(selectedSet.status) }}</span>
-              <span class="text-xs text-slate-400">versão {{ selectedSet.version }} · revisão {{ selectedSet.revision }}</span>
+              <span class="text-xs text-slate-400">versão {{ selectedSet.version }}<template v-if="auth.isAdmin"> · revisão {{ selectedSet.revision }}</template></span>
               <span v-if="selectedSet.hasUnreviewedClientChanges" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                Alterações aguardando revisão
+                {{ auth.isAdmin ? 'Alterações aguardando revisão' : 'Alterações enviadas à equipe' }}
               </span>
             </div>
             <p class="mt-1 text-sm text-slate-500">
@@ -70,7 +70,7 @@
               Criar nova versão
             </button>
             <button v-if="canEditDocument" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openDocumentEditor">
-              Editar documento
+              {{ auth.isAdmin ? 'Editar documento' : 'Preencher documento' }}
             </button>
             <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
               Publicar para o cliente
@@ -86,11 +86,11 @@
 
         <dl class="mt-5 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4">
           <div class="bg-white px-4 py-3">
-            <dt class="text-xs text-slate-500">Vínculos estruturados</dt>
+            <dt class="text-xs text-slate-500">Campos do de-para</dt>
             <dd class="mt-1 text-xl font-semibold text-slate-950">{{ selectedSet.entries.length }}</dd>
           </div>
           <div class="bg-white px-4 py-3">
-            <dt class="text-xs text-slate-500">Pendências</dt>
+            <dt class="text-xs text-slate-500">{{ auth.isAdmin ? 'Pendências' : 'A completar' }}</dt>
             <dd class="mt-1 text-xl font-semibold" :class="pendingCount ? 'text-amber-700' : 'text-slate-950'">{{ pendingCount }}</dd>
           </div>
           <div class="bg-white px-4 py-3">
@@ -98,9 +98,9 @@
             <dd class="mt-1 text-xl font-semibold text-slate-950">{{ selectedSet.attachments?.length || 0 }}</dd>
           </div>
           <div class="bg-white px-4 py-3">
-            <dt class="text-xs text-slate-500">{{ selectedSet.clientEditMode === 'none' ? 'Última alteração' : 'Colaboração do cliente' }}</dt>
+            <dt class="text-xs text-slate-500">{{ auth.isAdmin ? (selectedSet.clientEditMode === 'none' ? 'Última alteração' : 'Colaboração do cliente') : 'Situação' }}</dt>
             <dd class="mt-1 text-sm font-medium text-slate-800">
-              {{ selectedSet.hasUnreviewedClientChanges ? 'Revisão pendente' : selectedSet.clientEditMode === 'none' ? formatDate(selectedSet.closedAt || selectedSet.updatedAt) : clientEditModeLabel(selectedSet.clientEditMode) }}
+              {{ selectedSet.hasUnreviewedClientChanges ? (auth.isAdmin ? 'Revisão pendente' : 'Enviado para a equipe') : selectedSet.clientEditMode === 'none' ? formatDate(selectedSet.closedAt || selectedSet.updatedAt) : clientEditModeLabel(selectedSet.clientEditMode) }}
             </dd>
           </div>
         </dl>
@@ -144,9 +144,23 @@
             Começar documento
           </button>
         </div>
-      </section>
 
-      <section v-else-if="activeTab === 'fields'" class="pt-5">
+        <div class="mt-8 border-t border-slate-200 pt-6">
+          <div class="mb-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ auth.isAdmin ? 'Campos do documento' : 'Campos para completar' }}</h4>
+                <p class="mt-1 text-sm leading-6 text-slate-500">
+                  {{ auth.isAdmin
+                    ? 'Os campos abaixo fazem parte deste mesmo documento e mantêm o de-para pesquisável, validável e exportável.'
+                    : 'Complete somente os campos liberados. Tudo o que você salvar ficará registrado e será enviado à equipe técnica.' }}
+                </p>
+              </div>
+              <span v-if="selectedSet.entries.length" class="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                {{ mappingQuality.completionPercent }}% concluído
+              </span>
+            </div>
+          </div>
         <div v-if="selectedEntryIds.length" class="mb-4 flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p class="text-sm font-medium text-slate-800">{{ selectedEntryIds.length }} vínculo{{ selectedEntryIds.length === 1 ? '' : 's' }} selecionado{{ selectedEntryIds.length === 1 ? '' : 's' }}</p>
           <div class="flex flex-wrap gap-2">
@@ -254,6 +268,7 @@
             <button :disabled="entryPage >= entryPageCount" class="rounded-md border border-slate-300 px-3 py-2 text-xs disabled:opacity-40" @click="entryPage += 1">Próxima</button>
           </div>
         </div>
+        </div>
       </section>
 
       <section v-else-if="activeTab === 'history'" class="pt-5">
@@ -287,7 +302,7 @@
         </div>
       </section>
 
-      <section v-else class="pt-5">
+      <section v-else-if="activeTab === 'review' && auth.isAdmin" class="pt-5">
         <div class="grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4">
           <div class="bg-white px-4 py-3">
             <p class="text-xs text-slate-500">Cobertura do de-para</p>
@@ -406,6 +421,15 @@
               <label class="mb-1.5 block text-sm font-medium text-slate-700">Descrição curta <span class="font-normal text-slate-400">(opcional)</span></label>
               <textarea v-model="setForm.description" rows="2" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea>
             </div>
+            <div>
+              <label class="mb-1.5 block text-sm font-medium text-slate-700">Como o cliente participará?</label>
+              <select v-model="setForm.clientEditMode" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                <option value="all">Preencherá o documento e os campos</option>
+                <option value="selected">Preencherá somente campos liberados</option>
+                <option value="none">Apenas visualizará</option>
+              </select>
+              <p class="mt-1 text-xs leading-5 text-slate-500">A versão só ficará disponível após a publicação. As permissões podem ser refinadas nas configurações.</p>
+            </div>
           </div>
           <p v-if="modalError" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ modalError }}</p>
         </div>
@@ -421,23 +445,25 @@
       <aside class="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-slate-200 bg-white shadow-xl">
         <header class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 class="font-semibold text-slate-950">Editar documento</h3>
-            <p class="mt-0.5 text-xs text-slate-500">Markdown · {{ documentDraft.length.toLocaleString('pt-BR') }} caracteres</p>
+            <h3 class="font-semibold text-slate-950">{{ auth.isAdmin ? 'Editar documento' : 'Preencher de-para' }}</h3>
+            <p class="mt-0.5 text-xs text-slate-500">
+              {{ auth.isAdmin ? `Markdown · ${documentDraft.length.toLocaleString('pt-BR')} caracteres` : 'Complete respostas, decisões e valores pendentes; a pré-visualização é atualizada automaticamente.' }}
+            </p>
           </div>
           <div class="flex flex-wrap gap-2">
             <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" @click="closeDocumentEditor()">Cancelar</button>
-            <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-50" @click="saveDocument">{{ saving ? 'Salvando…' : 'Salvar documento' }}</button>
+            <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-50" @click="saveDocument">{{ saving ? 'Salvando…' : auth.isAdmin ? 'Salvar documento' : 'Salvar preenchimento' }}</button>
           </div>
         </header>
-        <div class="flex flex-wrap gap-1 border-b border-slate-200 px-4 py-2">
+        <div v-if="auth.isAdmin" class="flex flex-wrap gap-1 border-b border-slate-200 px-4 py-2">
           <button v-for="snippet in editorSnippets" :key="snippet.label" type="button" class="rounded px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900" @click="insertSnippet(snippet.content)">
             {{ snippet.label }}
           </button>
         </div>
         <div class="grid min-h-0 flex-1 lg:grid-cols-2">
           <div class="flex min-h-0 flex-col border-r border-slate-200">
-            <p class="border-b border-slate-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">Conteúdo</p>
-            <textarea ref="documentTextarea" v-model="documentDraft" class="min-h-[45vh] flex-1 resize-none border-0 p-5 font-mono text-sm leading-6 outline-none" spellcheck="true"></textarea>
+            <p class="border-b border-slate-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">{{ auth.isAdmin ? 'Conteúdo' : 'Preenchimento' }}</p>
+            <textarea ref="documentTextarea" v-model="documentDraft" class="min-h-[45vh] flex-1 resize-none border-0 p-5 text-sm leading-6 outline-none" :class="auth.isAdmin ? 'font-mono' : 'font-sans'" spellcheck="true"></textarea>
           </div>
           <div class="min-h-0 overflow-y-auto bg-slate-50">
             <p class="sticky top-0 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">Pré-visualização</p>
@@ -516,22 +542,32 @@
       <form class="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl" @submit.prevent="saveEntry">
         <header class="border-b border-slate-200 px-6 py-5">
           <h3 class="text-lg font-semibold text-slate-950">{{ entryForm.id ? 'Editar vínculo' : 'Adicionar vínculo' }}</h3>
-          <p class="mt-1 text-sm text-slate-500">Documente o valor, a regra e o que ainda depende de decisão.</p>
+          <p class="mt-1 text-sm text-slate-500">{{ auth.isAdmin ? 'Documente o valor, a regra e o que ainda depende de decisão.' : 'Preencha somente as informações liberadas pela equipe.' }}</p>
         </header>
         <div class="grid gap-4 p-6 sm:grid-cols-2">
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Seção</label><input v-model="entryForm.section" :disabled="!canEditField('section')" maxlength="240" placeholder="Ex.: Condições de pagamento" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de origem</label><input v-model="entryForm.sourcePath" :disabled="!canEditField('sourcePath')" required maxlength="500" placeholder="Ex.: 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor ou campo de destino</label><input v-model="entryForm.targetPath" :disabled="!canEditField('targetPath')" required maxlength="500" placeholder="Ex.: A28 - Para 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Tipo de origem <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.sourceType" :disabled="!canEditField('sourceType')" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Tipo de destino <span class="font-normal text-slate-400">(opcional)</span></label><input v-model="entryForm.targetType" :disabled="!canEditField('targetType')" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Situação</label><select v-model="entryForm.mappingStatus" :disabled="!canEditField('mappingStatus')" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><option value="mapped">Mapeado</option><option value="pending">Pendente</option><option value="attention">Requer atenção</option><option value="ignored">Desconsiderado</option></select></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Direção</label><select v-model="entryForm.direction" :disabled="!canEditField('direction')" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><option value="source_to_target">Origem → destino</option><option value="target_to_source">Destino → origem</option><option value="bidirectional">Bidirecional</option></select></div>
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Regra ou transformação</label><textarea v-model="entryForm.transformation" :disabled="!canEditField('transformation')" rows="3" maxlength="5000" placeholder="Ex.: remover pontuação e completar com zeros à esquerda." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Valor padrão (fallback)</label><input v-model="entryForm.fallbackValue" :disabled="!canEditField('fallbackValue')" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <label class="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2.5 text-sm font-medium"><input v-model="entryForm.isRequired" :disabled="!canEditField('isRequired')" type="checkbox" class="h-4 w-4 rounded border-slate-300"> Campo obrigatório</label>
-          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de origem</label><input v-model="entryForm.sourceExample" :disabled="!canEditField('examples')" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div><label class="mb-1.5 block text-sm font-medium">Exemplo de destino</label><input v-model="entryForm.targetExample" :disabled="!canEditField('examples')" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
-          <div class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Observações e ações</label><textarea v-model="entryForm.notes" :disabled="!canEditField('notes')" rows="3" maxlength="3000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+          <div v-if="auth.isAdmin || canEditField('section')" class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Seção</label><input v-model="entryForm.section" :disabled="!canEditField('section')" maxlength="240" placeholder="Ex.: Condições de pagamento" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div v-if="auth.isAdmin || canEditField('sourcePath')"><label class="mb-1.5 block text-sm font-medium">Valor ou campo de origem</label><input v-model="entryForm.sourcePath" :disabled="!canEditField('sourcePath')" :required="canEditField('sourcePath')" maxlength="500" placeholder="Ex.: 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div v-if="auth.isAdmin || canEditField('targetPath')"><label class="mb-1.5 block text-sm font-medium">Valor ou campo de destino</label><input v-model="entryForm.targetPath" :disabled="!canEditField('targetPath')" :required="canEditField('targetPath')" maxlength="500" placeholder="Ex.: A28 - Para 28 dias" class="w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+          <div v-if="auth.isAdmin || canEditField('mappingStatus')"><label class="mb-1.5 block text-sm font-medium">Situação</label><select v-model="entryForm.mappingStatus" :disabled="!canEditField('mappingStatus')" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><option value="mapped">Completo</option><option value="pending">Pendente</option><option value="attention">Preciso de ajuda</option><option value="ignored">Não se aplica</option></select></div>
+          <div v-if="auth.isAdmin || canEditField('notes')" class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Observações e dúvidas</label><textarea v-model="entryForm.notes" :disabled="!canEditField('notes')" rows="3" maxlength="3000" placeholder="Inclua o contexto necessário para a equipe validar este campo." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+
+          <details v-if="auth.isAdmin || hasEditableTechnicalFields" class="sm:col-span-2 rounded-md border border-slate-200" :open="auth.isAdmin">
+            <summary class="cursor-pointer px-4 py-3 text-sm font-medium text-slate-700">
+              {{ auth.isAdmin ? 'Configuração técnica do vínculo' : 'Mais detalhes do campo' }}
+            </summary>
+            <div class="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-2">
+              <div v-if="auth.isAdmin || canEditField('sourceType')"><label class="mb-1.5 block text-sm font-medium">Tipo de origem</label><input v-model="entryForm.sourceType" :disabled="!canEditField('sourceType')" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+              <div v-if="auth.isAdmin || canEditField('targetType')"><label class="mb-1.5 block text-sm font-medium">Tipo de destino</label><input v-model="entryForm.targetType" :disabled="!canEditField('targetType')" maxlength="80" placeholder="string" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+              <div v-if="auth.isAdmin || canEditField('direction')"><label class="mb-1.5 block text-sm font-medium">Direção</label><select v-model="entryForm.direction" :disabled="!canEditField('direction')" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"><option value="source_to_target">Origem → destino</option><option value="target_to_source">Destino → origem</option><option value="bidirectional">Bidirecional</option></select></div>
+              <div v-if="auth.isAdmin || canEditField('fallbackValue')"><label class="mb-1.5 block text-sm font-medium">Valor padrão</label><input v-model="entryForm.fallbackValue" :disabled="!canEditField('fallbackValue')" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+              <div v-if="auth.isAdmin || canEditField('transformation')" class="sm:col-span-2"><label class="mb-1.5 block text-sm font-medium">Regra ou transformação</label><textarea v-model="entryForm.transformation" :disabled="!canEditField('transformation')" rows="3" maxlength="5000" placeholder="Ex.: remover pontuação e completar com zeros à esquerda." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></textarea></div>
+              <label v-if="auth.isAdmin || canEditField('isRequired')" class="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2.5 text-sm font-medium"><input v-model="entryForm.isRequired" :disabled="!canEditField('isRequired')" type="checkbox" class="h-4 w-4 rounded border-slate-300"> Campo obrigatório</label>
+              <template v-if="auth.isAdmin || canEditField('examples')">
+                <div><label class="mb-1.5 block text-sm font-medium">Exemplo de origem</label><input v-model="entryForm.sourceExample" :disabled="!canEditField('examples')" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+                <div><label class="mb-1.5 block text-sm font-medium">Exemplo de destino</label><input v-model="entryForm.targetExample" :disabled="!canEditField('examples')" maxlength="1000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"></div>
+              </template>
+            </div>
+          </details>
           <fieldset v-if="auth.isAdmin && selectedSet.clientEditMode === 'selected'" class="sm:col-span-2 rounded-md border border-slate-200 p-4">
             <legend class="px-1 text-sm font-medium text-slate-800">Campos que o cliente pode editar</legend>
             <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -645,7 +681,7 @@ const api = useApi()
 const auth = useAuthStore()
 const mappingSets = ref<MappingSet[]>([])
 const selectedSetId = ref('')
-const activeTab = ref<'document' | 'fields' | 'history' | 'files' | 'review'>('document')
+const activeTab = ref<'document' | 'history' | 'files' | 'review'>('document')
 const entrySearch = ref('')
 const entryStatusFilter = ref('')
 const entryPage = ref(1)
@@ -676,7 +712,15 @@ const attachmentToDelete = ref<MappingAttachment | null>(null)
 const attachmentFile = ref<File | null>(null)
 const attachmentTextAvailable = ref(false)
 const appendAttachmentToDocument = ref(false)
-const setForm = ref({ name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete', processId: '' })
+const setForm = ref({
+  name: '',
+  sourceSystem: '',
+  targetSystem: '',
+  description: '',
+  template: 'complete',
+  processId: '',
+  clientEditMode: 'all' as MappingSet['clientEditMode']
+})
 const metadataForm = ref({
   name: '', sourceSystem: '', targetSystem: '', description: '',
   processId: '',
@@ -716,24 +760,24 @@ const clientNextAction = computed(() => {
   if (selectedSet.value.clientEditMode === 'none') {
     return {
       title: 'Consulte e valide o de-para',
-      detail: 'Use as abas para conferir o documento, os vínculos e o histórico. Se algo estiver incorreto, registre um comentário no histórico.'
+      detail: 'Confira o documento e os campos logo abaixo. Se algo estiver incorreto, registre uma dúvida no histórico.'
     }
   }
   if (selectedSet.value.hasUnreviewedClientChanges) {
     return {
       title: 'Suas alterações foram registradas',
-      detail: 'A equipe técnica poderá conferir exatamente o que mudou. Você pode complementar o contexto na aba Histórico.'
+      detail: 'A equipe técnica poderá conferir exatamente o que mudou. Você pode complementar o contexto em Dúvidas e histórico.'
     }
   }
   if (pendingCount.value) {
     return {
       title: `Ajude a resolver ${pendingCount.value} pendência${pendingCount.value === 1 ? '' : 's'}`,
-      detail: 'Abra a aba Campos estruturados, filtre por “Pendente” ou “Requer atenção” e preencha somente o que estiver liberado.'
+      detail: 'Use a seção Campos para completar, logo abaixo do documento, e preencha somente o que estiver liberado.'
     }
   }
   return {
     title: 'Mapeamento pronto para conferência',
-    detail: 'Revise os valores e registre qualquer dúvida ou decisão na aba Histórico.'
+    detail: 'Revise os valores e registre qualquer dúvida ou decisão em Dúvidas e histórico.'
   }
 })
 const canEditDocument = computed(() => Boolean(selectedSet.value && (
@@ -765,6 +809,18 @@ const canEditField = (field: MappingEntryClientField) => {
   if (selectedSet.value.clientEditMode === 'all') return true
   return entryForm.value.clientEditableFields.includes(field)
 }
+const technicalEntryFields: MappingEntryClientField[] = [
+  'sourceType',
+  'targetType',
+  'direction',
+  'transformation',
+  'fallbackValue',
+  'isRequired',
+  'examples'
+]
+const hasEditableTechnicalFields = computed(() =>
+  technicalEntryFields.some(field => canEditField(field))
+)
 const clientFieldOptions: Array<{ value: MappingEntryClientField; label: string }> = [
   { value: 'section', label: 'Seção' },
   { value: 'sourcePath', label: 'Campo de origem' },
@@ -814,7 +870,7 @@ const mappingQuality = computed(() => {
     },
     {
       ok: entries.length > 0,
-      label: 'Campos estruturados',
+      label: 'Campos do documento',
       detail: entries.length
         ? `${entries.length} vínculo${entries.length === 1 ? '' : 's'} disponível${entries.length === 1 ? '' : 'is'} para busca e exportação.`
         : 'Estruture os principais vínculos para facilitar validação e exportação.'
@@ -868,13 +924,20 @@ const allVisibleEntriesSelected = computed(() => Boolean(
   paginatedEntries.value.length &&
   paginatedEntries.value.every(entry => selectedEntryIds.value.includes(entry.id))
 ))
-const workspaceTabs = computed(() => [
-  { value: 'document' as const, label: 'Documento', count: null },
-  { value: 'fields' as const, label: 'Campos estruturados', count: selectedSet.value?.entries.length || 0 },
-  { value: 'history' as const, label: 'Histórico', count: selectedSet.value?.hasUnreviewedClientChanges ? 1 : null },
-  { value: 'files' as const, label: 'Arquivos', count: selectedSet.value?.attachments?.length || 0 },
-  { value: 'review' as const, label: 'Revisão', count: pendingCount.value || null }
-])
+const workspaceTabs = computed(() => {
+  const sharedTabs = [
+    { value: 'document' as const, label: 'Documento', count: null },
+    {
+      value: 'history' as const,
+      label: auth.isAdmin ? 'Histórico' : 'Dúvidas e histórico',
+      count: auth.isAdmin && selectedSet.value?.hasUnreviewedClientChanges ? 1 : null
+    },
+    { value: 'files' as const, label: 'Arquivos', count: selectedSet.value?.attachments?.length || 0 }
+  ]
+  return auth.isAdmin
+    ? [...sharedTabs, { value: 'review' as const, label: 'Revisão', count: pendingCount.value || null }]
+    : sharedTabs
+})
 const editorSnippets = [
   { label: 'Seção', content: '\n\n## Nova seção\n\n' },
   { label: 'Aviso', content: '\n\n:::warning\nEscreva o aviso aqui.\n:::\n\n' },
@@ -938,7 +1001,15 @@ const openCreateModal = () => {
   createMode.value = 'template'
   createFile.value = null
   createFileText.value = ''
-  setForm.value = { name: '', sourceSystem: '', targetSystem: '', description: '', template: 'complete', processId: '' }
+  setForm.value = {
+    name: '',
+    sourceSystem: '',
+    targetSystem: '',
+    description: '',
+    template: 'complete',
+    processId: '',
+    clientEditMode: 'all'
+  }
   modalError.value = ''
   createModalOpen.value = true
 }
@@ -994,6 +1065,12 @@ const createSet = async () => {
       description: setForm.value.description || null,
       contentMarkdown: contentMarkdown || null,
       processId: setForm.value.processId ? Number(setForm.value.processId) : null,
+      clientEditMode: setForm.value.clientEditMode,
+      clientCanAddEntries: false,
+      clientCanDeleteEntries: false,
+      clientInstructions: setForm.value.clientEditMode === 'none'
+        ? null
+        : 'Revise o documento e complete os campos indicados. Se houver dúvida, registre-a em Dúvidas e histórico.',
       entries: importedEntries,
       attachment
     })

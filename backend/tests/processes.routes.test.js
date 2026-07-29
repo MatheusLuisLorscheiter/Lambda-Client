@@ -8,6 +8,8 @@ const auditPath = require.resolve('../audit/logger');
 let capturedInsertParams = null;
 let capturedUpdateSql = null;
 let capturedUpdateParams = null;
+let capturedEffortAssessmentParams = null;
+let capturedEffortItemsParams = null;
 let currentItem = null;
 
 const query = async (sql, params = []) => {
@@ -47,6 +49,14 @@ const query = async (sql, params = []) => {
       updates: []
     };
     return { rowCount: 1, rows: [{ id: 42 }] };
+  }
+  if (sql.includes('INSERT INTO process_effort_assessments')) {
+    capturedEffortAssessmentParams = params;
+    return { rowCount: 1, rows: [{ id: 81 }] };
+  }
+  if (sql.includes('INSERT INTO process_effort_items')) {
+    capturedEffortItemsParams = params;
+    return { rowCount: 1, rows: [] };
   }
   if (sql.includes('INSERT INTO process_updates')) {
     currentItem.updates = [{ id: 1, message: params[2], createdAt: new Date().toISOString() }];
@@ -197,6 +207,69 @@ test('client creation cannot override workflow status or priority', async () => 
   assert.equal(capturedInsertParams[6], 'normal');
   assert.equal(capturedInsertParams[7], null);
   assert.equal(capturedInsertParams[9], 0);
+});
+
+test('client can include an optional effort baseline in the same process transaction', async () => {
+  capturedEffortAssessmentParams = null;
+  capturedEffortItemsParams = null;
+
+  const response = await invokePost(
+    { id: 21, role: 'client', companyId: 12 },
+    {
+      title: 'Automatizar conferência',
+      description: 'A equipe confere cada pedido manualmente.',
+      category: 'automation',
+      effort: {
+        label: 'Conferência atual',
+        measuredAt: '2026-07-28',
+        source: 'estimated',
+        items: [{
+          activityName: 'Conferir pedido',
+          executionTimeMinutes: 15,
+          executionsPerPeriod: 20,
+          periodUnit: 'day',
+          peopleCount: 2,
+          monthlyHoursPerEmployee: 176
+        }]
+      }
+    }
+  );
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(capturedEffortAssessmentParams[0], 42);
+  assert.equal(capturedEffortAssessmentParams[2], 'baseline');
+  assert.equal(capturedEffortAssessmentParams[6], 'draft');
+  assert.equal(capturedEffortItemsParams[1], 'Conferir pedido');
+  assert.equal(capturedEffortItemsParams[3], 15);
+  assert.equal(capturedEffortItemsParams[4], 20);
+  assert.equal(capturedEffortItemsParams[7], 2);
+});
+
+test('invalid optional effort is rejected before the process is created', async () => {
+  capturedInsertParams = null;
+  capturedEffortAssessmentParams = null;
+
+  const response = await invokePost(
+    { id: 21, role: 'client', companyId: 12 },
+    {
+      title: 'Automatizar conferência',
+      description: 'A equipe confere cada pedido manualmente.',
+      effort: {
+        items: [{
+          activityName: 'Conferir pedido',
+          executionTimeMinutes: 0,
+          executionsPerPeriod: 20,
+          periodUnit: 'day',
+          peopleCount: 2
+        }]
+      }
+    }
+  );
+
+  assert.equal(response.statusCode, 400);
+  assert.match(response.body.error, /Tempo de execução/);
+  assert.equal(capturedInsertParams, null);
+  assert.equal(capturedEffortAssessmentParams, null);
 });
 
 test('creation rejects a delivery date before the planned start', async () => {

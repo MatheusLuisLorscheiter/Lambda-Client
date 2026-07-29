@@ -3,6 +3,10 @@ const { authenticateToken } = require('./auth');
 const { pool, query } = require('../db');
 const { logAudit } = require('../audit/logger');
 const { subscribeToProcessEvents, publishProcessEvent } = require('../services/processEvents');
+const {
+  normalizeAssessment: normalizeEffortAssessment,
+  insertItems: insertEffortItems
+} = require('./process-effort.routes');
 
 const router = express.Router();
 
@@ -130,6 +134,11 @@ const selectFields = `
   process_items.custom_fields AS "customFields",
   process_items.client_can_comment AS "clientCanComment",
   process_items.client_can_manage_effort AS "clientCanManageEffort",
+  (
+    SELECT COUNT(*)::int
+      FROM process_effort_assessments effort_assessments
+     WHERE effort_assessments.process_id = process_items.id
+  ) AS "effortAssessmentCount",
   process_items.client_editable_fields AS "clientEditableFields",
   process_items.is_client_visible AS "isClientVisible",
   process_items.archived_at AS "archivedAt",
@@ -483,11 +492,26 @@ router.post('/', authenticateToken, async (req, res) => {
   let scope;
   let acceptanceCriteria;
   let tags;
+  let initialEffort = null;
   try {
     objective = normalizeText(req.body.objective, 3000);
     scope = normalizeText(req.body.scope, 5000);
     acceptanceCriteria = normalizeText(req.body.acceptanceCriteria, 5000);
     tags = normalizeTags(req.body.tags) || [];
+    if (req.body.effort !== undefined && req.body.effort !== null) {
+      if (typeof req.body.effort !== 'object' || Array.isArray(req.body.effort)) {
+        throw new Error('Esforço operacional inválido');
+      }
+      initialEffort = normalizeEffortAssessment({
+        stage: 'baseline',
+        label: req.body.effort.label || 'Operação atual',
+        measuredAt: req.body.effort.measuredAt || new Date().toISOString().slice(0, 10),
+        source: req.body.effort.source || 'estimated',
+        status: 'draft',
+        notes: req.body.effort.notes,
+        items: req.body.effort.items
+      });
+    }
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -683,6 +707,38 @@ router.post('/', authenticateToken, async (req, res) => {
         [processId, req.user.id, latestUpdate]
       );
     }
+    if (initialEffort) {
+      const assessmentResult = await client.query(
+        `INSERT INTO process_effort_assessments
+          (process_id, created_by, updated_by, stage, label, measured_at, source,
+           status, notes, confirmed_at)
+         VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, NULL)
+         RETURNING id`,
+        [
+          processId,
+          req.user.id,
+          initialEffort.stage,
+          initialEffort.label,
+          initialEffort.measuredAt,
+          initialEffort.source,
+          initialEffort.status,
+          initialEffort.notes
+        ]
+      );
+      const assessmentId = assessmentResult.rows[0].id;
+      await insertEffortItems(client, assessmentId, initialEffort.items);
+      await client.query(
+        `INSERT INTO process_updates
+          (process_id, author_user_id, kind, visibility, message, metadata)
+         VALUES ($1, $2, 'system', 'client', $3, $4)`,
+        [
+          processId,
+          req.user.id,
+          'Esforço operacional inicial informado junto com a solicitação.',
+          JSON.stringify({ assessmentId, stage: 'baseline', status: 'draft' })
+        ]
+      );
+    }
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -698,7 +754,7 @@ router.post('/', authenticateToken, async (req, res) => {
     action: 'process.create',
     resourceType: 'process',
     resourceId: String(item.id),
-    metadata: { title, category, status },
+    metadata: { title, category, status, initialEffort: Boolean(initialEffort) },
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
   });

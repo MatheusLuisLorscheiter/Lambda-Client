@@ -4,7 +4,7 @@
       <div>
         <h4 class="text-sm font-semibold text-slate-900">Esforço operacional</h4>
         <p class="mt-1 text-xs leading-5 text-slate-500">
-          Compare tempo e pessoas necessárias antes e depois da automação.
+          Veja quanto trabalho manual existe hoje e quanto foi liberado pela automação.
         </p>
       </div>
       <button
@@ -13,7 +13,7 @@
         class="shrink-0 rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800"
         @click="openCreate()"
       >
-        Nova medição
+        Registrar esforço
       </button>
     </div>
 
@@ -64,9 +64,9 @@
       </div>
 
       <div v-if="!assessments.length" class="rounded-lg border border-dashed border-slate-300 px-5 py-10 text-center">
-        <p class="text-sm font-medium text-slate-800">Registre como o processo funciona hoje</p>
+        <p class="text-sm font-medium text-slate-800">Quanto tempo esse processo consome hoje?</p>
         <p class="mx-auto mt-1 max-w-lg text-xs leading-5 text-slate-500">
-          Informe as atividades, o tempo por execução, a frequência e quantas pessoas participam. Esses dados formarão a linha de base da automação.
+          Para cada atividade, informe o tempo por vez, a frequência e quantas pessoas participam. O Lambda Pulse faz todas as contas.
         </p>
         <button
           v-if="permissions.canManage"
@@ -74,7 +74,7 @@
           class="mt-4 rounded-md bg-slate-950 px-4 py-2 text-xs font-medium text-white"
           @click="openCreate('baseline')"
         >
-          Criar linha de base
+          Informar esforço atual
         </button>
       </div>
 
@@ -162,50 +162,44 @@
     <Teleport to="body">
       <div v-if="editorOpen" class="fixed inset-0 z-[90] flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-slate-950/55" @click="closeEditor"></div>
-        <div class="relative flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+        <div class="relative flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
           <header class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
             <div>
               <h3 class="text-lg font-semibold text-slate-950">{{ editor.id ? 'Editar medição' : 'Nova medição de esforço' }}</h3>
-              <p class="mt-1 text-sm text-slate-500">Os cálculos são atualizados enquanto você preenche.</p>
+              <p class="mt-1 text-sm text-slate-500">Responda às perguntas abaixo. Os cálculos são automáticos.</p>
             </div>
             <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Fechar" @click="closeEditor">✕</button>
           </header>
 
           <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Momento</label>
-                <select v-model="editor.stage" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm" @change="applyDefaultLabel">
-                  <option value="baseline">Antes da automação</option>
-                  <option value="post_automation">Após a automação</option>
-                </select>
-              </div>
-              <div class="sm:col-span-2">
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Nome da medição</label>
-                <input v-model="editor.label" maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" placeholder="Ex.: Operação atual do financeiro">
-              </div>
-              <div>
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Data</label>
-                <input v-model="editor.measuredAt" type="date" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
-              </div>
-              <div>
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Origem dos dados</label>
-                <select v-model="editor.source" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
-                  <option value="estimated">Estimativa da equipe</option>
-                  <option value="observed">Tempo observado</option>
-                  <option value="system">Extraído de sistema</option>
-                </select>
-              </div>
-              <div class="sm:col-span-2 lg:col-span-3">
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">Observações gerais <span class="font-normal text-slate-400">(opcional)</span></label>
-                <input v-model="editor.notes" maxlength="5000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" placeholder="Premissas, período analisado ou fonte da informação">
+            <div>
+              <p class="text-sm font-semibold text-slate-900">1. Quando este esforço acontece?</p>
+              <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  class="rounded-md border px-4 py-3 text-left"
+                  :class="editor.stage === 'baseline' ? 'border-slate-950 bg-slate-50' : 'border-slate-200 hover:border-slate-300'"
+                  @click="setEditorStage('baseline')"
+                >
+                  <span class="block text-sm font-medium text-slate-900">Antes da automação</span>
+                  <span class="mt-0.5 block text-xs text-slate-500">O trabalho manual realizado hoje.</span>
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md border px-4 py-3 text-left"
+                  :class="editor.stage === 'post_automation' ? 'border-slate-950 bg-slate-50' : 'border-slate-200 hover:border-slate-300'"
+                  @click="setEditorStage('post_automation')"
+                >
+                  <span class="block text-sm font-medium text-slate-900">Depois da automação</span>
+                  <span class="mt-0.5 block text-xs text-slate-500">O esforço que permaneceu após a entrega.</span>
+                </button>
               </div>
             </div>
 
             <div class="mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-5">
               <div>
-                <h4 class="text-sm font-semibold text-slate-900">Atividades e funções</h4>
-                <p class="mt-0.5 text-xs text-slate-500">Separe as etapas quando houver tempos, frequências ou equipes diferentes.</p>
+                <h4 class="text-sm font-semibold text-slate-900">2. Quais atividades consomem tempo da equipe?</h4>
+                <p class="mt-0.5 text-xs text-slate-500">Crie uma atividade para cada rotina com tempo ou frequência diferente.</p>
               </div>
               <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700" @click="addItem">
                 Adicionar atividade
@@ -218,29 +212,22 @@
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Atividade {{ index + 1 }}</p>
                   <button v-if="editor.items.length > 1" type="button" class="text-xs font-medium text-red-600" @click="removeItem(index)">Remover</button>
                 </div>
-                <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-                  <div class="sm:col-span-2 lg:col-span-3">
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Atividade ou etapa</label>
-                    <input v-model="item.activityName" maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Ex.: Conferir e lançar pedidos">
-                  </div>
-                  <div class="sm:col-span-2 lg:col-span-3">
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Função responsável <span class="font-normal text-slate-400">(opcional)</span></label>
-                    <input v-model="item.roleName" maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Ex.: Assistente financeiro">
+                <div class="mt-3">
+                  <label class="mb-1 block text-xs font-medium text-slate-600">O que é feito?</label>
+                  <input v-model="item.activityName" maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" placeholder="Ex.: Conferir e lançar pedidos">
+                </div>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Quantos minutos por vez?</label>
+                    <input v-model.number="item.executionTimeMinutes" type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
                   </div>
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Tempo por execução</label>
-                    <div class="flex">
-                      <input v-model.number="item.executionTimeMinutes" type="number" min="0.01" step="0.01" class="min-w-0 flex-1 rounded-l-md border border-slate-300 px-3 py-2 text-sm">
-                      <span class="flex items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-50 px-2 text-xs text-slate-500">min</span>
-                    </div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Quantas vezes?</label>
+                    <input v-model.number="item.executionsPerPeriod" type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
                   </div>
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Execuções</label>
-                    <input v-model.number="item.executionsPerPeriod" type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  </div>
-                  <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Por período</label>
-                    <select v-model="item.periodUnit" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Em cada</label>
+                    <select v-model="item.periodUnit" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
                       <option value="day">Dia útil</option>
                       <option value="week">Semana</option>
                       <option value="month">Mês</option>
@@ -248,50 +235,81 @@
                       <option value="year">Ano</option>
                     </select>
                   </div>
-                  <div v-if="item.periodUnit === 'day'">
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Dias de operação / mês</label>
-                    <input v-model.number="item.workingDaysPerMonth" type="number" min="1" max="31" step="0.5" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  </div>
                   <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Pessoas envolvidas</label>
-                    <input v-model.number="item.peopleCount" type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  </div>
-                  <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Capacidade / pessoa</label>
-                    <div class="flex">
-                      <input v-model.number="item.monthlyHoursPerEmployee" type="number" min="1" max="744" step="1" class="min-w-0 flex-1 rounded-l-md border border-slate-300 px-3 py-2 text-sm">
-                      <span class="flex items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-50 px-2 text-xs text-slate-500">h/mês</span>
-                    </div>
-                  </div>
-                  <div class="rounded-md bg-slate-50 px-3 py-2 lg:self-end">
-                    <p class="text-[11px] text-slate-400">Esforço calculado</p>
-                    <p class="mt-0.5 text-sm font-semibold text-slate-800">{{ formatHours(itemWorkHours(item)) }}</p>
-                  </div>
-                  <div class="sm:col-span-2 lg:col-span-6">
-                    <label class="mb-1 block text-xs font-medium text-slate-600">Observações <span class="font-normal text-slate-400">(opcional)</span></label>
-                    <input v-model="item.notes" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Inclua variações, exceções ou premissas desta atividade">
+                    <label class="mb-1 block text-xs font-medium text-slate-600">Quantas pessoas?</label>
+                    <input v-model.number="item.peopleCount" type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
                   </div>
                 </div>
+                <div class="mt-3 flex flex-col gap-2 rounded-md bg-slate-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p class="text-xs text-slate-500">Esta atividade representa aproximadamente</p>
+                  <p class="text-sm font-semibold text-slate-900">{{ formatHours(itemWorkHours(item)) }} de trabalho por mês</p>
+                </div>
+                <details class="mt-3 rounded-md border border-slate-200">
+                  <summary class="cursor-pointer px-3 py-2.5 text-xs font-medium text-slate-600">Detalhes opcionais</summary>
+                  <div class="grid gap-3 border-t border-slate-200 p-3 sm:grid-cols-2">
+                    <div>
+                      <label class="mb-1 block text-xs font-medium text-slate-600">Quem realiza?</label>
+                      <input v-model="item.roleName" maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Ex.: Assistente financeiro">
+                    </div>
+                    <div v-if="item.periodUnit === 'day'">
+                      <label class="mb-1 block text-xs font-medium text-slate-600">Dias de operação por mês</label>
+                      <input v-model.number="item.workingDaysPerMonth" type="number" min="1" max="31" step="0.5" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-xs font-medium text-slate-600">Horas disponíveis por pessoa/mês</label>
+                      <input v-model.number="item.monthlyHoursPerEmployee" type="number" min="1" max="744" step="1" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                    </div>
+                    <div class="sm:col-span-2">
+                      <label class="mb-1 block text-xs font-medium text-slate-600">Observações</label>
+                      <input v-model="item.notes" maxlength="2000" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Variações, exceções ou premissas">
+                    </div>
+                  </div>
+                </details>
               </article>
             </div>
 
-            <div class="mt-4 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-3">
+            <div class="mt-5 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-3">
               <div class="bg-slate-50 px-4 py-3"><p class="text-xs text-slate-500">Horas de trabalho / mês</p><p class="mt-1 text-lg font-semibold text-slate-900">{{ formatHours(editorTotals.workHoursPerMonth) }}</p></div>
               <div class="bg-slate-50 px-4 py-3"><p class="text-xs text-slate-500">Pessoas equivalentes</p><p class="mt-1 text-lg font-semibold text-slate-900">{{ formatFte(editorTotals.fteEquivalent) }}</p></div>
               <div class="bg-slate-50 px-4 py-3"><p class="text-xs text-slate-500">Atividades mapeadas</p><p class="mt-1 text-lg font-semibold text-slate-900">{{ editor.items.length }}</p></div>
             </div>
+            <details class="mt-4 rounded-md border border-slate-200">
+              <summary class="cursor-pointer px-4 py-3 text-xs font-medium text-slate-600">Identificação e fonte da medição</summary>
+              <div class="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-2">
+                <div>
+                  <label class="mb-1.5 block text-xs font-medium text-slate-600">Nome da medição</label>
+                  <input v-model="editor.label" maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
+                </div>
+                <div>
+                  <label class="mb-1.5 block text-xs font-medium text-slate-600">Data</label>
+                  <input v-model="editor.measuredAt" type="date" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
+                </div>
+                <div>
+                  <label class="mb-1.5 block text-xs font-medium text-slate-600">Origem dos dados</label>
+                  <select v-model="editor.source" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                    <option value="estimated">Estimativa da equipe</option>
+                    <option value="observed">Tempo observado</option>
+                    <option value="system">Extraído de sistema</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1.5 block text-xs font-medium text-slate-600">Observações gerais</label>
+                  <input v-model="editor.notes" maxlength="5000" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
+                </div>
+              </div>
+            </details>
             <p v-if="editorError" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ editorError }}</p>
           </div>
 
           <footer class="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p class="text-xs leading-5 text-slate-400">Ao confirmar, a medição fica bloqueada para preservar o histórico.</p>
+            <p class="text-xs leading-5 text-slate-400">Concluir bloqueia esta medição e preserva o histórico. Um rascunho pode ser editado depois.</p>
             <div class="flex justify-end gap-2">
               <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" @click="closeEditor">Cancelar</button>
               <button :disabled="saving" type="button" class="rounded-md border border-slate-900 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50" @click="saveAssessment('draft')">
-                {{ saving ? 'Salvando…' : 'Salvar rascunho' }}
+                {{ saving ? 'Salvando…' : 'Salvar e continuar depois' }}
               </button>
               <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="saveAssessment('confirmed')">
-                Confirmar medição
+                Concluir medição
               </button>
             </div>
           </footer>
@@ -505,6 +523,10 @@ const applyDefaultLabel = () => {
       ? 'Linha de base operacional'
       : 'Medição após a automação'
   }
+}
+const setEditorStage = (stage: ProcessEffortStage) => {
+  editor.value.stage = stage
+  applyDefaultLabel()
 }
 const addItem = () => {
   if (editor.value.items.length < 50) editor.value.items.push(newItem())

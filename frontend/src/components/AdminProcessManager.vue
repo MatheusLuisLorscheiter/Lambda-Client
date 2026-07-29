@@ -518,7 +518,7 @@ const selectedEditorProcess = computed(() => editor.value.id ? processes.value.f
 const editorTabs = computed(() => [
   { value: 'context' as const, label: 'Contexto', count: null },
   { value: 'planning' as const, label: 'Planejamento', count: null },
-  { value: 'effort' as const, label: 'Tempo e equipe', count: null },
+  { value: 'effort' as const, label: 'Esforço operacional', count: selectedEditorProcess.value?.effortAssessmentCount || null },
   { value: 'execution' as const, label: 'Execução', count: editor.value.checklist.length + editor.value.deliveries.length },
   { value: 'activity' as const, label: 'Atividade', count: editor.value.updates.length }
 ])

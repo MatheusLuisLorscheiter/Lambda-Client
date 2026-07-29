@@ -1,7 +1,7 @@
 <template>
   <section>
     <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-end lg:justify-between">
-      <div class="grid min-w-0 flex-1 gap-3 sm:grid-cols-[minmax(0,1fr)_180px_180px]">
+      <div class="grid min-w-0 flex-1 gap-3" :class="auth.isAdmin ? 'sm:grid-cols-[minmax(0,1fr)_180px_180px]' : 'sm:grid-cols-1'">
         <label>
           <span class="mb-1 block text-xs font-medium text-slate-500">Buscar no histórico</span>
           <input
@@ -12,7 +12,7 @@
             @input="scheduleLoad"
           >
         </label>
-        <label>
+        <label v-if="auth.isAdmin">
           <span class="mb-1 block text-xs font-medium text-slate-500">Responsável</span>
           <select v-model="actorRole" class="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" @change="resetAndLoad">
             <option value="">Todas as pessoas</option>
@@ -21,7 +21,7 @@
             <option value="system">Sistema</option>
           </select>
         </label>
-        <label>
+        <label v-if="auth.isAdmin">
           <span class="mb-1 block text-xs font-medium text-slate-500">Tipo de item</span>
           <select v-model="entityType" class="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" @change="resetAndLoad">
             <option value="">Todos os itens</option>
@@ -47,13 +47,13 @@
       class="mt-4 flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
     >
       <p>
-        <span class="font-semibold">Há alterações do cliente aguardando revisão.</span>
+        <span class="font-semibold">{{ auth.isAdmin ? 'Há alterações do cliente aguardando revisão.' : 'Suas alterações foram enviadas à equipe técnica.' }}</span>
         <span v-if="mappingSet.lastClientEditedAt"> Última edição em {{ formatDateTime(mappingSet.lastClientEditedAt) }}.</span>
       </p>
-      <span v-if="!auth.isAdmin" class="shrink-0 text-xs font-medium">A equipe foi notificada pelo histórico.</span>
+      <span v-if="!auth.isAdmin" class="shrink-0 text-xs font-medium">Você pode continuar complementando as informações.</span>
     </div>
     <div
-      v-else-if="mappingSet.lastReviewedAt"
+      v-else-if="auth.isAdmin && mappingSet.lastReviewedAt"
       class="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
     >
       Alterações revisadas em {{ formatDateTime(mappingSet.lastReviewedAt) }}
@@ -61,17 +61,17 @@
     </div>
 
     <form class="mt-5 rounded-lg border border-slate-200 bg-white p-4" @submit.prevent="submitComment">
-      <label class="text-sm font-medium text-slate-800">Registrar comentário ou decisão</label>
+      <label class="text-sm font-medium text-slate-800">{{ auth.isAdmin ? 'Registrar comentário ou decisão' : 'Enviar dúvida ou observação' }}</label>
       <textarea
         v-model="comment"
         required
         maxlength="2000"
         rows="2"
-        placeholder="Ex.: Validamos este campo com o financeiro; usar o código A28."
+        :placeholder="auth.isAdmin ? 'Ex.: Validamos este campo com o financeiro; usar o código A28.' : 'Ex.: usamos o código A28 neste cenário. Está correto?'"
         class="mt-2 w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
       ></textarea>
       <div class="mt-2 flex items-center justify-between gap-3">
-        <p class="text-xs text-slate-500">O comentário ficará visível para cliente e equipe técnica.</p>
+        <p class="text-xs text-slate-500">{{ auth.isAdmin ? 'O comentário ficará visível para cliente e equipe técnica.' : 'A mensagem ficará registrada e visível para sua equipe e para a Chave Mestra.' }}</p>
         <button
           :disabled="submitting || !comment.trim()"
           class="shrink-0 rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 disabled:opacity-50"
@@ -108,7 +108,7 @@
             <div class="min-w-0">
               <p class="text-sm font-medium leading-5 text-slate-900">{{ change.summary }}</p>
               <p class="mt-1 text-xs text-slate-500">
-                {{ actorLabel(change) }} · {{ formatDateTime(change.createdAt) }} · revisão {{ change.mappingRevision }}
+                {{ actorLabel(change) }} · {{ formatDateTime(change.createdAt) }}<template v-if="auth.isAdmin"> · revisão {{ change.mappingRevision }}</template>
               </p>
             </div>
             <span class="w-fit shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
@@ -153,7 +153,7 @@
       </div>
     </div>
 
-    <div v-if="reviewModalOpen" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div v-if="reviewModalOpen && auth.isAdmin" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
       <div class="absolute inset-0 bg-slate-950/55" @click="reviewModalOpen = false"></div>
       <form class="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="markReviewed">
         <h3 class="text-lg font-semibold text-slate-950">Concluir revisão</h3>
@@ -313,7 +313,7 @@ const formatDateTime = (value: string) => new Intl.DateTimeFormat('pt-BR', {
 }).format(new Date(value))
 const actorLabel = (change: MappingChange) => {
   if (change.actorEmail) return change.actorEmail
-  if (change.actorRole === 'client') return 'Cliente'
+  if (change.actorRole === 'client') return auth.isAdmin ? 'Cliente' : 'Sua equipe'
   if (change.actorRole === 'admin') return 'Equipe técnica'
   return 'Sistema'
 }

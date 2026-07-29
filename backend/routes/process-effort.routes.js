@@ -576,3 +576,4 @@ router.delete('/:processId/effort/:assessmentId', authenticateToken, async (req,
 module.exports = router;
 module.exports.buildComparison = buildComparison;
 module.exports.normalizeAssessment = normalizeAssessment;
+module.exports.insertItems = insertItems;

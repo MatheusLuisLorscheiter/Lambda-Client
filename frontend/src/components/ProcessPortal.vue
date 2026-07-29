@@ -172,7 +172,7 @@
     <transition name="fade">
       <div v-if="requestModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-slate-950/55" @click="closeRequestModal"></div>
-        <div class="relative w-full max-w-xl rounded-lg border border-slate-200 bg-white shadow-xl">
+        <div class="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
           <div class="border-b border-slate-200 px-6 py-5">
             <h3 class="text-lg font-semibold text-slate-950">Nova solicitação</h3>
             <p class="mt-1 text-sm text-slate-500">Conte qual gargalo ou melhoria você quer resolver.</p>
@@ -205,6 +205,74 @@
               <textarea v-model="requestForm.acceptanceCriteria" rows="3" maxlength="5000" placeholder="Ex.: não duplicar pedidos; processar em até 5 minutos; preservar o código externo." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500"></textarea>
               <p class="mt-1 text-xs text-slate-400">Após o envio, a análise de viabilidade ocorre em até 48h úteis.</p>
             </div>
+            <section class="rounded-lg border border-slate-200">
+              <label class="flex cursor-pointer items-start gap-3 px-4 py-4">
+                <input v-model="requestEffortEnabled" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300">
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-800">Informar tempo e equipe envolvidos</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-slate-500">
+                    Opcional. Ajuda a estimar o impacto e comparar o antes e depois da automação.
+                  </span>
+                </span>
+              </label>
+
+              <div v-if="requestEffortEnabled" class="border-t border-slate-200 px-4 py-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-slate-900">Como o trabalho acontece hoje?</p>
+                    <p class="mt-0.5 text-xs text-slate-500">Informe apenas o que sua equipe já sabe. Os cálculos são automáticos.</p>
+                  </div>
+                  <button type="button" class="shrink-0 rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="addRequestEffortItem">
+                    Adicionar atividade
+                  </button>
+                </div>
+
+                <div class="mt-4 space-y-3">
+                  <article v-for="(item, index) in requestEffortItems" :key="item.localId" class="rounded-md border border-slate-200 p-4">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Atividade {{ index + 1 }}</p>
+                      <button v-if="requestEffortItems.length > 1" type="button" class="text-xs font-medium text-red-600 hover:text-red-700" @click="removeRequestEffortItem(index)">Remover</button>
+                    </div>
+                    <div class="mt-3">
+                      <label class="mb-1 block text-xs font-medium text-slate-600">O que é feito manualmente?</label>
+                      <input v-model="item.activityName" required maxlength="160" placeholder="Ex.: Conferir e lançar cada pedido" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900">
+                    </div>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <label>
+                        <span class="mb-1 block text-xs font-medium text-slate-600">Minutos por vez</span>
+                        <input v-model.number="item.executionTimeMinutes" required type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
+                      </label>
+                      <label>
+                        <span class="mb-1 block text-xs font-medium text-slate-600">Quantas vezes</span>
+                        <input v-model.number="item.executionsPerPeriod" required type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
+                      </label>
+                      <label>
+                        <span class="mb-1 block text-xs font-medium text-slate-600">Em cada</span>
+                        <select v-model="item.periodUnit" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                          <option value="day">Dia útil</option>
+                          <option value="week">Semana</option>
+                          <option value="month">Mês</option>
+                          <option value="quarter">Trimestre</option>
+                          <option value="year">Ano</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span class="mb-1 block text-xs font-medium text-slate-600">Pessoas envolvidas</span>
+                        <input v-model.number="item.peopleCount" required type="number" min="0.01" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm">
+                      </label>
+                    </div>
+                    <p class="mt-3 text-xs text-slate-500">
+                      Estimativa: <span class="font-semibold text-slate-800">{{ formatHours(requestEffortItemHours(item)) }} de trabalho por mês</span>
+                    </p>
+                  </article>
+                </div>
+
+                <div class="mt-3 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-3">
+                  <span class="text-xs text-slate-500">Esforço operacional estimado hoje</span>
+                  <span class="text-sm font-semibold text-slate-900">{{ formatHours(requestEffortMonthlyHours) }} / mês</span>
+                </div>
+              </div>
+            </section>
             <p v-if="requestError" class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ requestError }}</p>
             <div class="flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="closeRequestModal">Cancelar</button>
@@ -477,7 +545,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { formatCalendarDate, formatInstant } from '@/utils/dates'
-import type { ProcessClientField, ProcessItem, ProcessStatus } from '@/types'
+import type { ProcessClientField, ProcessEffortPeriodUnit, ProcessItem, ProcessStatus } from '@/types'
 import ProcessEffortPanel from '@/components/ProcessEffortPanel.vue'
 
 defineProps<{ mode: 'overview' | 'queue' }>()
@@ -497,6 +565,25 @@ const requestError = ref('')
 const successMessage = ref('')
 const loadError = ref('')
 const requestForm = ref({ title: '', category: 'automation', description: '', objective: '', acceptanceCriteria: '' })
+type RequestEffortItem = {
+  localId: number
+  activityName: string
+  executionTimeMinutes: number
+  executionsPerPeriod: number
+  periodUnit: ProcessEffortPeriodUnit
+  peopleCount: number
+}
+let nextRequestEffortItemId = 0
+const newRequestEffortItem = (): RequestEffortItem => ({
+  localId: ++nextRequestEffortItemId,
+  activityName: '',
+  executionTimeMinutes: 10,
+  executionsPerPeriod: 1,
+  periodUnit: 'day',
+  peopleCount: 1
+})
+const requestEffortEnabled = ref(false)
+const requestEffortItems = ref<RequestEffortItem[]>([newRequestEffortItem()])
 const commentMessage = ref('')
 const commentSubmitting = ref(false)
 const commentError = ref('')
@@ -534,7 +621,7 @@ const queueFilters = computed(() => [
 ])
 const detailTabs = computed(() => [
   { value: 'overview' as const, label: 'Visão geral', count: 0 },
-  { value: 'effort' as const, label: 'Tempo e equipe', count: 0 },
+  { value: 'effort' as const, label: 'Esforço operacional', count: selectedProcess.value?.effortAssessmentCount || 0 },
   { value: 'plan' as const, label: 'Plano', count: selectedProcess.value?.checklist?.length || 0 },
   { value: 'deliveries' as const, label: 'Entregas', count: selectedProcess.value?.deliveries?.length || 0 },
   { value: 'activity' as const, label: 'Atividade', count: selectedProcess.value ? processUpdates(selectedProcess.value).length : 0 }
@@ -615,6 +702,31 @@ const deliveryLabel = (item: ProcessItem) => {
   return item.status === 'requested' || item.status === 'analysis' ? 'Após análise' : 'A definir'
 }
 const canEditProcessField = (field: ProcessClientField) => Boolean(selectedProcess.value?.clientEditableFields?.includes(field))
+const requestEffortFactors: Record<ProcessEffortPeriodUnit, number> = {
+  day: 22,
+  week: 52 / 12,
+  month: 1,
+  quarter: 1 / 3,
+  year: 1 / 12
+}
+const requestEffortItemHours = (item: RequestEffortItem) =>
+  ((Number(item.executionTimeMinutes) || 0) *
+    (Number(item.executionsPerPeriod) || 0) *
+    requestEffortFactors[item.periodUnit] *
+    (Number(item.peopleCount) || 0)) / 60
+const requestEffortMonthlyHours = computed(() =>
+  requestEffortItems.value.reduce((total, item) => total + requestEffortItemHours(item), 0)
+)
+const localToday = () => {
+  const now = new Date()
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+}
+const formatHours = (value: number) =>
+  `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(value)} h`
+const addRequestEffortItem = () => {
+  if (requestEffortItems.value.length < 10) requestEffortItems.value.push(newRequestEffortItem())
+}
+const removeRequestEffortItem = (index: number) => requestEffortItems.value.splice(index, 1)
 
 const fetchProcesses = async (silent = false) => {
   if (!silent) loading.value = true
@@ -694,9 +806,29 @@ const submitRequest = async () => {
   submitting.value = true
   requestError.value = ''
   try {
-    const data = await api.post<{ process: ProcessItem }>('/processes', { ...requestForm.value })
+    const effort = requestEffortEnabled.value
+      ? {
+          label: 'Operação atual informada na solicitação',
+          measuredAt: localToday(),
+          source: 'estimated',
+          items: requestEffortItems.value.map(item => ({
+            activityName: item.activityName.trim(),
+            roleName: null,
+            executionTimeMinutes: Number(item.executionTimeMinutes),
+            executionsPerPeriod: Number(item.executionsPerPeriod),
+            periodUnit: item.periodUnit,
+            workingDaysPerMonth: 22,
+            peopleCount: Number(item.peopleCount),
+            monthlyHoursPerEmployee: 176,
+            notes: null
+          }))
+        }
+      : undefined
+    const data = await api.post<{ process: ProcessItem }>('/processes', { ...requestForm.value, effort })
     processes.value.unshift(data.process)
     requestForm.value = { title: '', category: 'automation', description: '', objective: '', acceptanceCriteria: '' }
+    requestEffortEnabled.value = false
+    requestEffortItems.value = [newRequestEffortItem()]
     closeRequestModal()
     successMessage.value = 'Solicitação enviada para análise'
     setTimeout(() => { successMessage.value = '' }, 3500)

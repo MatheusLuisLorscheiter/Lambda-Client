@@ -4,10 +4,10 @@ Este documento descreve o contrato funcional e técnico do workspace de mapeamen
 
 ## Objetivo
 
-O módulo mantém o de-para de uma integração como fonte da verdade compartilhada entre a equipe técnica e o cliente. Cada mapa pode reunir:
+O módulo mantém o de-para de uma integração como fonte da verdade compartilhada entre a equipe técnica e o cliente. Cada mapa pode reunir, dentro de uma única experiência centrada no documento:
 
 - documento livre em Markdown;
-- vínculos estruturados, pesquisáveis e exportáveis;
+- vínculos estruturados, pesquisáveis e exportáveis, exibidos dentro da área Documento;
 - regras, exemplos, obrigatoriedade, fallback e situação por vínculo;
 - arquivos originais e materiais de referência;
 - permissões de edição globais ou por campo;
@@ -29,8 +29,8 @@ Na primeira migração para o novo contrato, valores antigos de `version` são p
 1. O administrador cria um mapa por modelo ou importação.
 2. A importação cria documento, vínculos e anexo em uma única transação.
 3. A equipe ajusta os vínculos e configura permissões e política de publicação.
-4. A aba Revisão apresenta cobertura, pendências e duplicidades.
-5. A publicação disponibiliza a versão ao cliente.
+4. A seção administrativa Revisão apresenta cobertura, pendências e duplicidades.
+5. A publicação disponibiliza ao cliente Documento, Dúvidas e histórico e Arquivos; Revisão nunca aparece no portal.
 6. Alterações liberadas ao cliente incrementam a revisão e ficam marcadas como aguardando revisão.
 7. O administrador confere a linha do tempo, pode restaurar uma alteração e conclui a revisão.
 8. Mudanças administrativas em conteúdo publicado são feitas em uma nova versão.
