@@ -69,9 +69,6 @@
             <button v-if="auth.isAdmin && selectedSet.status !== 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="cloneSet">
               Criar nova versão
             </button>
-            <button v-if="canEditDocument" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="openDocumentEditor">
-              {{ auth.isAdmin ? 'Editar documento' : 'Preencher documento' }}
-            </button>
             <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
               Publicar para o cliente
             </button>
@@ -136,7 +133,40 @@
         <div v-else-if="selectedSet.status === 'published' && selectedSet.clientEditMode !== 'none'" class="mb-5 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           {{ selectedSet.clientEditMode === 'all' ? 'Este de-para está aberto para preenchimento completo pelo cliente.' : 'Somente os campos marcados pela equipe podem ser preenchidos pelo cliente.' }}
         </div>
-        <div v-if="selectedSet.contentMarkdown" class="mapping-document rounded-lg border border-slate-200 bg-white px-5 py-6 sm:px-8 sm:py-8" v-html="renderedDocument"></div>
+        <div v-if="selectedSet.contentMarkdown" class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div class="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-slate-900">Documento de-para</p>
+              <p class="mt-0.5 text-xs text-slate-500">
+                <template v-if="inlineDocumentEditing">Preencha os campos diretamente abaixo. O restante do documento permanece protegido.</template>
+                <template v-else-if="documentFields.length">{{ documentFields.length }} campo{{ documentFields.length === 1 ? '' : 's' }} interativo{{ documentFields.length === 1 ? '' : 's' }} configurado{{ documentFields.length === 1 ? '' : 's' }}.</template>
+                <template v-else>Conteúdo pronto para leitura e conferência.</template>
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <template v-if="inlineDocumentEditing">
+                <button type="button" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700" @click="closeInlineDocumentEditor">Cancelar</button>
+                <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50" @click="saveDocument">
+                  {{ saving ? 'Salvando…' : 'Salvar preenchimento' }}
+                </button>
+              </template>
+              <button v-else-if="canEditDocument" type="button" class="rounded-md bg-slate-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800" @click="openDocumentEditor">
+                {{ auth.isAdmin ? 'Editar documento' : 'Preencher documento' }}
+              </button>
+            </div>
+          </div>
+          <div
+            class="mapping-document px-5 py-6 sm:px-8 sm:py-8"
+            :class="inlineDocumentEditing ? 'mapping-document--editing bg-indigo-50/20' : ''"
+            @input="captureDocumentFieldValue"
+            @change="captureDocumentFieldValue"
+            v-html="renderedDocument"
+          ></div>
+          <p v-if="inlineDocumentEditing && !documentFields.length" class="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            A equipe ainda não marcou campos interativos neste documento.
+          </p>
+          <p v-if="inlineDocumentEditing && modalError" class="border-t border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ modalError }}</p>
+        </div>
         <div v-else class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
           <h4 class="font-semibold text-slate-900">O documento ainda está vazio</h4>
           <p class="mx-auto mt-1 max-w-lg text-sm leading-6 text-slate-500">Registre tabelas, perguntas, decisões, regras e pré-requisitos com total liberdade usando Markdown.</p>
@@ -459,6 +489,25 @@
           <button v-for="snippet in editorSnippets" :key="snippet.label" type="button" class="rounded px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900" @click="insertSnippet(snippet.content)">
             {{ snippet.label }}
           </button>
+          <span class="mx-1 hidden w-px bg-slate-200 sm:block"></span>
+          <button type="button" class="rounded bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100" @click="openDocumentFieldModal('text')">
+            Marcar como campo editável
+          </button>
+          <button type="button" class="rounded bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100" @click="openDocumentFieldModal('select')">
+            Marcar como seleção
+          </button>
+        </div>
+        <div v-if="auth.isAdmin && editorDocumentFields.length" class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
+          <span class="text-xs font-medium text-slate-500">Campos liberados ao cliente:</span>
+          <button
+            v-for="field in editorDocumentFields"
+            :key="`${field.id}-${field.start}`"
+            type="button"
+            class="rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
+            @click="openDocumentFieldModal(field.type, field)"
+          >
+            {{ field.label }} · {{ documentFieldTypeLabel(field.type) }}
+          </button>
         </div>
         <div class="grid min-h-0 flex-1 lg:grid-cols-2">
           <div class="flex min-h-0 flex-col border-r border-slate-200">
@@ -475,11 +524,57 @@
       </aside>
     </div>
 
-    <div v-if="metadataModalOpen && selectedSet" class="fixed inset-0 z-[75] flex items-center justify-center p-4">
+    <div v-if="documentFieldModalOpen" class="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto p-3 sm:p-6">
+      <div class="absolute inset-0 bg-slate-950/55" @click="documentFieldModalOpen = false"></div>
+      <form class="relative my-auto w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-xl" @submit.prevent="saveDocumentField">
+        <h3 class="text-base font-semibold text-slate-950">{{ documentFieldSelection.existing ? 'Configurar campo editável' : 'Marcar campo para o cliente' }}</h3>
+        <p class="mt-1 text-xs leading-5 text-slate-500">O cliente preencherá este controle diretamente no documento pronto, sem acessar o Markdown.</p>
+        <div class="mt-4 space-y-3">
+          <label class="block">
+            <span class="mb-1 block text-xs font-medium text-slate-600">Tipo de campo</span>
+            <select v-model="documentFieldForm.type" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+              <option value="text">Texto curto</option>
+              <option value="textarea">Texto longo</option>
+              <option value="select">Lista de seleção</option>
+              <option value="date">Data</option>
+              <option value="number">Número</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-medium text-slate-600">Rótulo exibido</span>
+            <input v-model="documentFieldForm.label" required maxlength="120" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Ex.: Código usado pelo financeiro">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-medium text-slate-600">Valor inicial <span class="font-normal text-slate-400">(opcional)</span></span>
+            <textarea v-if="documentFieldForm.type === 'textarea'" v-model="documentFieldForm.value" rows="2" maxlength="5000" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm"></textarea>
+            <input v-else v-model="documentFieldForm.value" :type="documentFieldForm.type === 'date' ? 'date' : documentFieldForm.type === 'number' ? 'number' : 'text'" maxlength="5000" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+          </label>
+          <label v-if="documentFieldForm.type === 'select'" class="block">
+            <span class="mb-1 block text-xs font-medium text-slate-600">Opções <span class="font-normal text-slate-400">(uma por linha)</span></span>
+            <textarea v-model="documentFieldForm.optionsText" required rows="4" class="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Sim&#10;Não&#10;Não se aplica"></textarea>
+          </label>
+          <label class="flex items-start gap-2 text-sm text-slate-700">
+            <input v-model="documentFieldForm.required" type="checkbox" class="mt-0.5 rounded border-slate-300">
+            <span><span class="font-medium">Preenchimento obrigatório</span><span class="mt-0.5 block text-xs text-slate-500">O navegador sinalizará o campo antes do envio.</span></span>
+          </label>
+        </div>
+        <p v-if="documentFieldError" class="mt-3 text-sm text-red-700">{{ documentFieldError }}</p>
+        <div class="mt-5 flex flex-wrap justify-between gap-2">
+          <button v-if="documentFieldSelection.existing" type="button" class="rounded-md px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50" @click="removeDocumentField">Remover marcação</button>
+          <span v-else></span>
+          <div class="flex gap-2">
+            <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium" @click="documentFieldModalOpen = false">Cancelar</button>
+            <button class="rounded-md bg-slate-950 px-3 py-1.5 text-xs font-medium text-white">Aplicar</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div v-if="metadataModalOpen && selectedSet" class="fixed inset-0 z-[75] flex items-start justify-center overflow-y-auto p-3 sm:p-6">
       <div class="absolute inset-0 bg-slate-950/55" @click="metadataModalOpen = false"></div>
-      <form class="relative w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl" @submit.prevent="saveMetadata">
+      <form class="relative my-auto max-h-[calc(100vh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-xl sm:max-h-[calc(100vh-3rem)] sm:p-5" @submit.prevent="saveMetadata">
         <h3 class="text-lg font-semibold text-slate-950">Configurações do de-para</h3>
-        <div class="mt-5 space-y-4">
+        <div class="mt-4 space-y-3">
           <div><label class="mb-1.5 block text-sm font-medium">Nome</label><input v-model="metadataForm.name" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
           <div class="grid gap-4 sm:grid-cols-2">
             <div><label class="mb-1.5 block text-sm font-medium">Origem</label><input v-model="metadataForm.sourceSystem" required maxlength="160" class="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"></div>
@@ -533,7 +628,7 @@
           <div><label class="mb-1.5 block text-sm font-medium">Orientações ao cliente</label><textarea v-model="metadataForm.clientInstructions" rows="3" maxlength="5000" placeholder="Explique o que deve ser preenchido e como validar." class="w-full resize-none rounded-md border border-slate-300 px-3 py-2.5 text-sm"></textarea></div>
         </div>
         <p v-if="modalError" class="mt-3 text-sm text-red-700">{{ modalError }}</p>
-        <div class="mt-5 flex justify-end gap-2"><button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="metadataModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar' }}</button></div>
+        <div class="sticky bottom-0 -mx-4 -mb-4 mt-4 flex justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:-mx-5 sm:-mb-5 sm:px-5"><button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs" @click="metadataModalOpen = false">Cancelar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">{{ saving ? 'Salvando…' : 'Salvar configurações' }}</button></div>
       </form>
     </div>
 
@@ -663,13 +758,18 @@ import { useAuthStore } from '@/stores/auth'
 import MappingHistoryPanel from '@/components/MappingHistoryPanel.vue'
 import {
   blankMappingTemplate,
+  createMappingDocumentFieldToken,
   extractMappingEntries,
+  extractMappingDocumentFields,
   fileToBase64,
   inferMappingMetadata,
+  materializeMappingDocument,
   migrationMappingTemplate,
   readTextAttachment,
-  renderMappingMarkdown
+  renderMappingMarkdown,
+  updateMappingDocumentFieldValues
 } from '@/utils/mappingDocument'
+import type { LocatedMappingDocumentField, MappingDocumentFieldType } from '@/utils/mappingDocument'
 import type { MappingAttachment, MappingEntry, MappingEntryClientField, MappingSet } from '@/types'
 
 const props = defineProps<{
@@ -699,8 +799,21 @@ const createFile = ref<File | null>(null)
 const createFileText = ref('')
 const createFileInput = ref<HTMLInputElement | null>(null)
 const documentEditorOpen = ref(false)
+const inlineDocumentEditing = ref(false)
 const documentDraft = ref('')
 const documentTextarea = ref<HTMLTextAreaElement | null>(null)
+const documentFieldValues = ref<Record<string, string>>({})
+const documentFieldModalOpen = ref(false)
+const documentFieldError = ref('')
+const documentFieldSelection = ref({ start: 0, end: 0, existing: false })
+const documentFieldForm = ref({
+  id: '',
+  type: 'text' as MappingDocumentFieldType,
+  label: '',
+  value: '',
+  optionsText: '',
+  required: false
+})
 const metadataModalOpen = ref(false)
 const entryModalOpen = ref(false)
 const attachmentModalOpen = ref(false)
@@ -755,6 +868,8 @@ const emptyEntryForm = () => ({
 const entryForm = ref(emptyEntryForm())
 
 const selectedSet = computed(() => mappingSets.value.find(item => String(item.id) === selectedSetId.value) || null)
+const documentFields = computed(() => extractMappingDocumentFields(selectedSet.value?.contentMarkdown || ''))
+const editorDocumentFields = computed(() => extractMappingDocumentFields(documentDraft.value))
 const clientNextAction = computed(() => {
   if (!selectedSet.value || auth.isAdmin) return null
   if (selectedSet.value.clientEditMode === 'none') {
@@ -782,7 +897,7 @@ const clientNextAction = computed(() => {
 })
 const canEditDocument = computed(() => Boolean(selectedSet.value && (
   (auth.isAdmin && selectedSet.value.status === 'draft') ||
-  (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode === 'all')
+  (!auth.isAdmin && selectedSet.value.status === 'published' && selectedSet.value.clientEditMode !== 'none' && documentFields.value.length > 0)
 )))
 const canAddEntry = computed(() => Boolean(selectedSet.value && (
   (auth.isAdmin && selectedSet.value.status === 'draft') ||
@@ -835,7 +950,10 @@ const clientFieldOptions: Array<{ value: MappingEntryClientField; label: string 
   { value: 'notes', label: 'Observações' },
   { value: 'mappingStatus', label: 'Situação' }
 ]
-const renderedDocument = computed(() => renderMappingMarkdown(selectedSet.value?.contentMarkdown || ''))
+const renderedDocument = computed(() => renderMappingMarkdown(
+  inlineDocumentEditing.value ? documentDraft.value : selectedSet.value?.contentMarkdown || '',
+  { interactiveFields: inlineDocumentEditing.value }
+))
 const pendingCount = computed(() => selectedSet.value?.entries.filter(entry => ['pending', 'attention'].includes(entry.mappingStatus)).length || 0)
 const mappingQuality = computed(() => {
   const entries = selectedSet.value?.entries || []
@@ -1079,6 +1197,8 @@ const createSet = async () => {
     selectedSetId.value = String(data.mappingSetId)
     activeTab.value = 'document'
     showSuccess(createMode.value === 'import' ? 'De-para importado com sucesso' : 'De-para criado com sucesso')
+    await nextTick()
+    openDocumentEditor()
   } catch (error) {
     modalError.value = error instanceof Error ? error.message : 'Não foi possível criar o de-para'
   } finally {
@@ -1089,7 +1209,20 @@ const createSet = async () => {
 const openDocumentEditor = () => {
   documentDraft.value = selectedSet.value?.contentMarkdown || ''
   modalError.value = ''
-  documentEditorOpen.value = true
+  if (auth.isAdmin) {
+    documentEditorOpen.value = true
+    return
+  }
+  documentFieldValues.value = Object.fromEntries(
+    extractMappingDocumentFields(documentDraft.value).map(field => [field.id, field.value])
+  )
+  inlineDocumentEditing.value = true
+}
+const closeInlineDocumentEditor = () => {
+  inlineDocumentEditing.value = false
+  documentDraft.value = ''
+  documentFieldValues.value = {}
+  modalError.value = ''
 }
 const closeDocumentEditor = (force = false) => {
   if (!force && documentDraft.value !== (selectedSet.value?.contentMarkdown || '') &&
@@ -1097,6 +1230,7 @@ const closeDocumentEditor = (force = false) => {
     return
   }
   documentEditorOpen.value = false
+  documentFieldModalOpen.value = false
   modalError.value = ''
 }
 const insertSnippet = async (content: string) => {
@@ -1112,18 +1246,100 @@ const insertSnippet = async (content: string) => {
   textarea.focus()
   textarea.setSelectionRange(start + content.length, start + content.length)
 }
+const documentFieldTypeLabel = (type: MappingDocumentFieldType) => ({
+  text: 'texto curto',
+  textarea: 'texto longo',
+  select: 'seleção',
+  date: 'data',
+  number: 'número'
+}[type])
+const openDocumentFieldModal = (type: MappingDocumentFieldType, existing?: LocatedMappingDocumentField) => {
+  const textarea = documentTextarea.value
+  const start = existing?.start ?? textarea?.selectionStart ?? documentDraft.value.length
+  const end = existing?.end ?? textarea?.selectionEnd ?? start
+  const selectedText = documentDraft.value.slice(start, end).trim()
+  const suggestedText = /^\[[^\]]+]$/.test(selectedText) ? selectedText.slice(1, -1) : selectedText
+  documentFieldSelection.value = { start, end, existing: Boolean(existing) }
+  documentFieldForm.value = {
+    id: existing?.id || `campo-${Date.now().toString(36)}`,
+    type: existing?.type || type,
+    label: existing?.label || suggestedText.slice(0, 120) || 'Campo a preencher',
+    value: existing?.value || (selectedText && !/^\[[^\]]+]$/.test(selectedText) ? selectedText.slice(0, 5000) : ''),
+    optionsText: existing?.options.join('\n') || '',
+    required: existing?.required || false
+  }
+  documentFieldError.value = ''
+  documentFieldModalOpen.value = true
+}
+const saveDocumentField = async () => {
+  const form = documentFieldForm.value
+  const options = form.optionsText.split(/\r?\n/).map(option => option.trim()).filter(Boolean)
+  if (!form.label.trim()) {
+    documentFieldError.value = 'Informe o rótulo exibido ao cliente.'
+    return
+  }
+  if (form.type === 'select' && options.length < 2) {
+    documentFieldError.value = 'Inclua ao menos duas opções para a seleção.'
+    return
+  }
+  if (form.type === 'select' && form.value && !options.includes(form.value)) {
+    options.unshift(form.value)
+  }
+  const token = createMappingDocumentFieldToken({
+    id: form.id,
+    type: form.type,
+    label: form.label.trim(),
+    value: form.value,
+    options,
+    required: form.required
+  })
+  const { start, end } = documentFieldSelection.value
+  documentDraft.value = `${documentDraft.value.slice(0, start)}${token}${documentDraft.value.slice(end)}`
+  documentFieldModalOpen.value = false
+  await nextTick()
+  documentTextarea.value?.focus()
+  documentTextarea.value?.setSelectionRange(start + token.length, start + token.length)
+}
+const removeDocumentField = async () => {
+  const { start, end } = documentFieldSelection.value
+  const replacement = documentFieldForm.value.value || `[${documentFieldForm.value.label}]`
+  documentDraft.value = `${documentDraft.value.slice(0, start)}${replacement}${documentDraft.value.slice(end)}`
+  documentFieldModalOpen.value = false
+  await nextTick()
+  documentTextarea.value?.focus()
+}
+const captureDocumentFieldValue = (event: Event) => {
+  if (!inlineDocumentEditing.value) return
+  const target = event.target
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return
+  const fieldId = target.dataset.mappingFieldId
+  if (!fieldId) return
+  documentFieldValues.value[fieldId] = target.value
+}
 const saveDocument = async () => {
   if (!selectedSet.value) return
   saving.value = true
   modalError.value = ''
   try {
+    if (inlineDocumentEditing.value) {
+      const missingRequired = extractMappingDocumentFields(documentDraft.value)
+        .filter(field => field.required && !String(documentFieldValues.value[field.id] || '').trim())
+      if (missingRequired.length) {
+        modalError.value = `Preencha ${missingRequired.length === 1 ? 'o campo obrigatório' : 'os campos obrigatórios'}: ${missingRequired.map(field => field.label).join(', ')}.`
+        return
+      }
+    }
+    const contentMarkdown = inlineDocumentEditing.value
+      ? updateMappingDocumentFieldValues(documentDraft.value, documentFieldValues.value)
+      : documentDraft.value
     await api.patch(`/lambda/mappings/${selectedSet.value.id}`, {
-      contentMarkdown: documentDraft.value || null,
+      contentMarkdown: contentMarkdown || null,
       expectedRevision: selectedSet.value.revision
     })
-    closeDocumentEditor(true)
+    if (inlineDocumentEditing.value) closeInlineDocumentEditor()
+    else closeDocumentEditor(true)
     await fetchMappings()
-    showSuccess('Documento salvo')
+    showSuccess(auth.isAdmin ? 'Documento salvo' : 'Preenchimento salvo e enviado à equipe')
   } catch (error) {
     modalError.value = error instanceof Error ? error.message : 'Não foi possível salvar o documento'
   } finally {
@@ -1422,7 +1638,8 @@ const downloadText = (content: string, fileName: string, type: string) => {
 const safeFileName = (value: string) => value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 const exportMarkdown = () => {
   if (!selectedSet.value) return
-  downloadText(selectedSet.value.contentMarkdown || `# ${selectedSet.value.name}\n`, `de-para-${safeFileName(selectedSet.value.name)}.md`, 'text/markdown;charset=utf-8')
+  const content = materializeMappingDocument(selectedSet.value.contentMarkdown || `# ${selectedSet.value.name}\n`)
+  downloadText(content, `de-para-${safeFileName(selectedSet.value.name)}.md`, 'text/markdown;charset=utf-8')
 }
 const exportCsv = () => {
   if (!selectedSet.value) return
@@ -1452,6 +1669,8 @@ watch(() => props.initialMappingSetId, (mappingSetId) => {
   }
 })
 watch(selectedSetId, () => {
+  inlineDocumentEditing.value = false
+  documentFieldValues.value = {}
   activeTab.value = 'document'
   entrySearch.value = ''
   entryStatusFilter.value = ''
@@ -1466,7 +1685,7 @@ watch(entryPageCount, (count) => {
   if (entryPage.value > count) entryPage.value = count
 })
 const preventUnsavedDocumentClose = (event: BeforeUnloadEvent) => {
-  if (documentEditorOpen.value && documentDraft.value !== (selectedSet.value?.contentMarkdown || '')) {
+  if ((documentEditorOpen.value && documentDraft.value !== (selectedSet.value?.contentMarkdown || '')) || inlineDocumentEditing.value) {
     event.preventDefault()
   }
 }
@@ -1542,4 +1761,50 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', preventUnsavedD
 .mapping-document :deep(th) { border-bottom: 1px solid #e2e8f0; background: #f8fafc; padding: 0.65rem 0.75rem; color: #475569; font-size: 0.75rem; font-weight: 650; }
 .mapping-document :deep(td) { border-bottom: 1px solid #f1f5f9; padding: 0.7rem 0.75rem; vertical-align: top; }
 .mapping-document :deep(tr:last-child td) { border-bottom: 0; }
+.mapping-document :deep(.mapping-field-control) {
+  display: inline-flex;
+  min-width: 12rem;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 0.25rem;
+  vertical-align: middle;
+}
+.mapping-document :deep(.mapping-field-control--wide) { width: min(100%, 32rem); }
+.mapping-document :deep(.mapping-field-control > span),
+.mapping-document :deep(.mapping-field-label) {
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.mapping-document :deep(.mapping-field-control input),
+.mapping-document :deep(.mapping-field-control select),
+.mapping-document :deep(.mapping-field-control textarea) {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  background: #fff;
+  padding: 0.5rem 0.625rem;
+  color: #0f172a;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  outline: none;
+}
+.mapping-document :deep(.mapping-field-control input:focus),
+.mapping-document :deep(.mapping-field-control select:focus),
+.mapping-document :deep(.mapping-field-control textarea:focus) {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgb(99 102 241 / 0.14);
+}
+.mapping-document :deep(.mapping-field-value) {
+  display: inline-flex;
+  min-width: 9rem;
+  flex-direction: column;
+  vertical-align: middle;
+}
+.mapping-document :deep(.mapping-field-readonly) {
+  color: #0f172a;
+  font-weight: 550;
+}
+.mapping-document :deep(.mapping-field-readonly:empty) { color: #94a3b8; }
 </style>

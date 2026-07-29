@@ -76,7 +76,11 @@ O documento é a unidade principal do mapeamento. Os campos estruturados não po
 
 O administrador pode criar ou importar, vincular a um processo, definir a participação do cliente, configurar validações, publicar, versionar, arquivar, revisar alterações, restaurar histórico e exportar.
 
-O cliente pode consultar ou preencher o documento, completar somente os campos liberados, registrar dúvidas e observações, baixar arquivos e acompanhar as próprias alterações.
+Durante a criação ou edição, o administrador seleciona um trecho do Markdown e o marca como texto curto, texto longo, seleção, data ou número. O campo pode receber rótulo, valor inicial, opções e obrigatoriedade. Após criar um de-para, o editor já é aberto para esse preparo.
+
+O cliente nunca edita o Markdown cru: o botão “Preencher documento” fica no cabeçalho do próprio documento e ativa os controles diretamente na versão renderizada. O backend garante que, no modo `selected`, somente os valores desses controles mudem; texto, configuração e estrutura protegidos não podem ser adulterados.
+
+Materiais de apoio possuem seção própria, separada de Dúvidas e histórico. A linha do tempo começa com 10 eventos e carrega mais 10 sob demanda.
 
 O cliente nunca recebe a aba Revisão. O estado administrativo “aguardando revisão” é apresentado ao cliente apenas como “enviado para a equipe”.
 
@@ -96,6 +100,7 @@ Novos de-paras iniciados pela interface administrativa usam `all` por padrão, p
 - Atualizações usam versão/revisão esperada para detectar concorrência.
 - Processo e esforço inicial são criados atomicamente.
 - Histórico funcional e auditoria de segurança continuam separados.
+- Auditoria administrativa usa páginas de 25 registros e contagem total no servidor; a tela nunca busca todos os logs de uma vez.
 - O total de medições é exposto no processo para sinalização sem consultas extras.
 
 ## Verificação

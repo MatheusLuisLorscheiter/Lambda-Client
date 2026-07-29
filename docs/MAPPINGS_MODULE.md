@@ -30,10 +30,11 @@ Na primeira migração para o novo contrato, valores antigos de `version` são p
 2. A importação cria documento, vínculos e anexo em uma única transação.
 3. A equipe ajusta os vínculos e configura permissões e política de publicação.
 4. A seção administrativa Revisão apresenta cobertura, pendências e duplicidades.
-5. A publicação disponibiliza ao cliente Documento, Dúvidas e histórico e Arquivos; Revisão nunca aparece no portal.
-6. Alterações liberadas ao cliente incrementam a revisão e ficam marcadas como aguardando revisão.
-7. O administrador confere a linha do tempo, pode restaurar uma alteração e conclui a revisão.
-8. Mudanças administrativas em conteúdo publicado são feitas em uma nova versão.
+5. A equipe marca no documento os controles que o cliente preencherá e configura tipo, rótulo, opções e obrigatoriedade.
+6. A publicação disponibiliza ao cliente Documento, Dúvidas e histórico e Arquivos; Revisão nunca aparece no portal.
+7. Alterações liberadas ao cliente incrementam a revisão e ficam marcadas como aguardando revisão.
+8. O administrador confere a linha do tempo, pode restaurar uma alteração e conclui a revisão.
+9. Mudanças administrativas em conteúdo publicado são feitas em uma nova versão.
 
 ## Histórico
 
@@ -52,16 +53,20 @@ Cada evento registra:
 
 O endpoint de listagem não devolve snapshots grandes. Documentos são resumidos por tamanho e quantidade de linhas. A restauração acontece no servidor, dentro de uma transação, e sempre cria um novo evento — o histórico nunca é reescrito.
 
+O frontend carrega os eventos em lotes cumulativos de 10. Busca e filtros reiniciam a linha do tempo e o botão “Carregar mais” consulta somente o próximo lote.
+
 Eventos antigos de `audit_logs` são importados uma única vez por `audit_log_id`, sem duplicação em reinicializações futuras.
 
 ## Permissões
 
 - Administrador: cria, importa, configura, publica, clona, arquiva, restaura e revisa.
 - Cliente em `none`: consulta e comenta.
-- Cliente em `selected`: edita apenas os campos liberados em cada vínculo.
+- Cliente em `selected`: edita apenas os campos liberados em cada vínculo e os controles marcados dentro do documento.
 - Cliente em `all`: edita documento e vínculos; inclusão e exclusão são permissões independentes.
 
 Toda escrita do cliente exige a revisão esperada. Se outra pessoa salvar antes, a API responde `409` e o frontend orienta o recarregamento.
+
+Os controles do documento são armazenados como tokens seguros no Markdown. No portal, esses tokens são renderizados como inputs e selects; o Markdown bruto permanece restrito ao administrador. Em modo `selected`, a API compara a estrutura anterior e a nova e rejeita qualquer mudança fora do valor dos tokens.
 
 ## Política de publicação
 

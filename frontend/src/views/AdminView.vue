@@ -74,7 +74,7 @@
             </div>
             <div class="ml-4">
               <p class="text-sm font-medium text-slate-500">Logs de auditoria</p>
-              <p class="text-2xl font-bold text-slate-900">{{ auditLogs.length }}</p>
+              <p class="text-2xl font-bold text-slate-900">{{ auditPagination.total }}</p>
             </div>
           </div>
         </div>
@@ -768,17 +768,18 @@
         <div v-if="activeTab === 'audit'" class="p-6">
           <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row">
-              <div class="min-w-0 flex-1"><label class="mb-1 block text-xs font-medium text-slate-500">Buscar atividade</label><input v-model="auditSearch" type="search" placeholder="Ação, usuário ou recurso" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" @keyup.enter="fetchAuditLogs" /></div>
-              <div><label class="mb-1 block text-xs font-medium text-slate-500">Empresa</label><select v-model="auditCompanyFilter" class="min-w-52 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" @change="fetchAuditLogs"><option value="">Todas</option><option v-for="company in companies" :key="company.id" :value="String(company.id)">{{ company.name }}</option></select></div>
+              <div class="min-w-0 flex-1"><label class="mb-1 block text-xs font-medium text-slate-500">Buscar atividade</label><input v-model="auditSearch" type="search" placeholder="Ação, usuário ou recurso" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" @keyup.enter="resetAuditPagination" /></div>
+              <div><label class="mb-1 block text-xs font-medium text-slate-500">Empresa</label><select v-model="auditCompanyFilter" class="min-w-52 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" @change="resetAuditPagination"><option value="">Todas</option><option v-for="company in companies" :key="company.id" :value="String(company.id)">{{ company.name }}</option></select></div>
             </div>
             <button
+              :disabled="auditLoading"
               @click="fetchAuditLogs"
               class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
             >
               <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Atualizar
+              {{ auditLoading ? 'Carregando…' : 'Atualizar' }}
             </button>
           </div>
 
@@ -820,7 +821,17 @@
               </tbody>
             </table>
           </div>
-          <div v-else class="text-center py-12 text-slate-500">
+          <div v-if="auditPagination.total > auditPagination.limit" class="flex flex-col gap-2 border-t border-slate-200 px-1 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-xs text-slate-500">
+              Exibindo {{ auditPagination.offset + 1 }}–{{ Math.min(auditPagination.offset + auditLogs.length, auditPagination.total) }} de {{ auditPagination.total }} logs
+            </p>
+            <div class="flex items-center gap-2">
+              <button :disabled="auditLoading || auditPagination.offset === 0" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium disabled:opacity-40" @click="changeAuditPage(-1)">Anterior</button>
+              <span class="min-w-20 text-center text-xs text-slate-500">Página {{ Math.floor(auditPagination.offset / auditPagination.limit) + 1 }}</span>
+              <button :disabled="auditLoading || !auditPagination.hasMore" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium disabled:opacity-40" @click="changeAuditPage(1)">Próxima</button>
+            </div>
+          </div>
+          <div v-else-if="!auditLoading && !auditLogs.length" class="text-center py-12 text-slate-500">
             <svg class="mx-auto h-12 w-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
@@ -1243,6 +1254,8 @@ const integrations = ref<Integration[]>([])
 const clients = ref<ClientUser[]>([])
 const companies = ref<Company[]>([])
 const auditLogs = ref<AuditLog[]>([])
+const auditLoading = ref(false)
+const auditPagination = ref({ limit: 25, offset: 0, total: 0, returned: 0, hasMore: false })
 const processOptions = ref<ProcessItem[]>([])
 const adminMappingProcessOptions = computed(() => {
   const integration = integrations.value.find(item => String(item.id) === adminMappingIntegrationId.value)
@@ -1564,15 +1577,30 @@ const fetchProcesses = async () => {
 }
 
 const fetchAuditLogs = async () => {
+  auditLoading.value = true
   try {
-    const params = new URLSearchParams({ limit: '100' })
+    const params = new URLSearchParams({
+      limit: String(auditPagination.value.limit),
+      offset: String(auditPagination.value.offset)
+    })
     if (auditSearch.value.trim()) params.set('search', auditSearch.value.trim())
     if (auditCompanyFilter.value) params.set('companyId', auditCompanyFilter.value)
-    const data = await api.get<{ logs: AuditLog[] }>(`/audit/logs?${params}`)
+    const data = await api.get<{ logs: AuditLog[], pagination: typeof auditPagination.value }>(`/audit/logs?${params}`)
     auditLogs.value = data.logs
+    auditPagination.value = data.pagination
   } catch (error) {
     console.error('Falha ao buscar logs de auditoria:', error)
+  } finally {
+    auditLoading.value = false
   }
+}
+const resetAuditPagination = () => {
+  auditPagination.value.offset = 0
+  void fetchAuditLogs()
+}
+const changeAuditPage = (direction: -1 | 1) => {
+  auditPagination.value.offset = Math.max(0, auditPagination.value.offset + direction * auditPagination.value.limit)
+  void fetchAuditLogs()
 }
 
 const addIntegration = async () => {

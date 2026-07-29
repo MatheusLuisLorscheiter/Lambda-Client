@@ -127,11 +127,15 @@
         <div class="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between"><label class="block w-full sm:max-w-md"><span class="mb-1.5 block text-sm font-medium">Função Lambda</span><select v-model="selectedIntegrationId" class="block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm"><option value="">Selecione uma função</option><option v-for="integration in integrations" :key="integration.id" :value="String(integration.id)">{{ integration.name }} · {{ integration.functionName }}</option></select></label><button v-if="selectedIntegrationId" @click="activeTab = 'dashboard'" class="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-medium">Voltar ao Dashboard</button></div>
         <div v-if="!selectedIntegrationId" class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center"><h3 class="font-semibold">Selecione uma função</h3><p class="mt-1 text-sm text-slate-500">A documentação disponível aparecerá aqui.</p></div>
         <template v-else>
-          <section>
+          <nav class="flex gap-5 border-b border-slate-200" aria-label="Documentação da função">
+            <button class="border-b-2 pb-3 text-sm font-medium" :class="docsSection === 'mapping' ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500'" @click="docsSection = 'mapping'">Mapeamento de dados</button>
+            <button class="border-b-2 pb-3 text-sm font-medium" :class="docsSection === 'materials' ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500'" @click="docsSection = 'materials'">Materiais de apoio <span class="ml-1 text-xs text-slate-400">{{ selectedIntegration?.documentationLinks?.length || 0 }}</span></button>
+          </nav>
+          <section v-if="docsSection === 'mapping'">
             <div class="mb-4"><h3 class="font-semibold text-slate-950">Mapeamento de dados</h3><p class="mt-1 text-sm text-slate-500">Consulte o de-para publicado, regras de transformação, obrigatoriedade e valores padrão.</p></div>
             <MappingWorkspace :integration-id="Number(selectedIntegrationId)" :initial-mapping-set-id="selectedMappingSetId" />
           </section>
-          <section class="border-t border-slate-200 pt-6">
+          <section v-else>
             <div class="mb-4"><h3 class="font-semibold text-slate-950">Materiais de apoio</h3><p class="mt-1 text-sm text-slate-500">Guias, especificações e documentos vinculados à automação.</p></div>
             <div v-if="!selectedIntegration?.documentationLinks?.length" class="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center"><h4 class="font-semibold">Sem materiais vinculados</h4><p class="mt-1 text-sm text-slate-500">Ainda não há links adicionais para esta função.</p></div>
             <div v-else class="grid gap-4 md:grid-cols-2"><article v-for="(link, index) in selectedIntegration.documentationLinks" :key="link" class="rounded-lg border border-slate-200 bg-white p-5"><p class="text-sm font-medium">Documentação {{ index + 1 }}</p><p class="mt-2 break-all text-sm text-slate-500">{{ link }}</p><div class="mt-5 flex gap-2"><a :href="link" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-10 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-700">Abrir em nova aba</a><button @click="fullscreenDocLink = link" class="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-medium">Visualizar</button></div></article></div>
@@ -165,6 +169,7 @@ const router = useRouter()
 const api = useApi()
 const selectedMappingSetId = ref<number | null>(null)
 const activeTab = ref<'overview' | 'queue' | 'dashboard' | 'docs'>('overview')
+const docsSection = ref<'mapping' | 'materials'>('mapping')
 const portalTabs = [{ value: 'overview' as const, label: 'Visão geral' }, { value: 'queue' as const, label: 'Processos' }, { value: 'dashboard' as const, label: 'Automações' }, { value: 'docs' as const, label: 'Documentos' }]
 const integrations = ref<Integration[]>([])
 const selectedIntegrationId = ref('')
@@ -253,7 +258,7 @@ function refreshData() { void loadData() }
 function refreshLogs() { void loadLogs() }
 function loadMoreLogs() { void loadLogs(true) }
 function openDashboard(id: number) { selectedIntegrationId.value = String(id); activeTab.value = 'dashboard' }
-function openMapping(id: number, mappingSetId?: number) { selectedIntegrationId.value = String(id); selectedMappingSetId.value = mappingSetId || null; activeTab.value = 'docs' }
+function openMapping(id: number, mappingSetId?: number) { selectedIntegrationId.value = String(id); selectedMappingSetId.value = mappingSetId || null; docsSection.value = 'mapping'; activeTab.value = 'docs' }
 function focusErrors() { logFilter.value = 'errors'; void loadLogs(); document.getElementById('recent-events')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 function formatNumber(value: number) { return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1, notation: value >= 10000 ? 'compact' : 'standard' }).format(value) }
 function formatDuration(value: number) { return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms` }

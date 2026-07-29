@@ -160,10 +160,10 @@
     </template>
 
     <Teleport to="body">
-      <div v-if="editorOpen" class="fixed inset-0 z-[90] flex items-center justify-center p-4">
+      <div v-if="editorOpen" class="fixed inset-0 z-[90] flex items-center justify-center p-2 sm:p-4">
         <div class="absolute inset-0 bg-slate-950/55" @click="closeEditor"></div>
         <div class="relative flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
-          <header class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+          <header class="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-3 sm:px-5">
             <div>
               <h3 class="text-lg font-semibold text-slate-950">{{ editor.id ? 'Editar medição' : 'Nova medição de esforço' }}</h3>
               <p class="mt-1 text-sm text-slate-500">Responda às perguntas abaixo. Os cálculos são automáticos.</p>
@@ -171,27 +171,27 @@
             <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Fechar" @click="closeEditor">✕</button>
           </header>
 
-          <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+          <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
             <div>
               <p class="text-sm font-semibold text-slate-900">1. Quando este esforço acontece?</p>
               <div class="mt-3 grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
-                  class="rounded-md border px-4 py-3 text-left"
+                  class="rounded-md border px-3 py-2 text-left"
                   :class="editor.stage === 'baseline' ? 'border-slate-950 bg-slate-50' : 'border-slate-200 hover:border-slate-300'"
                   @click="setEditorStage('baseline')"
                 >
-                  <span class="block text-sm font-medium text-slate-900">Antes da automação</span>
-                  <span class="mt-0.5 block text-xs text-slate-500">O trabalho manual realizado hoje.</span>
+                  <span class="text-sm font-medium text-slate-900">Antes da automação</span>
+                  <span class="ml-1 text-xs text-slate-500">· trabalho manual atual</span>
                 </button>
                 <button
                   type="button"
-                  class="rounded-md border px-4 py-3 text-left"
+                  class="rounded-md border px-3 py-2 text-left"
                   :class="editor.stage === 'post_automation' ? 'border-slate-950 bg-slate-50' : 'border-slate-200 hover:border-slate-300'"
                   @click="setEditorStage('post_automation')"
                 >
-                  <span class="block text-sm font-medium text-slate-900">Depois da automação</span>
-                  <span class="mt-0.5 block text-xs text-slate-500">O esforço que permaneceu após a entrega.</span>
+                  <span class="text-sm font-medium text-slate-900">Depois da automação</span>
+                  <span class="ml-1 text-xs text-slate-500">· esforço que permaneceu</span>
                 </button>
               </div>
             </div>
@@ -301,15 +301,15 @@
             <p v-if="editorError" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ editorError }}</p>
           </div>
 
-          <footer class="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p class="text-xs leading-5 text-slate-400">Concluir bloqueia esta medição e preserva o histórico. Um rascunho pode ser editado depois.</p>
-            <div class="flex justify-end gap-2">
-              <button type="button" class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" @click="closeEditor">Cancelar</button>
-              <button :disabled="saving" type="button" class="rounded-md border border-slate-900 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50" @click="saveAssessment('draft')">
-                {{ saving ? 'Salvando…' : 'Salvar e continuar depois' }}
+          <footer class="flex flex-col gap-2 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <p class="text-[11px] leading-4 text-slate-400">Rascunhos continuam editáveis; concluir preserva a medição.</p>
+            <div class="flex flex-wrap justify-end gap-1.5">
+              <button type="button" class="min-h-8 rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700" @click="closeEditor">Cancelar</button>
+              <button :disabled="saving" type="button" class="min-h-8 rounded-md border border-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-900 disabled:opacity-50" @click="saveAssessment('draft')">
+                {{ saving ? 'Salvando…' : 'Salvar rascunho' }}
               </button>
-              <button :disabled="saving" type="button" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="saveAssessment('confirmed')">
-                Concluir medição
+              <button :disabled="saving" type="button" class="min-h-8 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50" @click="saveAssessment('confirmed')">
+                Concluir
               </button>
             </div>
           </footer>

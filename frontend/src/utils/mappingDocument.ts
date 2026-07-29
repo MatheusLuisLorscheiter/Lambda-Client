@@ -6,8 +6,101 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
 
-const inlineMarkdown = (value: string) => {
-  let output = escapeHtml(value)
+export type MappingDocumentFieldType = 'text' | 'textarea' | 'select' | 'date' | 'number'
+
+export interface MappingDocumentField {
+  id: string
+  type: MappingDocumentFieldType
+  label: string
+  value: string
+  options: string[]
+  required: boolean
+}
+
+export interface LocatedMappingDocumentField extends MappingDocumentField {
+  start: number
+  end: number
+  token: string
+}
+
+const documentFieldPattern = /\{\{campo:([^}\n]+)\}\}/g
+
+const normalizeDocumentField = (value: Partial<MappingDocumentField>): MappingDocumentField => ({
+  id: String(value.id || `campo-${Date.now().toString(36)}`).replace(/[^a-zA-Z0-9_-]/g, '-'),
+  type: ['text', 'textarea', 'select', 'date', 'number'].includes(String(value.type))
+    ? value.type as MappingDocumentFieldType
+    : 'text',
+  label: String(value.label || 'Campo a preencher').slice(0, 120),
+  value: String(value.value || '').slice(0, 5000),
+  options: Array.isArray(value.options)
+    ? value.options.map(option => String(option).trim()).filter(Boolean).slice(0, 100)
+    : [],
+  required: Boolean(value.required)
+})
+
+const decodeDocumentField = (payload: string) => {
+  try {
+    return normalizeDocumentField(JSON.parse(decodeURIComponent(payload)) as Partial<MappingDocumentField>)
+  } catch {
+    return null
+  }
+}
+
+export const createMappingDocumentFieldToken = (field: Partial<MappingDocumentField>) =>
+  `{{campo:${encodeURIComponent(JSON.stringify(normalizeDocumentField(field)))}}}`
+
+export const extractMappingDocumentFields = (markdown: string): LocatedMappingDocumentField[] => {
+  const fields: LocatedMappingDocumentField[] = []
+  for (const match of String(markdown || '').matchAll(documentFieldPattern)) {
+    const field = decodeDocumentField(match[1] || '')
+    if (!field || match.index === undefined) continue
+    fields.push({ ...field, start: match.index, end: match.index + match[0].length, token: match[0] })
+  }
+  return fields
+}
+
+export const updateMappingDocumentFieldValues = (markdown: string, values: Record<string, string>) => {
+  return String(markdown || '').replace(documentFieldPattern, (token, payload: string) => {
+    const field = decodeDocumentField(payload)
+    if (!field || !Object.prototype.hasOwnProperty.call(values, field.id)) return token
+    return createMappingDocumentFieldToken({ ...field, value: values[field.id] })
+  })
+}
+
+export const materializeMappingDocument = (markdown: string) =>
+  String(markdown || '').replace(documentFieldPattern, (token, payload: string) => {
+    const field = decodeDocumentField(payload)
+    return field ? (field.value || `[preencher: ${field.label}]`) : token
+  })
+
+const renderDocumentField = (field: MappingDocumentField, interactive: boolean) => {
+  const label = escapeHtml(field.label)
+  const value = escapeHtml(field.value)
+  if (!interactive) {
+    return `<span class="mapping-field-value" data-field-type="${field.type}"><span class="mapping-field-label">${label}</span><span class="mapping-field-readonly">${value || 'Não preenchido'}</span></span>`
+  }
+  const common = `data-mapping-field-id="${escapeHtml(field.id)}" aria-label="${label}"${field.required ? ' required' : ''}`
+  if (field.type === 'select') {
+    const options = field.options
+      .map(option => `<option value="${escapeHtml(option)}"${option === field.value ? ' selected' : ''}>${escapeHtml(option)}</option>`)
+      .join('')
+    return `<label class="mapping-field-control"><span>${label}${field.required ? ' *' : ''}</span><select ${common}><option value="">Selecione…</option>${options}</select></label>`
+  }
+  if (field.type === 'textarea') {
+    return `<label class="mapping-field-control mapping-field-control--wide"><span>${label}${field.required ? ' *' : ''}</span><textarea ${common} rows="2" placeholder="Preencha aqui">${value}</textarea></label>`
+  }
+  return `<label class="mapping-field-control"><span>${label}${field.required ? ' *' : ''}</span><input ${common} type="${field.type}" value="${value}" placeholder="Preencha aqui"></label>`
+}
+
+const inlineMarkdown = (value: string, interactiveFields = false) => {
+  const fields: MappingDocumentField[] = []
+  const withPlaceholders = value.replace(documentFieldPattern, (token, payload: string) => {
+    const field = decodeDocumentField(payload)
+    if (!field) return token
+    const index = fields.push(field) - 1
+    return `@@MAPPINGFIELD${index}@@`
+  })
+  let output = escapeHtml(withPlaceholders)
   output = output.replace(/`([^`]+)`/g, '<code>$1</code>')
   output = output.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   output = output.replace(/__([^_]+)__/g, '<strong>$1</strong>')
@@ -16,6 +109,10 @@ const inlineMarkdown = (value: string) => {
     /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
   )
+  output = output.replace(/@@MAPPINGFIELD(\d+)@@/g, (_, rawIndex: string) => {
+    const field = fields[Number(rawIndex)]
+    return field ? renderDocumentField(field, interactiveFields) : ''
+  })
   return output
 }
 
@@ -101,7 +198,8 @@ const parseDelimitedRows = (text: string, delimiter: string) => {
   return rows
 }
 
-export const renderMappingMarkdown = (markdown: string) => {
+export const renderMappingMarkdown = (markdown: string, options: { interactiveFields?: boolean } = {}) => {
+  const inline = (value: string) => inlineMarkdown(value, Boolean(options.interactiveFields))
   const lines = String(markdown || '').replace(/\r\n?/g, '\n').split('\n')
   const output: string[] = []
   let index = 0
@@ -125,7 +223,7 @@ export const renderMappingMarkdown = (markdown: string) => {
       output.push(
         `<aside class="mapping-callout mapping-callout--${tone}">${body
           .filter(Boolean)
-          .map(item => `<p>${inlineMarkdown(item)}</p>`)
+          .map(item => `<p>${inline(item)}</p>`)
           .join('')}</aside>`
       )
       index += 1
@@ -147,7 +245,7 @@ export const renderMappingMarkdown = (markdown: string) => {
     const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
     if (heading) {
       const level = (heading[1] ?? '#').length
-      output.push(`<h${level}>${inlineMarkdown(heading[2] ?? '')}</h${level}>`)
+      output.push(`<h${level}>${inline(heading[2] ?? '')}</h${level}>`)
       index += 1
       continue
     }
@@ -171,9 +269,9 @@ export const renderMappingMarkdown = (markdown: string) => {
       }
       output.push(
         `<div class="mapping-table-wrap"><table><thead><tr>${headers
-          .map(cell => `<th>${inlineMarkdown(cell)}</th>`)
+          .map(cell => `<th>${inline(cell)}</th>`)
           .join('')}</tr></thead><tbody>${rows
-          .map(row => `<tr>${headers.map((_, cellIndex) => `<td>${inlineMarkdown(row[cellIndex] || '')}</td>`).join('')}</tr>`)
+          .map(row => `<tr>${headers.map((_, cellIndex) => `<td>${inline(row[cellIndex] || '')}</td>`).join('')}</tr>`)
           .join('')}</tbody></table></div>`
       )
       continue
@@ -185,7 +283,7 @@ export const renderMappingMarkdown = (markdown: string) => {
         quote.push((lines[index] ?? '').trim().replace(/^>\s?/, ''))
         index += 1
       }
-      output.push(`<blockquote>${quote.map(item => `<p>${inlineMarkdown(item)}</p>`).join('')}</blockquote>`)
+      output.push(`<blockquote>${quote.map(item => `<p>${inline(item)}</p>`).join('')}</blockquote>`)
       continue
     }
 
@@ -196,8 +294,8 @@ export const renderMappingMarkdown = (markdown: string) => {
         const checkbox = item.match(/^\[([ xX])]\s*(.*)$/)
         items.push(
           checkbox
-            ? `<li class="mapping-check"><span aria-hidden="true">${(checkbox[1] ?? '').trim() ? '✓' : '○'}</span>${inlineMarkdown(checkbox[2] ?? '')}</li>`
-            : `<li>${inlineMarkdown(item)}</li>`
+            ? `<li class="mapping-check"><span aria-hidden="true">${(checkbox[1] ?? '').trim() ? '✓' : '○'}</span>${inline(checkbox[2] ?? '')}</li>`
+            : `<li>${inline(item)}</li>`
         )
         index += 1
       }
@@ -208,7 +306,7 @@ export const renderMappingMarkdown = (markdown: string) => {
     if (/^\d+\.\s+/.test(trimmed)) {
       const items: string[] = []
       while (index < lines.length && /^\d+\.\s+/.test((lines[index] ?? '').trim())) {
-        items.push(`<li>${inlineMarkdown((lines[index] ?? '').trim().replace(/^\d+\.\s+/, ''))}</li>`)
+        items.push(`<li>${inline((lines[index] ?? '').trim().replace(/^\d+\.\s+/, ''))}</li>`)
         index += 1
       }
       output.push(`<ol>${items.join('')}</ol>`)
@@ -227,7 +325,7 @@ export const renderMappingMarkdown = (markdown: string) => {
       paragraph.push((lines[index] ?? '').trim())
       index += 1
     }
-    output.push(`<p>${paragraph.map(inlineMarkdown).join('<br>')}</p>`)
+    output.push(`<p>${paragraph.map(inline).join('<br>')}</p>`)
   }
 
   return output.join('')

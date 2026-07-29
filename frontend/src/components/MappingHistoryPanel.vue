@@ -86,7 +86,7 @@
     </div>
     <div v-else-if="errorMessage" class="mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
       {{ errorMessage }}
-      <button class="ml-2 font-medium underline" @click="loadHistory">Tentar novamente</button>
+      <button class="ml-2 font-medium underline" @click="resetAndLoad">Tentar novamente</button>
     </div>
     <div v-else-if="!changes.length" class="mt-5 rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center">
       <p class="text-sm font-medium text-slate-700">Nenhuma alteração encontrada</p>
@@ -145,12 +145,16 @@
       </li>
     </ol>
 
-    <div v-if="pagination.total > pagination.limit" class="flex items-center justify-between border-t border-slate-200 pt-4">
-      <p class="text-xs text-slate-500">{{ pagination.total }} eventos registrados</p>
-      <div class="flex gap-2">
-        <button :disabled="pagination.offset === 0 || loading" class="rounded-md border border-slate-300 px-3 py-2 text-xs disabled:opacity-40" @click="previousPage">Anterior</button>
-        <button :disabled="!pagination.hasMore || loading" class="rounded-md border border-slate-300 px-3 py-2 text-xs disabled:opacity-40" @click="nextPage">Próxima</button>
-      </div>
+    <div v-if="changes.length" class="flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p class="text-xs text-slate-500">Exibindo {{ changes.length }} de {{ pagination.total }} eventos</p>
+      <button
+        v-if="pagination.hasMore"
+        :disabled="loading"
+        class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 disabled:opacity-40"
+        @click="loadMore"
+      >
+        {{ loading ? 'Carregando…' : `Carregar mais ${Math.min(10, pagination.total - changes.length)}` }}
+      </button>
     </div>
 
     <div v-if="reviewModalOpen && auth.isAdmin" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
@@ -210,10 +214,10 @@ const comment = ref('')
 const reviewModalOpen = ref(false)
 const reviewNote = ref('')
 const changeToRestore = ref<MappingChange | null>(null)
-const pagination = ref({ limit: 30, offset: 0, total: 0, hasMore: false })
+const pagination = ref({ limit: 10, offset: 0, total: 0, hasMore: false })
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-const loadHistory = async () => {
+const loadHistory = async (append = false) => {
   loading.value = true
   errorMessage.value = ''
   try {
@@ -228,8 +232,12 @@ const loadHistory = async () => {
       changes: MappingChange[]
       pagination: typeof pagination.value
     }>(`/lambda/mappings/${props.mappingSet.id}/history?${params}`)
-    changes.value = data.changes
-    pagination.value = data.pagination
+    changes.value = append ? [...changes.value, ...data.changes] : data.changes
+    pagination.value = {
+      ...data.pagination,
+      offset: append ? 0 : data.pagination.offset,
+      hasMore: changes.value.length < data.pagination.total
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Não foi possível carregar o histórico'
   } finally {
@@ -239,19 +247,16 @@ const loadHistory = async () => {
 
 const resetAndLoad = () => {
   pagination.value.offset = 0
+  changes.value = []
   void loadHistory()
 }
 const scheduleLoad = () => {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(resetAndLoad, 300)
 }
-const previousPage = () => {
-  pagination.value.offset = Math.max(0, pagination.value.offset - pagination.value.limit)
-  void loadHistory()
-}
-const nextPage = () => {
-  pagination.value.offset += pagination.value.limit
-  void loadHistory()
+const loadMore = () => {
+  pagination.value.offset = changes.value.length
+  void loadHistory(true)
 }
 const submitComment = async () => {
   if (!comment.value.trim()) return

@@ -62,6 +62,53 @@ const normalizeValidationRules = (value) => {
   return Object.fromEntries(Object.keys(defaultValidationRules).map(key => [key, Boolean(value[key])]));
 };
 
+const parseClientDocumentFields = markdown => {
+  const text = String(markdown || '');
+  const pattern = /\{\{campo:([^}\n]+)\}\}/g;
+  const textParts = [];
+  const fields = [];
+  const ids = new Set();
+  let cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    let field;
+    try {
+      field = JSON.parse(decodeURIComponent(match[1] || ''));
+    } catch {
+      return null;
+    }
+    if (!field || typeof field !== 'object' || Array.isArray(field) || !field.id || ids.has(String(field.id))) {
+      return null;
+    }
+    ids.add(String(field.id));
+    textParts.push(text.slice(cursor, match.index));
+    fields.push({
+      id: String(field.id),
+      type: String(field.type || 'text'),
+      label: String(field.label || ''),
+      options: Array.isArray(field.options) ? field.options.map(String) : [],
+      required: Boolean(field.required),
+      value: String(field.value || '')
+    });
+    cursor = match.index + match[0].length;
+  }
+  textParts.push(text.slice(cursor));
+  return { textParts, fields };
+};
+
+const isSelectedDocumentFieldUpdate = (beforeMarkdown, afterMarkdown) => {
+  const before = parseClientDocumentFields(beforeMarkdown);
+  const after = parseClientDocumentFields(afterMarkdown);
+  if (!before || !after || !before.fields.length || before.fields.length !== after.fields.length) return false;
+  if (JSON.stringify(before.textParts) !== JSON.stringify(after.textParts)) return false;
+  return before.fields.every((field, index) => {
+    const next = after.fields[index];
+    if (!next) return false;
+    const { value: _beforeValue, ...beforeConfig } = field;
+    const { value: _afterValue, ...afterConfig } = next;
+    return JSON.stringify(beforeConfig) === JSON.stringify(afterConfig);
+  });
+};
+
 const normalizeEntryInput = (entry, { allowClientEditableFields = false } = {}) => {
   const examples = entry.examples && typeof entry.examples === 'object' && !Array.isArray(entry.examples)
     ? entry.examples
@@ -498,7 +545,7 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
 
   if (req.user.role === 'client') {
     const requestedFields = Object.keys(req.body).filter(key => !['expectedVersion', 'expectedRevision'].includes(key));
-    if (existing.client_edit_mode !== 'all' || existing.status !== 'published' ||
+    if (!['all', 'selected'].includes(existing.client_edit_mode) || existing.status !== 'published' ||
       requestedFields.length !== 1 || requestedFields[0] !== 'contentMarkdown') {
       return res.status(403).json({ error: 'Este documento não está liberado para edição' });
     }
@@ -511,6 +558,10 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
       contentMarkdown = normalizeText(req.body.contentMarkdown, 'Conteúdo do documento', 250000);
     } catch (error) {
       return res.status(400).json({ error: error.message });
+    }
+    if (existing.client_edit_mode === 'selected' &&
+        !isSelectedDocumentFieldUpdate(existing.content_markdown, contentMarkdown)) {
+      return res.status(403).json({ error: 'Somente os campos marcados pela equipe podem ser alterados' });
     }
     const client = await pool.connect();
     let updated;

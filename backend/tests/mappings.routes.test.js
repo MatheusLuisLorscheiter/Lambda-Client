@@ -411,6 +411,68 @@ test('client cannot edit a field that was not released', async () => {
   assert.equal(queries.some(item => item.sql.includes('UPDATE integration_mapping_entries')), false);
 });
 
+test('client updates a marked field inside the rendered document in selected mode', async () => {
+  queries = [];
+  const token = value => `{{campo:${encodeURIComponent(JSON.stringify({
+    id: 'codigo-financeiro',
+    type: 'select',
+    label: 'Código financeiro',
+    value,
+    options: ['A28', 'A35'],
+    required: true
+  }))}}}`;
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'published',
+    client_edit_mode: 'selected',
+    revision: 1,
+    content_markdown: `# De-para\n\n**Código:** ${token('')}`
+  };
+  const response = await invoke(updateSetHandler, {
+    user: { id: 21, role: 'client', companyId: 12 },
+    params: { mappingSetId: '91' },
+    body: {
+      contentMarkdown: `# De-para\n\n**Código:** ${token('A28')}`,
+      expectedRevision: 1
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const update = queries.find(item => item.sql.includes('SET content_markdown = $1'));
+  assert.match(update.params[0], /A28/);
+});
+
+test('client cannot alter protected document text in selected mode', async () => {
+  queries = [];
+  const token = `{{campo:${encodeURIComponent(JSON.stringify({
+    id: 'responsavel', type: 'text', label: 'Responsável', value: '', options: [], required: false
+  }))}}}`;
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'published',
+    client_edit_mode: 'selected',
+    revision: 1,
+    content_markdown: `# Documento protegido\n\n${token}`
+  };
+  const response = await invoke(updateSetHandler, {
+    user: { id: 21, role: 'client', companyId: 12 },
+    params: { mappingSetId: '91' },
+    body: { contentMarkdown: `# Texto adulterado\n\n${token}`, expectedRevision: 1 }
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.match(response.body.error, /Somente os campos marcados/);
+  assert.equal(queries.some(item => item.sql.includes('SET content_markdown = $1')), false);
+});
+
 test('client history exposes visible changes with actor, field diff and revision', async () => {
   queries = [];
   mappingSetFixture = {

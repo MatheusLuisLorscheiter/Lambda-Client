@@ -9,7 +9,7 @@ router.get('/logs', authenticateToken, async (req, res) => {
         return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
     }
 
-    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const action = req.query.action || null;
     const userId = req.query.userId ? Number(req.query.userId) : null;
@@ -61,8 +61,9 @@ router.get('/logs', authenticateToken, async (req, res) => {
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const result = await query(
-        `SELECT audit_logs.id, audit_logs.company_id AS "companyId",
+    const [result, countResult] = await Promise.all([
+        query(
+            `SELECT audit_logs.id, audit_logs.company_id AS "companyId",
                 companies.name AS "companyName",
                 audit_logs.user_id AS "userId", users.email AS "userEmail",
                 audit_logs.action, audit_logs.resource_type AS "resourceType",
@@ -75,12 +76,29 @@ router.get('/logs', authenticateToken, async (req, res) => {
      ${whereClause}
      ORDER BY audit_logs.created_at DESC
      LIMIT ${limit} OFFSET ${offset}`,
-        values
-    );
+            values
+        ),
+        query(
+            `SELECT COUNT(*)::int AS total
+             FROM audit_logs
+             JOIN companies ON companies.id = audit_logs.company_id
+             LEFT JOIN users ON users.id = audit_logs.user_id
+             ${whereClause}`,
+            values
+        )
+    ]);
+
+    const total = countResult.rows[0]?.total || 0;
 
     res.json({
         logs: result.rows,
-        pagination: { limit, offset, returned: result.rows.length, hasMore: result.rows.length === limit }
+        pagination: {
+            limit,
+            offset,
+            total,
+            returned: result.rows.length,
+            hasMore: offset + result.rows.length < total
+        }
     });
 });
 
