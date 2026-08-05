@@ -184,7 +184,7 @@ async function executeMcpTool(toolName, args, company) {
   const { allowedDomains } = company;
 
   if (args.client_email) {
-    if (company.id !== 1) {
+    if (Number(company.id) !== 1) {
       throw new Error('Acesso negado. Apenas a conta Master pode realizar consultas filtradas por client_email de terceiros.');
     }
     const userRes = await query('SELECT company_id FROM users WHERE email = $1', [args.client_email]);
