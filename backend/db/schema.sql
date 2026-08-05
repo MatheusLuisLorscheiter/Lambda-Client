@@ -330,3 +330,19 @@ CREATE INDEX IF NOT EXISTS idx_mapping_changes_set
   ON integration_mapping_changes(mapping_set_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_changes_actor
   ON integration_mapping_changes(actor_user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS company_mcp_configs (
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+  is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  api_key_hash TEXT,
+  api_key_prefix TEXT,
+  allowed_domains JSONB NOT NULL DEFAULT '{"logs": true, "processes": true, "mappings": true, "integrations": true}',
+  max_requests_per_minute INTEGER NOT NULL DEFAULT 60,
+  last_accessed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_mcp_configs_company ON company_mcp_configs(company_id);
+

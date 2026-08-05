@@ -222,7 +222,20 @@ const run = async () => {
         `DO $$ BEGIN
                     ALTER TABLE users ADD CONSTRAINT chk_clients_have_company CHECK (role <> 'client' OR company_id IS NOT NULL);
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-        'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL'
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_admin_email ON users(email) WHERE company_id IS NULL',
+        `CREATE TABLE IF NOT EXISTS company_mcp_configs (
+          id SERIAL PRIMARY KEY,
+          company_id INTEGER NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+          is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+          api_key_hash TEXT,
+          api_key_prefix TEXT,
+          allowed_domains JSONB NOT NULL DEFAULT '{"logs": true, "processes": true, "mappings": true, "integrations": true}',
+          max_requests_per_minute INTEGER NOT NULL DEFAULT 60,
+          last_accessed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+        'CREATE INDEX IF NOT EXISTS idx_company_mcp_configs_company ON company_mcp_configs(company_id)'
     ];
 
     const client = await pool.connect();

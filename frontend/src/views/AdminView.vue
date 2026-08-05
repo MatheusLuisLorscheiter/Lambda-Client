@@ -148,6 +148,20 @@
               </svg>
               Logs de auditoria
             </button>
+            <button
+              @click="activeTab = 'mcp'"
+              :class="[
+                'px-6 py-4 text-sm font-medium border-b-2 transition-colors',
+                activeTab === 'mcp'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              ]"
+            >
+              <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Acesso MCP
+            </button>
           </nav>
         </div>
 
@@ -1215,11 +1229,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus } from '@/types'
+import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpCompaniesResponse, McpTokenResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import AdminProcessManager from '@/components/AdminProcessManager.vue'
 import MappingWorkspace from '@/components/MappingWorkspace.vue'
@@ -1228,21 +1242,147 @@ const auth = useAuthStore()
 const router = useRouter()
 const api = useApi()
 
-const activeTab = ref<'integrations' | 'processes' | 'mappings' | 'clients' | 'audit'>('integrations')
+const activeTab = ref<'integrations' | 'processes' | 'mappings' | 'clients' | 'audit' | 'mcp'>('integrations')
 const adminPageTitle = computed(() => ({
   integrations: 'Integrações Lambda',
   processes: 'Processos',
   mappings: 'Mapeamentos',
   clients: 'Clientes e empresas',
-  audit: 'Auditoria'
+  audit: 'Auditoria',
+  mcp: 'Acesso MCP e Agentes de IA'
 }[activeTab.value]))
 const adminPageDescription = computed(() => ({
   integrations: 'Configure funções AWS Lambda e acompanhe a saúde das automações.',
   processes: 'Priorize demandas, planeje etapas e conduza cada entrega com contexto.',
   mappings: 'Crie, importe, versione e publique os de-paras de cada integração.',
   clients: 'Gerencie empresas e as pessoas com acesso ao Lambda Pulse.',
-  audit: 'Consulte as alterações administrativas e eventos relevantes do portal.'
+  audit: 'Consulte as alterações administrativas e eventos relevantes do portal.',
+  mcp: 'Ative, configure chaves de API e permissões de acesso ao protocolo MCP por empresa.'
 }[activeTab.value]))
+
+// Estado da Aba MCP
+const mcpLoading = ref(false)
+const mcpCompanies = ref<CompanyMcpConfig[]>([])
+const mcpStats = ref({ activeCompaniesCount: 0, totalMcpCalls: 0 })
+const mcpSearch = ref('')
+const mcpTokenModal = ref(false)
+const generatedTokenData = ref<McpTokenResponse | null>(null)
+const mcpPermissionsModal = ref(false)
+const editingMcpCompany = ref<CompanyMcpConfig | null>(null)
+const mcpPermissionsForm = ref<McpAllowedDomains>({ logs: true, processes: true, mappings: true, integrations: true })
+const mcpAuditModal = ref(false)
+const mcpAuditCompany = ref<CompanyMcpConfig | null>(null)
+const mcpAuditLogs = ref<any[]>([])
+
+const windowLocationHost = computed(() => typeof window !== 'undefined' ? window.location.host : 'localhost:3000')
+
+const filteredMcpCompanies = computed(() => {
+  const search = mcpSearch.value.trim().toLowerCase()
+  if (!search) return mcpCompanies.value
+  return mcpCompanies.value.filter(c => 
+    c.companyName.toLowerCase().includes(search) || 
+    (c.apiKeyPrefix && c.apiKeyPrefix.toLowerCase().includes(search))
+  )
+})
+
+const fetchMcpCompanies = async () => {
+  mcpLoading.value = true
+  try {
+    const res = await api.get<McpCompaniesResponse>('/auth/admin/mcp/companies')
+    mcpCompanies.value = res.companies
+    mcpStats.value = res.stats
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao carregar configurações MCP')
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+const toggleMcpStatus = async (company: CompanyMcpConfig) => {
+  try {
+    const newStatus = !company.isEnabled
+    await api.post(`/auth/admin/mcp/company/${company.companyId}/toggle`, { isEnabled: newStatus })
+    company.isEnabled = newStatus
+    showToast('success', `Acesso MCP ${newStatus ? 'ativado' : 'desativado'} para ${company.companyName}`)
+    await fetchMcpCompanies()
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao alterar status MCP')
+  }
+}
+
+const generateMcpToken = async (company: CompanyMcpConfig) => {
+  const confirmed = await requestConfirm({
+    title: 'Gerar/Rotacionar Chave MCP',
+    message: company.hasToken 
+      ? `Deseja rotacionar a chave de ${company.companyName}? A chave antiga será invalidada imediatamente.`
+      : `Gerar nova chave MCP para ${company.companyName}?`,
+    confirmLabel: 'Gerar Chave'
+  })
+  if (!confirmed) return
+
+  try {
+    const res = await api.post<McpTokenResponse>(`/auth/admin/mcp/company/${company.companyId}/token`)
+    generatedTokenData.value = res
+    mcpTokenModal.value = true
+    await fetchMcpCompanies()
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao gerar token MCP')
+  }
+}
+
+const copyMcpTokenToClipboard = async () => {
+  if (!generatedTokenData.value?.token) return
+  try {
+    await navigator.clipboard.writeText(generatedTokenData.value.token)
+    showToast('success', 'Token MCP copiado com sucesso!')
+  } catch {
+    showToast('error', 'Erro ao copiar o token')
+  }
+}
+
+const openMcpPermissionsModal = (company: CompanyMcpConfig) => {
+  editingMcpCompany.value = company
+  mcpPermissionsForm.value = {
+    logs: company.allowedDomains?.logs ?? true,
+    processes: company.allowedDomains?.processes ?? true,
+    mappings: company.allowedDomains?.mappings ?? true,
+    integrations: company.allowedDomains?.integrations ?? true
+  }
+  mcpPermissionsModal.value = true
+}
+
+const saveMcpPermissions = async () => {
+  if (!editingMcpCompany.value) return
+  try {
+    await api.put(`/auth/admin/mcp/company/${editingMcpCompany.value.companyId}/permissions`, {
+      allowedDomains: mcpPermissionsForm.value
+    })
+    showToast('success', 'Permissões MCP atualizadas')
+    mcpPermissionsModal.value = false
+    await fetchMcpCompanies()
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao salvar permissões')
+  }
+}
+
+const openMcpAuditModal = async (company: CompanyMcpConfig) => {
+  mcpAuditCompany.value = company
+  mcpAuditLogs.value = []
+  mcpAuditModal.value = true
+  try {
+    const res = await api.get<{ logs: any[] }>(`/auth/admin/mcp/company/${company.companyId}/audit`)
+    mcpAuditLogs.value = res.logs
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao carregar auditoria MCP')
+  }
+}
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'mcp') {
+    fetchMcpCompanies()
+  }
+})
+
 const adminMappingIntegrationId = ref('')
 const auditSearch = ref('')
 const auditCompanyFilter = ref('')

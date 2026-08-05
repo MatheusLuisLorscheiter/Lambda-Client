@@ -462,3 +462,40 @@ export interface User {
   companyId: number
   companyName?: string
 }
+
+export interface McpAllowedDomains {
+  logs: boolean
+  processes: boolean
+  mappings: boolean
+  integrations: boolean
+}
+
+export interface CompanyMcpConfig {
+  companyId: number
+  companyName: string
+  companyCreatedAt: string
+  configId: number | null
+  isEnabled: boolean
+  apiKeyPrefix: string | null
+  hasToken: boolean
+  allowedDomains: McpAllowedDomains
+  maxRequestsPerMinute: number
+  lastAccessedAt: string | null
+  mcpCallsCount: number
+}
+
+export interface McpCompaniesResponse {
+  companies: CompanyMcpConfig[]
+  stats: {
+    activeCompaniesCount: number
+    totalMcpCalls: number
+  }
+}
+
+export interface McpTokenResponse {
+  success: boolean
+  token: string
+  prefix: string
+  message: string
+}
+

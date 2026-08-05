@@ -43,12 +43,16 @@ const lambdaRouter = require('./routes/lambda');
 const auditRouter = require('./routes/audit');
 const processesRouter = require('./routes/processes');
 const processEffortRouter = require('./routes/process-effort.routes');
+const adminMcpRouter = require('./routes/admin-mcp.routes');
+const mcpRouter = require('./routes/mcp.routes');
 
 app.use('/auth/login', authLimiter);
 app.use('/auth/admin/login', authLimiter);
 app.use('/auth/password/forgot', authLimiter);
 app.use('/auth/password/reset', authLimiter);
 
+app.use('/auth/admin/mcp', adminMcpRouter);
+app.use('/mcp', mcpRouter);
 app.use('/auth', authRouter);
 app.use('/lambda', lambdaRouter);
 app.use('/audit', auditRouter);
@@ -56,6 +60,7 @@ app.use('/processes', processEffortRouter);
 app.use('/processes', processesRouter);
 
 // Basic route
+
 app.get('/', (req, res) => {
   res.json({ message: 'API Lambda Pulse' });
 });
