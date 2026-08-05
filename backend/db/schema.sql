@@ -338,6 +338,9 @@ CREATE TABLE IF NOT EXISTS company_mcp_configs (
   api_key_hash TEXT,
   api_key_prefix TEXT,
   allowed_domains JSONB NOT NULL DEFAULT '{"logs": true, "processes": true, "mappings": true, "integrations": true}',
+  access_mode TEXT NOT NULL DEFAULT 'company'
+    CHECK (access_mode IN ('company', 'delegated')),
+  require_contact_tag_match BOOLEAN NOT NULL DEFAULT FALSE,
   max_requests_per_minute INTEGER NOT NULL DEFAULT 60,
   last_accessed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -346,3 +349,16 @@ CREATE TABLE IF NOT EXISTS company_mcp_configs (
 
 CREATE INDEX IF NOT EXISTS idx_company_mcp_configs_company ON company_mcp_configs(company_id);
 
+CREATE TABLE IF NOT EXISTS company_mcp_access_grants (
+  id SERIAL PRIMARY KEY,
+  principal_company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  target_company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (principal_company_id, target_company_id),
+  CHECK (principal_company_id <> target_company_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_mcp_access_grants_principal
+  ON company_mcp_access_grants(principal_company_id, is_active);

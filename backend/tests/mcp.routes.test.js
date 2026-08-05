@@ -1,139 +1,130 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
+const express = require('express');
+const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 
-const dbPath = require.resolve('../db');
+delete process.env.REDIS_URL;
+
+const hashes = {
+  company: crypto.createHash('sha256').update('mcp_live_company').digest('hex'),
+  delegated: crypto.createHash('sha256').update('mcp_live_delegated').digest('hex'),
+};
 
 const query = async (sql, params = []) => {
-  if (sql.includes('FROM company_mcp_configs')) {
-    if (params[0] === crypto.createHash('sha256').update('mcp_live_validtoken').digest('hex')) {
-      return {
-        rows: [{
-          company_id: 1,
-          is_enabled: true,
-          allowed_domains: { logs: true, processes: true, mappings: true, integrations: true },
-          company_name: 'Empresa Teste'
-        }]
-      };
+  if (sql.includes('WHERE cfg.api_key_hash')) {
+    if (params[0] === hashes.company) {
+      return { rows: [{ company_id: 1, company_name: 'Empresa Teste', is_enabled: true, allowed_domains: { logs: true, processes: true, mappings: true, integrations: true }, access_mode: 'company', require_contact_tag_match: false, max_requests_per_minute: 60 }] };
+    }
+    if (params[0] === hashes.delegated) {
+      return { rows: [{ company_id: 99, company_name: 'CloudWhats', is_enabled: true, allowed_domains: { logs: true, processes: true, mappings: true, integrations: true }, access_mode: 'delegated', require_contact_tag_match: true, max_requests_per_minute: 60 }] };
     }
     return { rows: [] };
   }
-
-  if (sql.includes('SELECT COUNT(*)::int FROM integrations')) {
-    return { rows: [{ count: 3 }] };
+  if (sql.includes('JOIN company_mcp_access_grants')) {
+    if (String(params[1]).toLowerCase() === 'cliente@example.com') {
+      return { rows: [{ id: 7, name: 'Cliente Alfa', allowed_domains: { logs: false, processes: true, mappings: true, integrations: true } }] };
+    }
+    return { rows: [] };
   }
-  if (sql.includes('SELECT COUNT(*)::int FROM process_items')) {
-    return { rows: [{ count: 5 }] };
-  }
-  if (sql.includes('SELECT COUNT(*)::int FROM integration_mapping_sets')) {
-    return { rows: [{ count: 2 }] };
-  }
-  if (sql.includes('SELECT COUNT(*)::int FROM audit_logs')) {
-    return { rows: [{ count: 10 }] };
-  }
-
-  if (sql.includes('FROM process_items')) {
-    return {
-      rows: [
-        { id: 101, reference_code: 'PROC-1', title: 'Automação Financeira', status: 'in_progress', progress: 50 }
-      ]
-    };
-  }
-
-  if (sql.includes('FROM process_deliveries')) {
-    return {
-      rows: [
-        { id: 1, title: 'Release 1.0', summary: 'Versão Inicial', artifact_links: ['https://doc.com/v1'] }
-      ]
-    };
-  }
-
+  if (sql.includes('COUNT(*)::int AS count FROM integrations')) return { rows: [{ count: 3 }] };
+  if (sql.includes('COUNT(*)::int AS count FROM process_items')) return { rows: [{ count: 5 }] };
+  if (sql.includes('COUNT(*)::int AS count FROM integration_mapping_sets')) return { rows: [{ count: 2 }] };
   return { rows: [], rowCount: 0 };
 };
 
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { query }
-};
-
+const dbPath = require.resolve('../db');
+require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { query } };
 const router = require('../routes/mcp.routes');
 
-const invokeMcp = async (headers = {}, body = {}) => {
-  let statusCode = 200;
-  let responseBody;
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => { req.requestId = 'test-request'; next(); });
+app.use('/mcp', router);
+const httpServer = app.listen(0);
+const port = httpServer.address().port;
+const endpoint = new URL(`http://127.0.0.1:${port}/mcp`);
 
-  const req = {
-    url: '/',
-    method: 'POST',
-    get: (headerName) => headers[headerName.toLowerCase()] || headers[headerName],
-    body,
-    ip: '127.0.0.1',
-    protocol: 'https'
-  };
+test.after(() => new Promise((resolve) => httpServer.close(resolve)));
 
-  const res = {
-    status(code) { statusCode = code; return this; },
-    json(payload) { responseBody = payload; return this; }
-  };
-
-  await new Promise((resolve) => {
-    router(req, res, () => {
-      resolve();
-    });
+async function withClient(token, handler) {
+  const client = new Client({ name: 'lambda-pulse-test', version: '1.0.0' }, { capabilities: {} });
+  const transport = new StreamableHTTPClientTransport(endpoint, {
+    requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
+  await client.connect(transport);
+  try {
+    return await handler(client);
+  } finally {
+    await client.close();
+  }
+}
 
-  return { statusCode, body: responseBody };
-};
-
-test('MCP blocks requests without Bearer token', async () => {
-  const res = await invokeMcp({}, { jsonrpc: '2.0', method: 'initialize', id: 1 });
-  assert.equal(res.statusCode, 401);
-  assert.equal(res.body.error.code, -32001);
+test('bloqueia requisição sem Bearer e não aceita token em query string', async () => {
+  const response = await fetch(`${endpoint}?token=mcp_live_company`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }),
+  });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error.code, -32001);
 });
 
-test('MCP initializes successfully with valid Bearer token', async () => {
-  const res = await invokeMcp(
-    { authorization: 'Bearer mcp_live_validtoken' },
-    { jsonrpc: '2.0', method: 'initialize', id: 1 }
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.result.serverInfo.name, 'Lambda Pulse MCP Server');
-  assert.equal(res.body.result.serverInfo.company, 'Empresa Teste');
+test('cliente MCP oficial inicializa, lista tools e executa chamada stateless', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const listed = await client.listTools();
+    assert.ok(listed.tools.some((tool) => tool.name === 'get_company_summary'));
+    const result = await client.callTool({ name: 'get_company_summary', arguments: {} });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.companyName, 'Empresa Teste');
+    assert.equal(data.totalIntegrations, 3);
+    assert.equal(data.totalVisibleProcesses, 5);
+  });
 });
 
-test('MCP tools/list returns available tools', async () => {
-  const res = await invokeMcp(
-    { authorization: 'Bearer mcp_live_validtoken' },
-    { jsonrpc: '2.0', method: 'tools/list', id: 2 }
-  );
-
-  assert.equal(res.statusCode, 200);
-  assert.ok(Array.isArray(res.body.result.tools));
-  const toolNames = res.body.result.tools.map(t => t.name);
-  assert.ok(toolNames.includes('get_company_summary'));
-  assert.ok(toolNames.includes('list_integration_logs'));
-  assert.ok(toolNames.includes('list_processes_and_docs'));
-  assert.ok(toolNames.includes('list_mappings_and_entries'));
+test('acesso delegado falha fechado quando não há tag exata', async () => {
+  await withClient('mcp_live_delegated', async (client) => {
+    const result = await client.callTool({
+      name: 'get_company_summary',
+      arguments: { client_context: { email: 'cliente@example.com', labels: ['Outra Empresa'] } },
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /tag do contato/i);
+  });
 });
 
-test('MCP tools/call executes get_company_summary tool safely', async () => {
-  const res = await invokeMcp(
-    { authorization: 'Bearer mcp_live_validtoken' },
-    {
-      jsonrpc: '2.0',
-      method: 'tools/call',
-      params: { name: 'get_company_summary', arguments: {} },
-      id: 3
-    }
-  );
+test('concessão explícita e tag exata resolvem a empresa, aplicando as permissões do alvo', async () => {
+  await withClient('mcp_live_delegated', async (client) => {
+    const result = await client.callTool({
+      name: 'get_company_summary',
+      arguments: { client_context: { email: 'cliente@example.com', labels: ['Cliente Alfa'] } },
+    });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.companyName, 'Cliente Alfa');
+    assert.equal(data.totalIntegrations, 3);
+    assert.equal(data.totalVisibleProcesses, 5);
+    assert.equal(data.allowedDomains.logs, false);
+  });
+});
 
-  assert.equal(res.statusCode, 200);
-  const contentText = res.body.result.content[0].text;
-  const data = JSON.parse(contentText);
-  assert.equal(data.companyName, 'Empresa Teste');
-  assert.equal(data.totalIntegrations, 3);
-  assert.equal(data.totalProcesses, 5);
+test('uma credencial diferente não pode publicar na sessão SSE de outra empresa', async () => {
+  router._mcpInternals.legacySseSessions.set('session-company-1', {
+    principalId: 1,
+    tokenHash: hashes.company,
+    transport: { handlePostMessage: async () => { throw new Error('não deveria executar'); } },
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/mcp/message?sessionId=session-company-1`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer mcp_live_delegated', 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list' }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, -32007);
+  } finally {
+    router._mcpInternals.legacySseSessions.delete('session-company-1');
+  }
 });

@@ -479,6 +479,9 @@ export interface CompanyMcpConfig {
   apiKeyPrefix: string | null
   hasToken: boolean
   allowedDomains: McpAllowedDomains
+  accessMode: 'company' | 'delegated'
+  requireContactTagMatch: boolean
+  grantedCompanyIds: number[]
   maxRequestsPerMinute: number
   lastAccessedAt: string | null
   mcpCallsCount: number
@@ -488,7 +491,7 @@ export interface McpCompaniesResponse {
   companies: CompanyMcpConfig[]
   stats: {
     activeCompaniesCount: number
-    totalMcpCalls: number
+    mcpCallsToday: number
   }
 }
 
@@ -498,4 +501,3 @@ export interface McpTokenResponse {
   prefix: string
   message: string
 }
-

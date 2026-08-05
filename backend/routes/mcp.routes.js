@@ -1,659 +1,514 @@
 const express = require('express');
 const crypto = require('crypto');
+const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
+const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
+const { ListToolsRequestSchema, CallToolRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 const { query } = require('../db');
+const { client: redisClient, connectRedis } = require('../cache/redis');
 
 const router = express.Router();
+const legacySseSessions = new Map();
+const localRateWindows = new Map();
+const DOMAIN_NAMES = ['logs', 'processes', 'mappings', 'integrations'];
+const DEFAULT_DOMAINS = Object.freeze({ logs: true, processes: true, mappings: true, integrations: true });
 
-/**
- * Middleware: Autenticação de Agentes de IA via MCP Token
- */
-async function mcpAuthMiddleware(req, res, next) {
-  let token = '';
+function rpcError(res, status, code, message, id = null) {
+  return res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id });
+}
 
+function parseDomains(value) {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  return DOMAIN_NAMES.reduce((result, domain) => {
+    result[domain] = parsed?.[domain] !== false;
+    return result;
+  }, {});
+}
+
+function effectiveDomains(principalDomains, targetDomains = DEFAULT_DOMAINS) {
+  return DOMAIN_NAMES.reduce((result, domain) => {
+    result[domain] = principalDomains[domain] !== false && targetDomains[domain] !== false;
+    return result;
+  }, {});
+}
+
+function normalizeIdentity(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleLowerCase('pt-BR');
+}
+
+function readBearerToken(req) {
   const authHeader = req.get('authorization') || '';
-  if (authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (req.query.token) {
-    token = req.query.token;
-  } else if (req.query.apiKey) {
-    token = req.query.apiKey;
-  }
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+}
 
+function isOriginAllowed(req) {
+  const origin = req.get('origin');
+  if (!origin) return true;
+  const configured = (process.env.MCP_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const protocol = String(req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
+  const host = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  const sameOrigin = host ? `${protocol}://${host}` : '';
+  return configured.includes(origin) || origin === sameOrigin;
+}
+
+function originGuard(req, res, next) {
+  if (!isOriginAllowed(req)) {
+    return rpcError(res, 403, -32004, 'Origem não autorizada para o endpoint MCP.', req.body?.id ?? null);
+  }
+  next();
+}
+
+function consumeLocalRateLimit(key, limit) {
+  const now = Date.now();
+  const minute = Math.floor(now / 60_000);
+  const current = localRateWindows.get(key);
+  const next = !current || current.minute !== minute ? { minute, count: 1 } : { minute, count: current.count + 1 };
+  localRateWindows.set(key, next);
+  if (localRateWindows.size > 5000) {
+    for (const [storedKey, value] of localRateWindows) {
+      if (value.minute < minute) localRateWindows.delete(storedKey);
+    }
+  }
+  return { allowed: next.count <= limit, remaining: Math.max(0, limit - next.count) };
+}
+
+async function consumeRateLimit(key, limit) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 60, 1), 1000);
+  if (!process.env.REDIS_URL) return consumeLocalRateLimit(key, safeLimit);
+  try {
+    await connectRedis();
+    const minute = Math.floor(Date.now() / 60_000);
+    const redisKey = `mcp:rate:${key}:${minute}`;
+    const count = await redisClient.incr(redisKey);
+    if (count === 1) await redisClient.expire(redisKey, 70);
+    return { allowed: count <= safeLimit, remaining: Math.max(0, safeLimit - count) };
+  } catch (error) {
+    console.warn('[MCP] Redis rate limit unavailable; using local fallback:', error.message);
+    return consumeLocalRateLimit(key, safeLimit);
+  }
+}
+
+async function mcpAuthMiddleware(req, res, next) {
+  const token = readBearerToken(req);
   if (!token) {
-    return res.status(401).json({
-      jsonrpc: '2.0',
-      error: { code: -32001, message: 'Autenticação MCP necessária. Forneça a chave Bearer no cabeçalho Authorization ou via query string (token=...)' },
-      id: req.body?.id || null
-    });
+    return rpcError(res, 401, -32001, 'Autenticação MCP necessária via cabeçalho Authorization: Bearer <token>.', req.body?.id ?? null);
   }
 
-  const keyHash = crypto.createHash('sha256').update(token).digest('hex');
-
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   try {
     const result = await query(`
-      SELECT 
-        cfg.company_id,
-        cfg.is_enabled,
-        cfg.allowed_domains,
-        c.name AS company_name
-      FROM company_mcp_configs cfg
-      JOIN companies c ON c.id = cfg.company_id
-      WHERE cfg.api_key_hash = $1
-    `, [keyHash]);
-
-    if (result.rows.length === 0) {
-      return res.status(403).json({
-        jsonrpc: '2.0',
-        error: { code: -32002, message: 'Token MCP não encontrado ou inválido.' },
-        id: req.body?.id || null
-      });
-    }
+      SELECT cfg.company_id, cfg.is_enabled, cfg.allowed_domains, cfg.access_mode,
+             cfg.require_contact_tag_match, cfg.max_requests_per_minute, c.name AS company_name
+        FROM company_mcp_configs cfg
+        JOIN companies c ON c.id = cfg.company_id
+       WHERE cfg.api_key_hash = $1
+       LIMIT 1
+    `, [tokenHash]);
 
     const config = result.rows[0];
-    if (!config.is_enabled) {
-      return res.status(403).json({
-        jsonrpc: '2.0',
-        error: { code: -32003, message: 'O acesso MCP está desativado para esta empresa.' },
-        id: req.body?.id || null
-      });
-    }
+    if (!config) return rpcError(res, 403, -32002, 'Token MCP inválido.', req.body?.id ?? null);
+    if (!config.is_enabled) return rpcError(res, 403, -32003, 'O acesso MCP está desativado para esta empresa.', req.body?.id ?? null);
 
-    // Atualizar último acesso assincronamente (fire-and-forget)
-    query('UPDATE company_mcp_configs SET last_accessed_at = NOW() WHERE company_id = $1', [config.company_id]).catch(() => {});
+    const rate = await consumeRateLimit(tokenHash.slice(0, 24), config.max_requests_per_minute);
+    res.setHeader('RateLimit-Limit', String(config.max_requests_per_minute || 60));
+    res.setHeader('RateLimit-Remaining', String(rate.remaining));
+    if (!rate.allowed) return rpcError(res, 429, -32005, 'Limite de requisições MCP excedido. Tente novamente no próximo minuto.', req.body?.id ?? null);
 
-    req.mcpCompany = {
-      id: config.company_id,
+    req.mcpPrincipal = {
+      id: Number(config.company_id),
       name: config.company_name,
-      allowedDomains: typeof config.allowed_domains === 'string' ? JSON.parse(config.allowed_domains) : (config.allowed_domains || {})
+      tokenHash,
+      accessMode: config.access_mode === 'delegated' ? 'delegated' : 'company',
+      requireContactTagMatch: config.require_contact_tag_match === true,
+      allowedDomains: parseDomains(config.allowed_domains),
     };
-
+    query('UPDATE company_mcp_configs SET last_accessed_at = NOW() WHERE company_id = $1', [config.company_id]).catch(() => {});
     next();
   } catch (error) {
-    console.error('[MCP Middleware Error]', error);
-    return res.status(500).json({
-      jsonrpc: '2.0',
-      error: { code: -32603, message: 'Erro interno ao validar credenciais MCP.' },
-      id: req.body?.id || null
-    });
+    console.error('[MCP Auth]', error);
+    return rpcError(res, 500, -32603, 'Erro interno ao validar as credenciais MCP.', req.body?.id ?? null);
   }
 }
 
-/**
- * Função utilitária para registrar chamadas MCP no audit_log
- */
-async function auditMcpCall(companyId, toolName, params, resultStatus = 'success', ip = null, userAgent = null) {
-  try {
-    await query(`
-      INSERT INTO audit_logs (company_id, action, resource_type, resource_id, metadata, ip_address, user_agent)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-    `, [
-      companyId,
-      `mcp.tool_call.${toolName}`,
-      'mcp_tool',
-      toolName,
-      JSON.stringify({ params, status: resultStatus }),
-      ip,
-      userAgent
-    ]);
-  } catch (e) {
-    console.error('[MCP Audit Log Error]', e);
-  }
+function contextSchema() {
+  return {
+    type: 'object',
+    description: 'Contexto do contato preenchido pelo sistema chamador. O servidor nunca confia nele sem validar as concessões de acesso.',
+    properties: {
+      source: { type: 'string', maxLength: 80 },
+      contact_id: { type: 'string', maxLength: 160 },
+      email: { type: 'string', format: 'email', maxLength: 320 },
+      labels: { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 160 } },
+    },
+    additionalProperties: false,
+  };
 }
 
-/**
- * Definições das ferramentas (Tools) MCP expostas para Agentes de IA
- */
-const MCP_TOOLS = [
+function withContext(properties, required = []) {
+  return {
+    type: 'object',
+    properties: {
+      ...properties,
+      client_context: contextSchema(),
+      client_email: { type: 'string', format: 'email', maxLength: 320, description: 'Compatibilidade legada. Prefira client_context; o acesso delegado continua limitado por concessões explícitas.' },
+    },
+    required,
+    additionalProperties: false,
+  };
+}
+
+const MCP_TOOL_DEFINITIONS = [
   {
     name: 'get_company_summary',
-    description: 'Retorna um resumo estatístico da empresa: total de integrações, processos, entregas e mapeamentos configurados.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
-      },
-      required: []
-    }
+    domain: null,
+    description: 'Retorna um resumo da empresa autorizada para o contato atual.',
+    inputSchema: withContext({}),
   },
   {
     name: 'list_integration_logs',
-    description: 'Lista as integrações da empresa com seus status de saúde (healthy/degraded/unavailable) e o histórico recente de logs de auditoria e automação.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Quantidade máxima de registros (padrão: 20, máximo: 50)' },
-        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
-      }
-    }
+    domain: 'integrations',
+    description: 'Lista integrações e eventos recentes visíveis da empresa autorizada.',
+    inputSchema: withContext({ limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }),
   },
   {
     name: 'list_processes_and_docs',
-    description: 'Lista os processos, demandas, checklists e documentos/entregáveis (release notes, entregas) cadastrados para a empresa.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', description: 'Filtrar por status do processo (ex: requested, analysis, in_progress, delivered)' },
-        limit: { type: 'number', description: 'Quantidade máxima de processos (padrão: 20)' },
-        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
-      }
-    }
+    domain: 'processes',
+    description: 'Lista processos visíveis ao cliente e seus entregáveis.',
+    inputSchema: withContext({
+      status: { type: 'string', enum: ['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused', 'cancelled'] },
+      limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+    }),
   },
   {
     name: 'get_process_details',
-    description: 'Retorna os detalhes completos de um processo específico incluindo histórico de atualizações, comentários, itens de checklist, avaliações de esforço e documentos entregues.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        processId: { type: 'number', description: 'ID numérico do processo' },
-        client_email: { type: 'string', description: 'Email do cliente para validação de acesso. Apenas chaves Master podem utilizar.' }
-      },
-      required: ['processId']
-    }
+    domain: 'processes',
+    description: 'Retorna detalhes de um processo visível ao cliente, incluindo atualizações públicas e entregáveis.',
+    inputSchema: withContext({ processId: { type: 'integer', minimum: 1 } }, ['processId']),
   },
   {
     name: 'list_mappings_and_entries',
-    description: 'Lista todos os conjuntos de mapeamento de integração (de/para), com suas regras, status de mapeamento e textos extraídos de documentos/anexos.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', description: 'Filtrar por status do mapeamento (draft, published, archived)' },
-        limit: { type: 'number', description: 'Quantidade máxima de mapeamentos (padrão: 20)' },
-        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
-      }
-    }
+    domain: 'mappings',
+    description: 'Lista conjuntos de mapeamento da empresa autorizada e metadados dos anexos.',
+    inputSchema: withContext({
+      status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+      limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+    }),
   },
   {
     name: 'get_mapping_details',
-    description: 'Obtém o detalhamento de um conjunto de mapeamento específico: lista de campos (de/para), transformações, instruções, texto extraído de documentos anexos e histórico de revisões.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        mappingSetId: { type: 'number', description: 'ID numérico do conjunto de mapeamento' },
-        client_email: { type: 'string', description: 'Email do cliente para validação de acesso. Apenas chaves Master podem utilizar.' }
-      },
-      required: ['mappingSetId']
-    }
-  }
-];
+    domain: 'mappings',
+    description: 'Retorna o detalhamento de um conjunto de mapeamento autorizado.',
+    inputSchema: withContext({ mappingSetId: { type: 'integer', minimum: 1 } }, ['mappingSetId']),
+  },
+].map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
 
-/**
- * Executores das Ferramentas MCP
- */
-async function executeMcpTool(toolName, args, company) {
-  let targetCompanyId = company.id;
-  const { allowedDomains } = company;
+function publicToolsFor(principal) {
+  return MCP_TOOL_DEFINITIONS
+    .filter((tool) => !tool.domain || principal.allowedDomains[tool.domain] !== false || (tool.name === 'list_integration_logs' && principal.allowedDomains.logs !== false))
+    .map(({ domain, ...tool }) => tool);
+}
 
-  if (args.client_email) {
-    if (Number(company.id) !== 1) {
-      throw new Error('Acesso negado. Apenas a conta Master pode realizar consultas filtradas por client_email de terceiros.');
-    }
-    const userRes = await query('SELECT company_id FROM users WHERE email = $1', [args.client_email]);
-    if (userRes.rows.length === 0) {
-      throw new Error(`O email ${args.client_email} não está vinculado a nenhuma empresa nesta plataforma.`);
-    }
-    targetCompanyId = userRes.rows[0].company_id;
+function readClientContext(args) {
+  const raw = args?.client_context && typeof args.client_context === 'object' ? args.client_context : {};
+  const email = String(raw.email || args?.client_email || '').trim().toLocaleLowerCase('pt-BR');
+  const labels = Array.isArray(raw.labels) ? raw.labels.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 100) : [];
+  return { email, labels };
+}
+
+async function resolveTargetCompany(principal, args) {
+  if (principal.accessMode !== 'delegated') {
+    return { id: principal.id, name: principal.name, allowedDomains: principal.allowedDomains };
   }
 
+  const context = readClientContext(args);
+  if (!context.email) throw new Error('O contato não possui email válido para resolver o acesso delegado.');
+
+  const result = await query(`
+    SELECT DISTINCT c.id, c.name, cfg.allowed_domains
+      FROM users u
+      JOIN companies c ON c.id = u.company_id
+      JOIN company_mcp_access_grants grant_cfg
+        ON grant_cfg.principal_company_id = $1
+       AND grant_cfg.target_company_id = c.id
+       AND grant_cfg.is_active = TRUE
+      JOIN company_mcp_configs cfg ON cfg.company_id = c.id AND cfg.is_enabled = TRUE
+     WHERE LOWER(BTRIM(u.email)) = LOWER(BTRIM($2))
+       AND u.role = 'client'
+       AND u.is_active = TRUE
+     ORDER BY c.name ASC
+  `, [principal.id, context.email]);
+
+  if (result.rows.length === 0) throw new Error('Nenhuma empresa autorizada foi encontrada para o contato informado.');
+  const normalizedLabels = new Set(context.labels.map(normalizeIdentity));
+  const labelMatches = result.rows.filter((row) => normalizedLabels.has(normalizeIdentity(row.name)));
+  let target;
+  if (principal.requireContactTagMatch) {
+    if (labelMatches.length !== 1) throw new Error('A tag do contato não corresponde de forma única a uma empresa autorizada.');
+    target = labelMatches[0];
+  } else if (result.rows.length === 1) {
+    target = result.rows[0];
+  } else if (labelMatches.length === 1) {
+    target = labelMatches[0];
+  } else {
+    throw new Error('O email está associado a mais de uma empresa. Adicione ao contato uma tag com o nome exato da empresa.');
+  }
+
+  return {
+    id: Number(target.id),
+    name: target.name,
+    allowedDomains: effectiveDomains(principal.allowedDomains, parseDomains(target.allowed_domains)),
+  };
+}
+
+function requireDomain(target, domain, message) {
+  if (target.allowedDomains[domain] === false) throw new Error(message);
+}
+
+function safeLimit(value, fallback = 20) {
+  return Math.min(Math.max(Number(value) || fallback, 1), 50);
+}
+
+async function executeMcpTool(toolName, args, principal, resolvedTarget = null) {
+  const target = resolvedTarget || await resolveTargetCompany(principal, args || {});
   switch (toolName) {
     case 'get_company_summary': {
-      const integrationsCount = await query('SELECT COUNT(*)::int FROM integrations WHERE company_id = $1', [targetCompanyId]);
-      const processesCount = await query('SELECT COUNT(*)::int FROM process_items WHERE company_id = $1', [targetCompanyId]);
-      const mappingsCount = await query('SELECT COUNT(*)::int FROM integration_mapping_sets WHERE company_id = $1', [targetCompanyId]);
-      const recentAuditCount = await query('SELECT COUNT(*)::int FROM audit_logs WHERE company_id = $1', [targetCompanyId]);
-
-      return {
-        companyId: targetCompanyId,
-        companyName: company.id === targetCompanyId ? company.name : `Empresa de ${args.client_email}`,
-        totalIntegrations: integrationsCount.rows[0].count,
-        totalProcesses: processesCount.rows[0].count,
-        totalMappingSets: mappingsCount.rows[0].count,
-        totalAuditLogs: recentAuditCount.rows[0].count,
-        allowedDomains
-      };
+      const [integrations, processes, mappings] = await Promise.all([
+        target.allowedDomains.integrations ? query('SELECT COUNT(*)::int AS count FROM integrations WHERE company_id = $1', [target.id]) : Promise.resolve({ rows: [{ count: null }] }),
+        target.allowedDomains.processes ? query('SELECT COUNT(*)::int AS count FROM process_items WHERE company_id = $1 AND is_client_visible = TRUE', [target.id]) : Promise.resolve({ rows: [{ count: null }] }),
+        target.allowedDomains.mappings ? query('SELECT COUNT(*)::int AS count FROM integration_mapping_sets WHERE company_id = $1', [target.id]) : Promise.resolve({ rows: [{ count: null }] }),
+      ]);
+      return { companyName: target.name, totalIntegrations: integrations.rows[0].count, totalVisibleProcesses: processes.rows[0].count, totalMappingSets: mappings.rows[0].count, allowedDomains: target.allowedDomains };
     }
-
     case 'list_integration_logs': {
-      if (allowedDomains.logs === false && allowedDomains.integrations === false) {
-        throw new Error('Acesso a logs e integrações não está liberado para esta empresa.');
-      }
-      const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
-
-      const integrations = await query(`
-        SELECT id, name, function_name, region, memory_mb, lifecycle_status, last_check_status, last_check_message, last_checked_at, created_at
-        FROM integrations
-        WHERE company_id = $1
-        ORDER BY name ASC
-      `, [targetCompanyId]);
-
-      const logs = await query(`
-        SELECT id, action, resource_type, resource_id, metadata, created_at
-        FROM audit_logs
-        WHERE company_id = $1
-        ORDER BY created_at DESC
-        LIMIT $2
-      `, [targetCompanyId, limit]);
-
-      return {
-        integrations: integrations.rows,
-        recentLogs: logs.rows
-      };
+      if (!target.allowedDomains.logs && !target.allowedDomains.integrations) throw new Error('Acesso a logs e integrações não está liberado.');
+      const limit = safeLimit(args.limit);
+      const integrations = target.allowedDomains.integrations
+        ? await query(`SELECT id, name, function_name, region, lifecycle_status, last_check_status, last_check_message, last_checked_at, created_at FROM integrations WHERE company_id = $1 ORDER BY name ASC`, [target.id])
+        : { rows: [] };
+      const logs = target.allowedDomains.logs
+        ? await query(`SELECT id, action, resource_type, resource_id, created_at FROM audit_logs WHERE company_id = $1 ORDER BY created_at DESC LIMIT $2`, [target.id, limit])
+        : { rows: [] };
+      return { integrations: integrations.rows, recentEvents: logs.rows };
     }
-
     case 'list_processes_and_docs': {
-      if (allowedDomains.processes === false) {
-        throw new Error('Acesso a processos e documentos não está liberado para esta empresa.');
-      }
-      const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
-      const statusFilter = args?.status ? String(args.status) : null;
-
-      const params = [targetCompanyId];
-      let sql = `
-        SELECT 
-          p.id, p.reference_code, p.title, p.description, p.category, p.status, p.priority, p.impact, p.health, p.progress, p.due_date, p.target_sla_at, p.delivered_at, p.created_at, p.updated_at,
-          (SELECT COUNT(*)::int FROM process_updates u WHERE u.process_id = p.id) AS updates_count,
-          (SELECT COUNT(*)::int FROM process_deliveries d WHERE d.process_id = p.id) AS deliveries_count
-        FROM process_items p
-        WHERE p.company_id = $1
-      `;
-
-      if (statusFilter) {
-        params.push(statusFilter);
-        sql += ` AND p.status = $${params.length}`;
-      }
-
-      sql += ` ORDER BY p.updated_at DESC LIMIT $${params.length + 1}`;
-      params.push(limit);
-
-      const result = await query(sql, params);
-
-      // Buscar entregas/documentos anexos aos processos
+      requireDomain(target, 'processes', 'Acesso a processos e documentos não está liberado.');
+      const params = [target.id];
+      let statusSql = '';
+      if (args.status) { params.push(String(args.status)); statusSql = ` AND p.status = $${params.length}`; }
+      params.push(safeLimit(args.limit));
+      const processes = await query(`
+        SELECT p.id, p.reference_code, p.title, p.description, p.category, p.status, p.priority, p.impact,
+               p.health, p.progress, p.due_date, p.target_sla_at, p.delivered_at, p.latest_update, p.created_at, p.updated_at,
+               (SELECT COUNT(*)::int FROM process_updates u WHERE u.process_id = p.id AND u.visibility = 'client') AS updates_count,
+               (SELECT COUNT(*)::int FROM process_deliveries d WHERE d.process_id = p.id) AS deliveries_count
+          FROM process_items p
+         WHERE p.company_id = $1 AND p.is_client_visible = TRUE${statusSql}
+         ORDER BY p.updated_at DESC LIMIT $${params.length}
+      `, params);
       const deliveries = await query(`
-        SELECT d.id, d.process_id, d.title, d.summary, d.version, d.environment, d.status, d.artifact_links, d.release_notes, d.delivered_at, d.created_at
-        FROM process_deliveries d
-        JOIN process_items p ON p.id = d.process_id
-        WHERE p.company_id = $1
-        ORDER BY d.created_at DESC
-        LIMIT 30
-      `, [targetCompanyId]);
-
-      return {
-        processes: result.rows,
-        processDeliveriesAndDocs: deliveries.rows
-      };
+        SELECT d.id, d.process_id, d.title, d.summary, d.version, d.environment, d.status, d.artifact_links,
+               d.release_notes, d.delivered_at, d.created_at
+          FROM process_deliveries d JOIN process_items p ON p.id = d.process_id
+         WHERE p.company_id = $1 AND p.is_client_visible = TRUE
+         ORDER BY d.created_at DESC LIMIT 30
+      `, [target.id]);
+      return { processes: processes.rows, deliveriesAndDocs: deliveries.rows };
     }
-
     case 'get_process_details': {
-      if (allowedDomains.processes === false) {
-        throw new Error('Acesso a processos e documentos não está liberado para esta empresa.');
-      }
-      const processId = Number(args?.processId);
-      if (!processId) {
-        throw new Error('Parâmetro processId é obrigatório.');
-      }
-
-      const processCheck = await query(`
-        SELECT * FROM process_items WHERE id = $1 AND company_id = $2
-      `, [processId, targetCompanyId]);
-
-      if (processCheck.rows.length === 0) {
-        throw new Error(`Processo ID ${processId} não foi encontrado para esta empresa.`);
-      }
-
-      const processItem = processCheck.rows[0];
-
-      const updates = await query(`
-        SELECT id, kind, visibility, message, metadata, created_at
-        FROM process_updates
-        WHERE process_id = $1 AND visibility = 'client'
-        ORDER BY created_at ASC
-      `, [processId]);
-
-      const checklist = await query(`
-        SELECT id, title, description, status, due_date, sort_order, completed_at
-        FROM process_checklist_items
-        WHERE process_id = $1
-        ORDER BY sort_order ASC, id ASC
-      `, [processId]);
-
-      const deliveries = await query(`
-        SELECT id, title, summary, version, environment, status, artifact_links, release_notes, delivered_at
-        FROM process_deliveries
-        WHERE process_id = $1
-        ORDER BY created_at DESC
-      `, [processId]);
-
-      const effortAssessments = await query(`
-        SELECT a.id, a.stage, a.label, a.measured_at, a.source, a.status, a.notes,
-               JSON_AGG(i.*) AS items
-        FROM process_effort_assessments a
-        LEFT JOIN process_effort_items i ON i.assessment_id = a.id
-        WHERE a.process_id = $1
-        GROUP BY a.id
-        ORDER BY a.created_at DESC
-      `, [processId]);
-
-      return {
-        process: processItem,
-        updates: updates.rows,
-        checklist: checklist.rows,
-        deliveriesAndDocs: deliveries.rows,
-        effortAssessments: effortAssessments.rows
-      };
+      requireDomain(target, 'processes', 'Acesso a processos e documentos não está liberado.');
+      const processId = Number(args.processId);
+      if (!Number.isInteger(processId) || processId < 1) throw new Error('processId inválido.');
+      const processResult = await query(`
+        SELECT id, reference_code, title, description, objective, scope, acceptance_criteria, category, status,
+               priority, impact, health, complexity, progress, estimate_business_days, planned_start, due_date,
+               target_sla_at, delivered_at, blocked_reason, next_action, tags, latest_update, created_at, updated_at
+          FROM process_items WHERE id = $1 AND company_id = $2 AND is_client_visible = TRUE
+      `, [processId, target.id]);
+      if (!processResult.rows[0]) throw new Error('Processo não encontrado ou não visível para esta empresa.');
+      const [updates, checklist, deliveries] = await Promise.all([
+        query(`SELECT id, kind, message, created_at FROM process_updates WHERE process_id = $1 AND visibility = 'client' ORDER BY created_at ASC`, [processId]),
+        query(`SELECT id, title, description, status, due_date, sort_order, completed_at FROM process_checklist_items WHERE process_id = $1 ORDER BY sort_order ASC, id ASC`, [processId]),
+        query(`SELECT id, title, summary, version, environment, status, artifact_links, release_notes, delivered_at FROM process_deliveries WHERE process_id = $1 ORDER BY created_at DESC`, [processId]),
+      ]);
+      return { process: processResult.rows[0], updates: updates.rows, checklist: checklist.rows, deliveriesAndDocs: deliveries.rows };
     }
-
     case 'list_mappings_and_entries': {
-      if (allowedDomains.mappings === false) {
-        throw new Error('Acesso a mapeamentos não está liberado para esta empresa.');
-      }
-      const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
-      const statusFilter = args?.status ? String(args.status) : null;
-
-      const params = [targetCompanyId];
-      let sql = `
-        SELECT 
-          s.id, s.name, s.description, s.source_system, s.target_system, s.version, s.revision, s.status, s.content_markdown, s.created_at, s.updated_at,
-          (SELECT COUNT(*)::int FROM integration_mapping_entries e WHERE e.mapping_set_id = s.id) AS entries_count,
-          (SELECT COUNT(*)::int FROM integration_mapping_attachments a WHERE a.mapping_set_id = s.id) AS attachments_count
-        FROM integration_mapping_sets s
-        WHERE s.company_id = $1
-      `;
-
-      if (statusFilter) {
-        params.push(statusFilter);
-        sql += ` AND s.status = $${params.length}`;
-      }
-
-      sql += ` ORDER BY s.updated_at DESC LIMIT $${params.length + 1}`;
-      params.push(limit);
-
-      const mappingSets = await query(sql, params);
-
-      // Anexos e textos extraídos de documentos
+      requireDomain(target, 'mappings', 'Acesso a mapeamentos não está liberado.');
+      const params = [target.id];
+      let statusSql = '';
+      if (args.status) { params.push(String(args.status)); statusSql = ` AND s.status = $${params.length}`; }
+      params.push(safeLimit(args.limit));
+      const sets = await query(`
+        SELECT s.id, s.name, s.description, s.source_system, s.target_system, s.version, s.revision, s.status,
+               s.created_at, s.updated_at,
+               (SELECT COUNT(*)::int FROM integration_mapping_entries e WHERE e.mapping_set_id = s.id) AS entries_count,
+               (SELECT COUNT(*)::int FROM integration_mapping_attachments a WHERE a.mapping_set_id = s.id) AS attachments_count
+          FROM integration_mapping_sets s WHERE s.company_id = $1${statusSql}
+         ORDER BY s.updated_at DESC LIMIT $${params.length}
+      `, params);
       const attachments = await query(`
-        SELECT a.id, a.mapping_set_id, a.file_name, a.mime_type, a.file_size, a.extracted_text, a.created_at
-        FROM integration_mapping_attachments a
-        JOIN integration_mapping_sets s ON s.id = a.mapping_set_id
-        WHERE s.company_id = $1
-        ORDER BY a.created_at DESC
-      `, [targetCompanyId]);
-
-      return {
-        mappingSets: mappingSets.rows,
-        attachmentsAndExtractedDocs: attachments.rows.map(att => ({
-          ...att,
-          extractedTextPreview: att.extracted_text ? att.extracted_text.slice(0, 1000) : null
-        }))
-      };
+        SELECT a.id, a.mapping_set_id, a.file_name, a.mime_type, a.file_size, a.created_at
+          FROM integration_mapping_attachments a JOIN integration_mapping_sets s ON s.id = a.mapping_set_id
+         WHERE s.company_id = $1 ORDER BY a.created_at DESC LIMIT 100
+      `, [target.id]);
+      return { mappingSets: sets.rows, attachments: attachments.rows };
     }
-
     case 'get_mapping_details': {
-      if (allowedDomains.mappings === false) {
-        throw new Error('Acesso a mapeamentos não está liberado para esta empresa.');
-      }
-      const mappingSetId = Number(args?.mappingSetId);
-      if (!mappingSetId) {
-        throw new Error('Parâmetro mappingSetId é obrigatório.');
-      }
-
-      const setCheck = await query(`
-        SELECT * FROM integration_mapping_sets WHERE id = $1 AND company_id = $2
-      `, [mappingSetId, targetCompanyId]);
-
-      if (setCheck.rows.length === 0) {
-        throw new Error(`Conjunto de Mapeamento ID ${mappingSetId} não foi encontrado para esta empresa.`);
-      }
-
-      const mappingSet = setCheck.rows[0];
-
-      const entries = await query(`
-        SELECT id, source_path, source_type, target_path, target_type, direction, transformation, fallback_value, is_required, notes, examples, section, mapping_status, sort_order
-        FROM integration_mapping_entries
-        WHERE mapping_set_id = $1
-        ORDER BY sort_order ASC, id ASC
-      `, [mappingSetId]);
-
-      const attachments = await query(`
-        SELECT id, file_name, mime_type, file_size, extracted_text, created_at
-        FROM integration_mapping_attachments
-        WHERE mapping_set_id = $1
-        ORDER BY created_at DESC
-      `, [mappingSetId]);
-
-      const revisionHistory = await query(`
-        SELECT id, action, entity_type, summary, mapping_revision, created_at
-        FROM integration_mapping_changes
-        WHERE mapping_set_id = $1 AND client_visible = TRUE
-        ORDER BY created_at DESC
-        LIMIT 20
-      `, [mappingSetId]);
-
-      return {
-        mappingSet,
-        entries: entries.rows,
-        attachmentsDocs: attachments.rows,
-        revisionHistory: revisionHistory.rows
-      };
+      requireDomain(target, 'mappings', 'Acesso a mapeamentos não está liberado.');
+      const mappingSetId = Number(args.mappingSetId);
+      if (!Number.isInteger(mappingSetId) || mappingSetId < 1) throw new Error('mappingSetId inválido.');
+      const setResult = await query(`
+        SELECT id, name, description, content_markdown, source_system, target_system, version, revision, status,
+               client_edit_mode, client_can_add_entries, client_can_delete_entries, client_instructions,
+               validation_rules, published_at, closed_at, created_at, updated_at
+          FROM integration_mapping_sets WHERE id = $1 AND company_id = $2
+      `, [mappingSetId, target.id]);
+      if (!setResult.rows[0]) throw new Error('Conjunto de mapeamento não encontrado para esta empresa.');
+      const [entries, attachments, history] = await Promise.all([
+        query(`SELECT id, source_path, source_type, target_path, target_type, direction, transformation, fallback_value, is_required, notes, examples, section, mapping_status, sort_order FROM integration_mapping_entries WHERE mapping_set_id = $1 ORDER BY sort_order ASC, id ASC`, [mappingSetId]),
+        query(`SELECT id, file_name, mime_type, file_size, LEFT(extracted_text, 8000) AS extracted_text_preview, created_at FROM integration_mapping_attachments WHERE mapping_set_id = $1 ORDER BY created_at DESC`, [mappingSetId]),
+        query(`SELECT id, action, entity_type, summary, mapping_revision, created_at FROM integration_mapping_changes WHERE mapping_set_id = $1 AND client_visible = TRUE ORDER BY created_at DESC LIMIT 20`, [mappingSetId]),
+      ]);
+      return { mappingSet: setResult.rows[0], entries: entries.rows, attachments: attachments.rows, revisionHistory: history.rows };
     }
-
     default:
-      throw new Error(`Ferramenta MCP desconhecida: '${toolName}'`);
+      throw new Error('Ferramenta MCP desconhecida.');
   }
 }
 
-// Map to store active SSE connections (session state)
-const sseClients = new Map();
+function auditMetadata(args, status, targetCompanyId, durationMs, requestId) {
+  return {
+    status,
+    targetCompanyId,
+    durationMs,
+    requestId,
+    arguments: {
+      limit: args?.limit,
+      status: args?.status,
+      processId: args?.processId,
+      mappingSetId: args?.mappingSetId,
+      hasContactContext: Boolean(args?.client_context || args?.client_email),
+      contactLabelCount: Array.isArray(args?.client_context?.labels) ? args.client_context.labels.length : 0,
+    },
+  };
+}
 
-/**
- * Handle JSON-RPC method execution
- */
-async function handleRpcMethod(method, params, id, req, clientIp, userAgent) {
+async function auditMcpCall(principal, toolName, args, status, targetCompanyId, durationMs, requestMeta) {
   try {
-    switch (method) {
-      case 'initialize':
-        return {
-          jsonrpc: '2.0',
-          result: {
-            protocolVersion: '2024-11-05',
-            capabilities: {
-              tools: {},
-              resources: {}
-            },
-            serverInfo: {
-              name: 'Lambda Pulse MCP Server',
-              version: '1.0.0',
-              company: req.mcpCompany.name
-            }
-          },
-          id
-        };
-
-      case 'tools/list':
-        return {
-          jsonrpc: '2.0',
-          result: {
-            tools: MCP_TOOLS
-          },
-          id
-        };
-
-      case 'tools/call': {
-        const toolName = params?.name;
-        const toolArgs = params?.arguments || {};
-
-        if (!toolName) {
-          return {
-            jsonrpc: '2.0',
-            error: { code: -32602, message: 'Nome da ferramenta não especificado em params.name' },
-            id
-          };
-        }
-
-        const data = await executeMcpTool(toolName, toolArgs, req.mcpCompany);
-        await auditMcpCall(req.mcpCompany.id, toolName, toolArgs, 'success', clientIp, userAgent);
-
-        return {
-          jsonrpc: '2.0',
-          result: {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(data, null, 2)
-              }
-            ]
-          },
-          id
-        };
-      }
-
-      case 'resources/list': {
-        return {
-          jsonrpc: '2.0',
-          result: {
-            resources: [
-              {
-                uri: `company://${req.mcpCompany.id}/summary`,
-                name: `Resumo da Empresa (${req.mcpCompany.name})`,
-                mimeType: 'application/json'
-              },
-              {
-                uri: `company://${req.mcpCompany.id}/integrations`,
-                name: 'Lista de Integrações e Logs',
-                mimeType: 'application/json'
-              },
-              {
-                uri: `company://${req.mcpCompany.id}/processes`,
-                name: 'Processos, Checklists e Documentos',
-                mimeType: 'application/json'
-              },
-              {
-                uri: `company://${req.mcpCompany.id}/mappings`,
-                name: 'Mapeamentos e Anexos',
-                mimeType: 'application/json'
-              }
-            ]
-          },
-          id
-        };
-      }
-
-      case 'resources/read': {
-        const uri = params?.uri || '';
-        let toolName = 'get_company_summary';
-        if (uri.endsWith('/integrations')) toolName = 'list_integration_logs';
-        if (uri.endsWith('/processes')) toolName = 'list_processes_and_docs';
-        if (uri.endsWith('/mappings')) toolName = 'list_mappings_and_entries';
-
-        const data = await executeMcpTool(toolName, {}, req.mcpCompany);
-        await auditMcpCall(req.mcpCompany.id, `resource_read:${toolName}`, { uri }, 'success', clientIp, userAgent);
-
-        return {
-          jsonrpc: '2.0',
-          result: {
-            contents: [
-              {
-                uri,
-                mimeType: 'application/json',
-                text: JSON.stringify(data, null, 2)
-              }
-            ]
-          },
-          id
-        };
-      }
-
-      default:
-        return {
-          jsonrpc: '2.0',
-          error: { code: -32601, message: `Método MCP não encontrado: '${method}'` },
-          id
-        };
-    }
-  } catch (err) {
-    console.error(`[MCP Error execution method=${method}]`, err);
-    await auditMcpCall(req.mcpCompany.id, method || 'unknown', params || {}, `error: ${err.message}`, clientIp, userAgent);
-    return {
-      jsonrpc: '2.0',
-      error: { code: -32603, message: err.message || 'Erro interno ao processar requisição MCP' },
-      id: id || null
-    };
+    await query(`
+      INSERT INTO audit_logs (company_id, action, resource_type, resource_id, metadata, ip_address, user_agent)
+      VALUES ($1, $2, 'mcp_tool', $3, $4, $5, $6)
+    `, [
+      principal.id,
+      `mcp.tool_call.${toolName}`,
+      toolName,
+      JSON.stringify(auditMetadata(args, status, targetCompanyId, durationMs, requestMeta.requestId)),
+      requestMeta.ip,
+      requestMeta.userAgent,
+    ]);
+  } catch (error) {
+    console.error('[MCP Audit]', error);
   }
 }
 
-/**
- * Main HTTP JSON-RPC 2.0 Handler para /mcp (Direct HTTP fallback, non-SSE)
- */
+function createMcpServer(principal, requestMeta) {
+  const server = new Server(
+    { name: 'lambda-pulse', version: '2.0.0' },
+    {
+      capabilities: { tools: {} },
+      instructions: principal.accessMode === 'delegated'
+        ? 'Use somente o contexto de contato fornecido pelo sistema. O servidor aplica concessões explícitas e falha de forma fechada.'
+        : 'Todas as consultas são isoladas na empresa proprietária desta credencial.',
+    },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: publicToolsFor(principal) }));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const toolName = request.params.name;
+    const args = request.params.arguments || {};
+    const startedAt = Date.now();
+    let targetCompanyId = principal.id;
+    try {
+      const target = await resolveTargetCompany(principal, args);
+      targetCompanyId = target.id;
+      const data = await executeMcpTool(toolName, args, principal, target);
+      await auditMcpCall(principal, toolName, args, 'success', targetCompanyId, Date.now() - startedAt, requestMeta);
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    } catch (error) {
+      await auditMcpCall(principal, toolName, args, 'error', targetCompanyId, Date.now() - startedAt, requestMeta);
+      return { isError: true, content: [{ type: 'text', text: error.message || 'Não foi possível executar a ferramenta.' }] };
+    }
+  });
+  return server;
+}
+
+function requestMeta(req) {
+  return {
+    requestId: req.requestId || crypto.randomUUID(),
+    ip: req.ip || null,
+    userAgent: req.get('user-agent') || null,
+  };
+}
+
+router.use(originGuard);
+
 router.post('/', mcpAuthMiddleware, async (req, res) => {
-  const { jsonrpc, method, params, id } = req.body || {};
-
-  if (jsonrpc !== '2.0') {
-    return res.status(400).json({
-      jsonrpc: '2.0',
-      error: { code: -32600, message: 'Requisição JSON-RPC inválida. Versão deve ser "2.0".' },
-      id: id || null
-    });
+  const server = createMcpServer(req.mcpPrincipal, requestMeta(req));
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (error) {
+    console.error('[MCP Streamable HTTP]', error);
+    if (!res.headersSent) rpcError(res, 500, -32603, 'Erro interno no transporte MCP.', req.body?.id ?? null);
+  } finally {
+    await Promise.allSettled([transport.close(), server.close()]);
   }
-
-  const clientIp = req.ip || req.get('x-forwarded-for') || null;
-  const userAgent = req.get('user-agent') || null;
-
-  const responseData = await handleRpcMethod(method, params, id, req, clientIp, userAgent);
-  return res.json(responseData);
 });
 
-/**
- * Handler POST para Mensagens de Sessões SSE (/mcp/message)
- * O SDK envia requisições POST para o endpoint informado em "event: endpoint".
- * Devemos responder rapidamente com 202 Accepted, e enviar a resposta pela conexão SSE ativa.
- */
+router.get('/', mcpAuthMiddleware, (_req, res) => rpcError(res, 405, -32000, 'Este servidor MCP opera em modo stateless; envie requisições POST para este endpoint.'));
+router.delete('/', mcpAuthMiddleware, (_req, res) => rpcError(res, 405, -32000, 'Não há sessão persistente para encerrar.'));
+
+router.get('/sse', mcpAuthMiddleware, async (req, res) => {
+  const server = createMcpServer(req.mcpPrincipal, requestMeta(req));
+  const transport = new SSEServerTransport('/mcp/message', res);
+  legacySseSessions.set(transport.sessionId, {
+    transport,
+    server,
+    principalId: req.mcpPrincipal.id,
+    tokenHash: req.mcpPrincipal.tokenHash,
+  });
+  res.on('close', () => legacySseSessions.delete(transport.sessionId));
+  try {
+    await server.connect(transport);
+  } catch (error) {
+    legacySseSessions.delete(transport.sessionId);
+    console.error('[MCP Legacy SSE]', error);
+    if (!res.headersSent) rpcError(res, 500, -32603, 'Erro ao iniciar o transporte SSE legado.');
+  }
+});
+
 router.post('/message', mcpAuthMiddleware, async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const sseRes = sseClients.get(sessionId);
-
-  if (!sseRes) {
-    return res.status(404).send('Session not found or expired');
+  const session = legacySseSessions.get(String(req.query.sessionId || ''));
+  if (!session) return rpcError(res, 404, -32006, 'Sessão SSE inexistente ou expirada.', req.body?.id ?? null);
+  if (session.principalId !== req.mcpPrincipal.id || session.tokenHash !== req.mcpPrincipal.tokenHash) {
+    return rpcError(res, 403, -32007, 'A credencial não pertence a esta sessão SSE.', req.body?.id ?? null);
   }
-
-  // De acordo com a especificação, devemos retornar "202 Accepted"
-  res.status(202).end();
-
-  const { jsonrpc, method, params, id } = req.body || {};
-
-  if (jsonrpc !== '2.0') {
-    sseRes.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Requisição JSON-RPC inválida.' }, id: id || null })}\n\n`);
-    return;
+  try {
+    await session.transport.handlePostMessage(req, res, req.body);
+  } catch (error) {
+    console.error('[MCP Legacy SSE Message]', error);
+    if (!res.headersSent) rpcError(res, 500, -32603, 'Erro ao processar a mensagem SSE.', req.body?.id ?? null);
   }
-
-  const clientIp = req.ip || req.get('x-forwarded-for') || null;
-  const userAgent = req.get('user-agent') || null;
-
-  const responseData = await handleRpcMethod(method, params, id, req, clientIp, userAgent);
-  sseRes.write(`event: message\ndata: ${JSON.stringify(responseData)}\n\n`);
 });
 
-/**
- * Suporte a SSE (Server-Sent Events) para MCP Clients como Claude Desktop
- */
-router.get('/sse', mcpAuthMiddleware, (req, res) => {
-  const sessionId = crypto.randomUUID();
-  sseClients.set(sessionId, res);
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
-  });
-
-  const protocol = req.get('x-forwarded-proto') || req.protocol;
-  const host = req.get('x-forwarded-host') || req.get('host');
-  const endpointUrl = `${protocol}://${host}/mcp/message?sessionId=${sessionId}`;
-  
-  // Como fallback de segurança adicional para clientes MCP, enviar URL absoluta compatível com o proxy
-  res.write(`event: endpoint\ndata: ${endpointUrl}\n\n`);
-
-  req.on('close', () => {
-    sseClients.delete(sessionId);
-    res.end();
-  });
-});
+router._mcpInternals = { executeMcpTool, resolveTargetCompany, publicToolsFor, normalizeIdentity, legacySseSessions };
 
 module.exports = router;
