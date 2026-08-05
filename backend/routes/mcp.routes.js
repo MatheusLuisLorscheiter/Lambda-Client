@@ -304,7 +304,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       if (args.status) { params.push(String(args.status)); statusSql = ` AND p.status = $${params.length}`; }
       params.push(safeLimit(args.limit));
       const processes = await query(`
-        SELECT p.id, p.reference_code, p.title, p.description, p.category, p.status, p.priority, p.impact,
+        SELECT p.id, p.reference_code, p.title, LEFT(p.description, 2000) AS description, p.category, p.status, p.priority, p.impact,
                p.health, p.progress, p.due_date, p.target_sla_at, p.delivered_at, p.latest_update, p.created_at, p.updated_at,
                (SELECT COUNT(*)::int FROM process_updates u WHERE u.process_id = p.id AND u.visibility = 'client') AS updates_count,
                (SELECT COUNT(*)::int FROM process_deliveries d WHERE d.process_id = p.id) AS deliveries_count
@@ -313,8 +313,8 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
          ORDER BY p.updated_at DESC LIMIT $${params.length}
       `, params);
       const deliveries = await query(`
-        SELECT d.id, d.process_id, d.title, d.summary, d.version, d.environment, d.status, d.artifact_links,
-               d.release_notes, d.delivered_at, d.created_at
+        SELECT d.id, d.process_id, d.title, LEFT(d.summary, 2000) AS summary, d.version, d.environment, d.status, d.artifact_links,
+               LEFT(d.release_notes, 4000) AS release_notes, d.delivered_at, d.created_at
           FROM process_deliveries d JOIN process_items p ON p.id = d.process_id
          WHERE p.company_id = $1 AND p.is_client_visible = TRUE
          ORDER BY d.created_at DESC LIMIT 30
@@ -326,16 +326,17 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       const processId = Number(args.processId);
       if (!Number.isInteger(processId) || processId < 1) throw new Error('processId inválido.');
       const processResult = await query(`
-        SELECT id, reference_code, title, description, objective, scope, acceptance_criteria, category, status,
+        SELECT id, reference_code, title, LEFT(description, 4000) AS description, LEFT(objective, 2000) AS objective,
+               LEFT(scope, 4000) AS scope, LEFT(acceptance_criteria, 4000) AS acceptance_criteria, category, status,
                priority, impact, health, complexity, progress, estimate_business_days, planned_start, due_date,
                target_sla_at, delivered_at, blocked_reason, next_action, tags, latest_update, created_at, updated_at
           FROM process_items WHERE id = $1 AND company_id = $2 AND is_client_visible = TRUE
       `, [processId, target.id]);
       if (!processResult.rows[0]) throw new Error('Processo não encontrado ou não visível para esta empresa.');
       const [updates, checklist, deliveries] = await Promise.all([
-        query(`SELECT id, kind, message, created_at FROM process_updates WHERE process_id = $1 AND visibility = 'client' ORDER BY created_at ASC`, [processId]),
+        query(`SELECT id, kind, LEFT(message, 4000) AS message, created_at FROM process_updates WHERE process_id = $1 AND visibility = 'client' ORDER BY created_at DESC LIMIT 50`, [processId]),
         query(`SELECT id, title, description, status, due_date, sort_order, completed_at FROM process_checklist_items WHERE process_id = $1 ORDER BY sort_order ASC, id ASC`, [processId]),
-        query(`SELECT id, title, summary, version, environment, status, artifact_links, release_notes, delivered_at FROM process_deliveries WHERE process_id = $1 ORDER BY created_at DESC`, [processId]),
+        query(`SELECT id, title, LEFT(summary, 2000) AS summary, version, environment, status, artifact_links, LEFT(release_notes, 4000) AS release_notes, delivered_at FROM process_deliveries WHERE process_id = $1 ORDER BY created_at DESC LIMIT 30`, [processId]),
       ]);
       return { process: processResult.rows[0], updates: updates.rows, checklist: checklist.rows, deliveriesAndDocs: deliveries.rows };
     }
@@ -346,7 +347,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       if (args.status) { params.push(String(args.status)); statusSql = ` AND s.status = $${params.length}`; }
       params.push(safeLimit(args.limit));
       const sets = await query(`
-        SELECT s.id, s.name, s.description, s.source_system, s.target_system, s.version, s.revision, s.status,
+        SELECT s.id, s.name, LEFT(s.description, 2000) AS description, s.source_system, s.target_system, s.version, s.revision, s.status,
                s.created_at, s.updated_at,
                (SELECT COUNT(*)::int FROM integration_mapping_entries e WHERE e.mapping_set_id = s.id) AS entries_count,
                (SELECT COUNT(*)::int FROM integration_mapping_attachments a WHERE a.mapping_set_id = s.id) AS attachments_count
@@ -365,15 +366,16 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       const mappingSetId = Number(args.mappingSetId);
       if (!Number.isInteger(mappingSetId) || mappingSetId < 1) throw new Error('mappingSetId inválido.');
       const setResult = await query(`
-        SELECT id, name, description, content_markdown, source_system, target_system, version, revision, status,
+        SELECT id, name, LEFT(description, 2000) AS description, LEFT(content_markdown, 16000) AS content_markdown,
+               source_system, target_system, version, revision, status,
                client_edit_mode, client_can_add_entries, client_can_delete_entries, client_instructions,
                validation_rules, published_at, closed_at, created_at, updated_at
           FROM integration_mapping_sets WHERE id = $1 AND company_id = $2
       `, [mappingSetId, target.id]);
       if (!setResult.rows[0]) throw new Error('Conjunto de mapeamento não encontrado para esta empresa.');
       const [entries, attachments, history] = await Promise.all([
-        query(`SELECT id, source_path, source_type, target_path, target_type, direction, transformation, fallback_value, is_required, notes, examples, section, mapping_status, sort_order FROM integration_mapping_entries WHERE mapping_set_id = $1 ORDER BY sort_order ASC, id ASC`, [mappingSetId]),
-        query(`SELECT id, file_name, mime_type, file_size, LEFT(extracted_text, 8000) AS extracted_text_preview, created_at FROM integration_mapping_attachments WHERE mapping_set_id = $1 ORDER BY created_at DESC`, [mappingSetId]),
+        query(`SELECT id, source_path, source_type, target_path, target_type, direction, transformation, fallback_value, is_required, notes, examples, section, mapping_status, sort_order FROM integration_mapping_entries WHERE mapping_set_id = $1 ORDER BY sort_order ASC, id ASC LIMIT 250`, [mappingSetId]),
+        query(`SELECT id, file_name, mime_type, file_size, LEFT(extracted_text, 2000) AS extracted_text_preview, created_at FROM integration_mapping_attachments WHERE mapping_set_id = $1 ORDER BY created_at DESC LIMIT 10`, [mappingSetId]),
         query(`SELECT id, action, entity_type, summary, mapping_revision, created_at FROM integration_mapping_changes WHERE mapping_set_id = $1 AND client_visible = TRUE ORDER BY created_at DESC LIMIT 20`, [mappingSetId]),
       ]);
       return { mappingSet: setResult.rows[0], entries: entries.rows, attachments: attachments.rows, revisionHistory: history.rows };

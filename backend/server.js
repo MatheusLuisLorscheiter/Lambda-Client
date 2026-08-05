@@ -19,9 +19,16 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
-// Mapping documents may include a base64 attachment. The mapping route applies
-// its own stricter 10 MB decoded-file limit.
-app.use(express.json({ limit: '15mb' }));
+// MCP aceita apenas JSON pequeno; anexos base64 das demais rotas continuam com
+// o limite maior e com a validação específica do módulo de mapeamentos.
+const mcpJsonParser = express.json({ limit: '1mb' });
+const applicationJsonParser = express.json({ limit: '15mb' });
+app.use((req, res, next) => {
+  const parser = req.path === '/mcp' || req.path.startsWith('/mcp/')
+    ? mcpJsonParser
+    : applicationJsonParser;
+  return parser(req, res, next);
+});
 app.use((req, res, next) => {
   const requestId = req.get('x-request-id') || crypto.randomUUID();
   req.requestId = requestId;

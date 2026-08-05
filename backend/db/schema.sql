@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS company_mcp_configs (
   api_key_prefix TEXT,
   allowed_domains JSONB NOT NULL DEFAULT '{"logs": true, "processes": true, "mappings": true, "integrations": true}',
   access_mode TEXT NOT NULL DEFAULT 'company'
-    CHECK (access_mode IN ('company', 'delegated')),
+    CONSTRAINT chk_company_mcp_access_mode CHECK (access_mode IN ('company', 'delegated')),
   require_contact_tag_match BOOLEAN NOT NULL DEFAULT FALSE,
   max_requests_per_minute INTEGER NOT NULL DEFAULT 60,
   last_accessed_at TIMESTAMPTZ,
