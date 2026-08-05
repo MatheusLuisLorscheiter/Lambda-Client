@@ -623,7 +623,11 @@ router.get('/sse', mcpAuthMiddleware, (req, res) => {
     'Connection': 'keep-alive'
   });
 
-  const endpointUrl = `${req.protocol}://${req.get('host')}/mcp/message?sessionId=${sessionId}`;
+  const protocol = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('x-forwarded-host') || req.get('host');
+  const endpointUrl = `${protocol}://${host}/mcp/message?sessionId=${sessionId}`;
+  
+  // Como fallback de segurança adicional para clientes MCP, enviar URL absoluta compatível com o proxy
   res.write(`event: endpoint\ndata: ${endpointUrl}\n\n`);
 
   req.on('close', () => {
