@@ -420,27 +420,17 @@ async function executeMcpTool(toolName, args, company) {
   }
 }
 
+// Map to store active SSE connections (session state)
+const sseClients = new Map();
+
 /**
- * Main HTTP JSON-RPC 2.0 Handler para /mcp
+ * Handle JSON-RPC method execution
  */
-router.post('/', mcpAuthMiddleware, async (req, res) => {
-  const { jsonrpc, method, params, id } = req.body || {};
-
-  if (jsonrpc !== '2.0') {
-    return res.status(400).json({
-      jsonrpc: '2.0',
-      error: { code: -32600, message: 'Requisição JSON-RPC inválida. Versão deve ser "2.0".' },
-      id: id || null
-    });
-  }
-
-  const clientIp = req.ip || req.get('x-forwarded-for') || null;
-  const userAgent = req.get('user-agent') || null;
-
+async function handleRpcMethod(method, params, id, req, clientIp, userAgent) {
   try {
     switch (method) {
       case 'initialize':
-        return res.json({
+        return {
           jsonrpc: '2.0',
           result: {
             protocolVersion: '2024-11-05',
@@ -455,33 +445,33 @@ router.post('/', mcpAuthMiddleware, async (req, res) => {
             }
           },
           id
-        });
+        };
 
       case 'tools/list':
-        return res.json({
+        return {
           jsonrpc: '2.0',
           result: {
             tools: MCP_TOOLS
           },
           id
-        });
+        };
 
       case 'tools/call': {
         const toolName = params?.name;
         const toolArgs = params?.arguments || {};
 
         if (!toolName) {
-          return res.status(400).json({
+          return {
             jsonrpc: '2.0',
             error: { code: -32602, message: 'Nome da ferramenta não especificado em params.name' },
             id
-          });
+          };
         }
 
         const data = await executeMcpTool(toolName, toolArgs, req.mcpCompany);
         await auditMcpCall(req.mcpCompany.id, toolName, toolArgs, 'success', clientIp, userAgent);
 
-        return res.json({
+        return {
           jsonrpc: '2.0',
           result: {
             content: [
@@ -492,11 +482,11 @@ router.post('/', mcpAuthMiddleware, async (req, res) => {
             ]
           },
           id
-        });
+        };
       }
 
       case 'resources/list': {
-        return res.json({
+        return {
           jsonrpc: '2.0',
           result: {
             resources: [
@@ -523,7 +513,7 @@ router.post('/', mcpAuthMiddleware, async (req, res) => {
             ]
           },
           id
-        });
+        };
       }
 
       case 'resources/read': {
@@ -536,7 +526,7 @@ router.post('/', mcpAuthMiddleware, async (req, res) => {
         const data = await executeMcpTool(toolName, {}, req.mcpCompany);
         await auditMcpCall(req.mcpCompany.id, `resource_read:${toolName}`, { uri }, 'success', clientIp, userAgent);
 
-        return res.json({
+        return {
           jsonrpc: '2.0',
           result: {
             contents: [
@@ -548,42 +538,96 @@ router.post('/', mcpAuthMiddleware, async (req, res) => {
             ]
           },
           id
-        });
+        };
       }
 
       default:
-        return res.status(404).json({
+        return {
           jsonrpc: '2.0',
           error: { code: -32601, message: `Método MCP não encontrado: '${method}'` },
           id
-        });
+        };
     }
   } catch (err) {
     console.error(`[MCP Error execution method=${method}]`, err);
     await auditMcpCall(req.mcpCompany.id, method || 'unknown', params || {}, `error: ${err.message}`, clientIp, userAgent);
-
-    return res.status(500).json({
+    return {
       jsonrpc: '2.0',
       error: { code: -32603, message: err.message || 'Erro interno ao processar requisição MCP' },
       id: id || null
+    };
+  }
+}
+
+/**
+ * Main HTTP JSON-RPC 2.0 Handler para /mcp (Direct HTTP fallback, non-SSE)
+ */
+router.post('/', mcpAuthMiddleware, async (req, res) => {
+  const { jsonrpc, method, params, id } = req.body || {};
+
+  if (jsonrpc !== '2.0') {
+    return res.status(400).json({
+      jsonrpc: '2.0',
+      error: { code: -32600, message: 'Requisição JSON-RPC inválida. Versão deve ser "2.0".' },
+      id: id || null
     });
   }
+
+  const clientIp = req.ip || req.get('x-forwarded-for') || null;
+  const userAgent = req.get('user-agent') || null;
+
+  const responseData = await handleRpcMethod(method, params, id, req, clientIp, userAgent);
+  return res.json(responseData);
+});
+
+/**
+ * Handler POST para Mensagens de Sessões SSE (/mcp/message)
+ * O SDK envia requisições POST para o endpoint informado em "event: endpoint".
+ * Devemos responder rapidamente com 202 Accepted, e enviar a resposta pela conexão SSE ativa.
+ */
+router.post('/message', mcpAuthMiddleware, async (req, res) => {
+  const sessionId = req.query.sessionId;
+  const sseRes = sseClients.get(sessionId);
+
+  if (!sseRes) {
+    return res.status(404).send('Session not found or expired');
+  }
+
+  // De acordo com a especificação, devemos retornar "202 Accepted"
+  res.status(202).end();
+
+  const { jsonrpc, method, params, id } = req.body || {};
+
+  if (jsonrpc !== '2.0') {
+    sseRes.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Requisição JSON-RPC inválida.' }, id: id || null })}\n\n`);
+    return;
+  }
+
+  const clientIp = req.ip || req.get('x-forwarded-for') || null;
+  const userAgent = req.get('user-agent') || null;
+
+  const responseData = await handleRpcMethod(method, params, id, req, clientIp, userAgent);
+  sseRes.write(`event: message\ndata: ${JSON.stringify(responseData)}\n\n`);
 });
 
 /**
  * Suporte a SSE (Server-Sent Events) para MCP Clients como Claude Desktop
  */
 router.get('/sse', mcpAuthMiddleware, (req, res) => {
+  const sessionId = crypto.randomUUID();
+  sseClients.set(sessionId, res);
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive'
   });
 
-  const endpointUrl = `${req.protocol}://${req.get('host')}/mcp`;
+  const endpointUrl = `${req.protocol}://${req.get('host')}/mcp/message?sessionId=${sessionId}`;
   res.write(`event: endpoint\ndata: ${endpointUrl}\n\n`);
 
   req.on('close', () => {
+    sseClients.delete(sessionId);
     res.end();
   });
 });
