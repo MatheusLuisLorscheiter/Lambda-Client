@@ -8,20 +8,21 @@ const router = express.Router();
  * Middleware: Autenticação de Agentes de IA via MCP Token
  */
 async function mcpAuthMiddleware(req, res, next) {
+  let token = '';
+
   const authHeader = req.get('authorization') || '';
-  if (!authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      jsonrpc: '2.0',
-      error: { code: -32001, message: 'Autenticação MCP necessária. Forneça a chave Bearer no cabeçalho Authorization.' },
-      id: req.body?.id || null
-    });
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (req.query.token) {
+    token = req.query.token;
+  } else if (req.query.apiKey) {
+    token = req.query.apiKey;
   }
 
-  const token = authHeader.substring(7).trim();
   if (!token) {
     return res.status(401).json({
       jsonrpc: '2.0',
-      error: { code: -32001, message: 'Token MCP inválido ou vazio.' },
+      error: { code: -32001, message: 'Autenticação MCP necessária. Forneça a chave Bearer no cabeçalho Authorization ou via query string (token=...)' },
       id: req.body?.id || null
     });
   }
@@ -108,7 +109,9 @@ const MCP_TOOLS = [
     description: 'Retorna um resumo estatístico da empresa: total de integrações, processos, entregas e mapeamentos configurados.',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
+      },
       required: []
     }
   },
@@ -118,7 +121,8 @@ const MCP_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: 'Quantidade máxima de registros (padrão: 20, máximo: 50)' }
+        limit: { type: 'number', description: 'Quantidade máxima de registros (padrão: 20, máximo: 50)' },
+        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
       }
     }
   },
@@ -129,7 +133,8 @@ const MCP_TOOLS = [
       type: 'object',
       properties: {
         status: { type: 'string', description: 'Filtrar por status do processo (ex: requested, analysis, in_progress, delivered)' },
-        limit: { type: 'number', description: 'Quantidade máxima de processos (padrão: 20)' }
+        limit: { type: 'number', description: 'Quantidade máxima de processos (padrão: 20)' },
+        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
       }
     }
   },
@@ -139,7 +144,8 @@ const MCP_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        processId: { type: 'number', description: 'ID numérico do processo' }
+        processId: { type: 'number', description: 'ID numérico do processo' },
+        client_email: { type: 'string', description: 'Email do cliente para validação de acesso. Apenas chaves Master podem utilizar.' }
       },
       required: ['processId']
     }
@@ -151,7 +157,8 @@ const MCP_TOOLS = [
       type: 'object',
       properties: {
         status: { type: 'string', description: 'Filtrar por status do mapeamento (draft, published, archived)' },
-        limit: { type: 'number', description: 'Quantidade máxima de mapeamentos (padrão: 20)' }
+        limit: { type: 'number', description: 'Quantidade máxima de mapeamentos (padrão: 20)' },
+        client_email: { type: 'string', description: 'Email do cliente para filtrar os resultados pela sua respectiva empresa. Apenas chaves Master podem utilizar.' }
       }
     }
   },
@@ -161,7 +168,8 @@ const MCP_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        mappingSetId: { type: 'number', description: 'ID numérico do conjunto de mapeamento' }
+        mappingSetId: { type: 'number', description: 'ID numérico do conjunto de mapeamento' },
+        client_email: { type: 'string', description: 'Email do cliente para validação de acesso. Apenas chaves Master podem utilizar.' }
       },
       required: ['mappingSetId']
     }
@@ -172,18 +180,30 @@ const MCP_TOOLS = [
  * Executores das Ferramentas MCP
  */
 async function executeMcpTool(toolName, args, company) {
-  const { id: companyId, allowedDomains } = company;
+  let targetCompanyId = company.id;
+  const { allowedDomains } = company;
+
+  if (args.client_email) {
+    if (company.id !== 1) {
+      throw new Error('Acesso negado. Apenas a conta Master pode realizar consultas filtradas por client_email de terceiros.');
+    }
+    const userRes = await query('SELECT company_id FROM users WHERE email = $1', [args.client_email]);
+    if (userRes.rows.length === 0) {
+      throw new Error(`O email ${args.client_email} não está vinculado a nenhuma empresa nesta plataforma.`);
+    }
+    targetCompanyId = userRes.rows[0].company_id;
+  }
 
   switch (toolName) {
     case 'get_company_summary': {
-      const integrationsCount = await query('SELECT COUNT(*)::int FROM integrations WHERE company_id = $1', [companyId]);
-      const processesCount = await query('SELECT COUNT(*)::int FROM process_items WHERE company_id = $1', [companyId]);
-      const mappingsCount = await query('SELECT COUNT(*)::int FROM integration_mapping_sets WHERE company_id = $1', [companyId]);
-      const recentAuditCount = await query('SELECT COUNT(*)::int FROM audit_logs WHERE company_id = $1', [companyId]);
+      const integrationsCount = await query('SELECT COUNT(*)::int FROM integrations WHERE company_id = $1', [targetCompanyId]);
+      const processesCount = await query('SELECT COUNT(*)::int FROM process_items WHERE company_id = $1', [targetCompanyId]);
+      const mappingsCount = await query('SELECT COUNT(*)::int FROM integration_mapping_sets WHERE company_id = $1', [targetCompanyId]);
+      const recentAuditCount = await query('SELECT COUNT(*)::int FROM audit_logs WHERE company_id = $1', [targetCompanyId]);
 
       return {
-        companyId,
-        companyName: company.name,
+        companyId: targetCompanyId,
+        companyName: company.id === targetCompanyId ? company.name : `Empresa de ${args.client_email}`,
         totalIntegrations: integrationsCount.rows[0].count,
         totalProcesses: processesCount.rows[0].count,
         totalMappingSets: mappingsCount.rows[0].count,
@@ -203,7 +223,7 @@ async function executeMcpTool(toolName, args, company) {
         FROM integrations
         WHERE company_id = $1
         ORDER BY name ASC
-      `, [companyId]);
+      `, [targetCompanyId]);
 
       const logs = await query(`
         SELECT id, action, resource_type, resource_id, metadata, created_at
@@ -211,7 +231,7 @@ async function executeMcpTool(toolName, args, company) {
         WHERE company_id = $1
         ORDER BY created_at DESC
         LIMIT $2
-      `, [companyId, limit]);
+      `, [targetCompanyId, limit]);
 
       return {
         integrations: integrations.rows,
@@ -226,7 +246,7 @@ async function executeMcpTool(toolName, args, company) {
       const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
       const statusFilter = args?.status ? String(args.status) : null;
 
-      const params = [companyId];
+      const params = [targetCompanyId];
       let sql = `
         SELECT 
           p.id, p.reference_code, p.title, p.description, p.category, p.status, p.priority, p.impact, p.health, p.progress, p.due_date, p.target_sla_at, p.delivered_at, p.created_at, p.updated_at,
@@ -254,7 +274,7 @@ async function executeMcpTool(toolName, args, company) {
         WHERE p.company_id = $1
         ORDER BY d.created_at DESC
         LIMIT 30
-      `, [companyId]);
+      `, [targetCompanyId]);
 
       return {
         processes: result.rows,
@@ -273,7 +293,7 @@ async function executeMcpTool(toolName, args, company) {
 
       const processCheck = await query(`
         SELECT * FROM process_items WHERE id = $1 AND company_id = $2
-      `, [processId, companyId]);
+      `, [processId, targetCompanyId]);
 
       if (processCheck.rows.length === 0) {
         throw new Error(`Processo ID ${processId} não foi encontrado para esta empresa.`);
@@ -328,7 +348,7 @@ async function executeMcpTool(toolName, args, company) {
       const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
       const statusFilter = args?.status ? String(args.status) : null;
 
-      const params = [companyId];
+      const params = [targetCompanyId];
       let sql = `
         SELECT 
           s.id, s.name, s.description, s.source_system, s.target_system, s.version, s.revision, s.status, s.content_markdown, s.created_at, s.updated_at,
@@ -355,7 +375,7 @@ async function executeMcpTool(toolName, args, company) {
         JOIN integration_mapping_sets s ON s.id = a.mapping_set_id
         WHERE s.company_id = $1
         ORDER BY a.created_at DESC
-      `, [companyId]);
+      `, [targetCompanyId]);
 
       return {
         mappingSets: mappingSets.rows,
@@ -377,7 +397,7 @@ async function executeMcpTool(toolName, args, company) {
 
       const setCheck = await query(`
         SELECT * FROM integration_mapping_sets WHERE id = $1 AND company_id = $2
-      `, [mappingSetId, companyId]);
+      `, [mappingSetId, targetCompanyId]);
 
       if (setCheck.rows.length === 0) {
         throw new Error(`Conjunto de Mapeamento ID ${mappingSetId} não foi encontrado para esta empresa.`);
