@@ -851,6 +851,7 @@
             </svg>
             <p class="mt-4 text-sm">Nenhum log de auditoria ainda.</p>
           </div>
+        </div>
         <!-- MCP Tab -->
         <div v-if="activeTab === 'mcp'" class="p-6">
           <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
