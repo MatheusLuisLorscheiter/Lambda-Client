@@ -851,6 +851,84 @@
             </svg>
             <p class="mt-4 text-sm">Nenhum log de auditoria ainda.</p>
           </div>
+        <!-- MCP Tab -->
+        <div v-if="activeTab === 'mcp'" class="p-6">
+          <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div class="flex-1">
+              <label class="block min-w-0 sm:max-w-lg">
+                <span class="mb-1 block text-xs font-medium text-slate-500">Buscar empresa</span>
+                <input v-model="mcpSearch" type="search" placeholder="Nome da empresa ou prefixo da chave" class="min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm" />
+              </label>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+              <div class="text-slate-500">
+                Empresas ativas: <span class="font-semibold text-slate-900">{{ mcpStats.activeCompaniesCount }}</span>
+              </div>
+              <div class="text-slate-500">
+                Chamadas hoje: <span class="font-semibold text-slate-900">{{ mcpStats.totalMcpCalls }}</span>
+              </div>
+              <button @click="fetchMcpCompanies" class="text-indigo-600 hover:text-indigo-800" title="Atualizar">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              </button>
+            </div>
+          </div>
+          
+          <div v-if="mcpLoading" class="py-12 text-center text-slate-500">
+            <svg class="mx-auto h-8 w-8 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-2 text-sm">Carregando configurações MCP...</p>
+          </div>
+          
+          <div v-else class="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+            <table class="min-w-full divide-y divide-slate-200">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Empresa</th>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status MCP</th>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Chave API</th>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Ações</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-slate-200">
+                <tr v-for="company in filteredMcpCompanies" :key="company.companyId" class="hover:bg-slate-50">
+                  <td class="px-4 py-4 whitespace-nowrap">
+                    <div class="text-sm font-medium text-slate-900">{{ company.companyName }}</div>
+                  </td>
+                  <td class="px-4 py-4 whitespace-nowrap">
+                    <button
+                      @click="toggleMcpStatus(company)"
+                      :class="['relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2', company.isEnabled ? 'bg-indigo-600' : 'bg-slate-200']"
+                    >
+                      <span :class="['pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out', company.isEnabled ? 'translate-x-4' : 'translate-x-0']"></span>
+                    </button>
+                    <span class="ml-2 text-xs text-slate-500">{{ company.isEnabled ? 'Ativo' : 'Inativo' }}</span>
+                  </td>
+                  <td class="px-4 py-4 whitespace-nowrap text-sm text-slate-500">
+                    <div v-if="company.hasToken" class="flex items-center gap-2">
+                      <span class="font-mono bg-slate-100 px-2 py-1 rounded text-xs">{{ company.apiKeyPrefix }}...</span>
+                      <button @click="generateMcpToken(company)" class="text-indigo-600 hover:text-indigo-900 text-xs" title="Rotacionar Chave">Rotacionar</button>
+                    </div>
+                    <div v-else>
+                      <button @click="generateMcpToken(company)" class="text-indigo-600 hover:text-indigo-900 text-xs">Gerar Chave</button>
+                    </div>
+                  </td>
+                  <td class="px-4 py-4 whitespace-nowrap text-sm font-medium">
+                    <div class="flex space-x-3">
+                      <button @click="openMcpPermissionsModal(company)" class="text-indigo-600 hover:text-indigo-900" :disabled="!company.isEnabled">Permissões</button>
+                      <button @click="openMcpAuditModal(company)" class="text-slate-600 hover:text-slate-900" :disabled="!company.isEnabled">Logs de Uso</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="filteredMcpCompanies.length === 0">
+                  <td colspan="4" class="px-4 py-8 text-center text-sm text-slate-500">
+                    Nenhuma empresa encontrada.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </main>
@@ -1221,6 +1299,126 @@
             >
               Fechar
             </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+    <!-- MCP Token Modal -->
+    <transition name="fade">
+      <div v-if="mcpTokenModal" class="fixed inset-0 z-[60] flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="mcpTokenModal = false"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg mx-4 p-6">
+          <div class="flex items-start justify-between mb-4">
+            <h3 class="text-lg font-semibold text-slate-900">Chave MCP Gerada</h3>
+            <button type="button" @click="mcpTokenModal = false" class="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+          <div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <p class="text-sm text-amber-800 font-medium">Importante: Copie esta chave agora!</p>
+            <p class="text-xs text-amber-700 mt-1">Por segurança, não será possível visualizá-la novamente.</p>
+          </div>
+          <div class="flex items-center gap-2 mb-6">
+            <input type="text" readonly :value="generatedTokenData?.token" class="w-full px-4 py-2 border border-slate-300 rounded-lg font-mono text-sm bg-slate-50 text-slate-900" />
+            <button @click="copyMcpTokenToClipboard" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800">Copiar</button>
+          </div>
+          <p class="text-sm text-slate-600 mb-2">Para configurar o Cursor (ou outro agente MCP):</p>
+          <pre class="bg-slate-900 text-slate-300 p-4 rounded-lg text-xs overflow-x-auto"><code>{
+  "mcpServers": {
+    "lambda-pulse": {
+      "command": "node",
+      "args": ["caminho/para/mcp-client.js"],
+      "env": {
+        "MCP_TOKEN": "{{ generatedTokenData?.token }}"
+      }
+    }
+  }
+}</code></pre>
+          <div class="mt-6 flex justify-end">
+            <button @click="mcpTokenModal = false" class="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Fechar</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- MCP Permissions Modal -->
+    <transition name="fade">
+      <div v-if="mcpPermissionsModal" class="fixed inset-0 z-[60] flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="mcpPermissionsModal = false"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md mx-4 p-6">
+          <div class="flex items-start justify-between mb-4">
+            <h3 class="text-lg font-semibold text-slate-900">Permissões MCP</h3>
+            <button type="button" @click="mcpPermissionsModal = false" class="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+          <p class="text-sm text-slate-500 mb-6">Configure quais dados a empresa <strong>{{ editingMcpCompany?.companyName }}</strong> pode acessar via agentes de IA.</p>
+          
+          <div class="space-y-4">
+            <label class="flex items-center p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+              <input type="checkbox" v-model="mcpPermissionsForm.logs" class="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+              <span class="ml-3 text-sm text-slate-700 font-medium">Logs e Métricas de Integrações</span>
+            </label>
+            <label class="flex items-center p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+              <input type="checkbox" v-model="mcpPermissionsForm.processes" class="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+              <span class="ml-3 text-sm text-slate-700 font-medium">Processos e Documentos</span>
+            </label>
+            <label class="flex items-center p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+              <input type="checkbox" v-model="mcpPermissionsForm.mappings" class="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+              <span class="ml-3 text-sm text-slate-700 font-medium">Mapeamentos de Dados</span>
+            </label>
+            <label class="flex items-center p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+              <input type="checkbox" v-model="mcpPermissionsForm.integrations" class="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+              <span class="ml-3 text-sm text-slate-700 font-medium">Listar Integrações / Funções</span>
+            </label>
+          </div>
+          
+          <div class="mt-6 flex justify-end gap-3">
+            <button @click="mcpPermissionsModal = false" class="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">Cancelar</button>
+            <button @click="saveMcpPermissions" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Salvar Permissões</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- MCP Audit Modal -->
+    <transition name="fade">
+      <div v-if="mcpAuditModal" class="fixed inset-0 z-[60] flex items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/50" @click="mcpAuditModal = false"></div>
+        <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-3xl mx-4 p-6 max-h-[90vh] flex flex-col">
+          <div class="flex items-start justify-between mb-4">
+            <div>
+              <h3 class="text-lg font-semibold text-slate-900">Logs de Uso MCP</h3>
+              <p class="text-sm text-slate-500 mt-1">Empresa: {{ mcpAuditCompany?.companyName }}</p>
+            </div>
+            <button type="button" @click="mcpAuditModal = false" class="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+          
+          <div class="overflow-y-auto flex-1 pr-1 border border-slate-200 rounded-lg">
+            <table class="min-w-full divide-y divide-slate-200">
+              <thead class="bg-slate-50 sticky top-0">
+                <tr>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Data/Hora</th>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Método MCP</th>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                  <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Duração (ms)</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-slate-200">
+                <tr v-for="log in mcpAuditLogs" :key="log.id" class="hover:bg-slate-50">
+                  <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500">{{ new Date(log.created_at).toLocaleString('pt-BR') }}</td>
+                  <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-900">{{ log.method }}</td>
+                  <td class="px-4 py-3 whitespace-nowrap text-sm">
+                    <span :class="['px-2 inline-flex text-xs leading-5 font-semibold rounded-full', log.status === 'success' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800']">
+                      {{ log.status }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500">{{ log.duration_ms }}</td>
+                </tr>
+                <tr v-if="mcpAuditLogs.length === 0">
+                  <td colspan="4" class="px-4 py-8 text-center text-sm text-slate-500">Nenhum log registrado recentemente.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-6 flex justify-end">
+            <button @click="mcpAuditModal = false" class="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Fechar</button>
           </div>
         </div>
       </div>
