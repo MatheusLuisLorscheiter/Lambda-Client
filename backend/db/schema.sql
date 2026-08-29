@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS process_checklist_items (
   due_date DATE,
   sort_order INTEGER NOT NULL DEFAULT 0,
   completed_at TIMESTAMPTZ,
+  version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -164,9 +165,60 @@ CREATE TABLE IF NOT EXISTS process_deliveries (
   delivered_at TIMESTAMPTZ,
   accepted_at TIMESTAMPTZ,
   accepted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  row_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS mcp_tool_effects (
+  id BIGSERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  tool_name TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('processing', 'committed')),
+  response JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (company_id, tool_name, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS generic_webhook_endpoints (
+  id BIGSERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  encrypted_secret TEXT NOT NULL,
+  event_types TEXT[] NOT NULL DEFAULT '{}',
+  signature_header TEXT NOT NULL DEFAULT 'x-webhook-signature',
+  timestamp_header TEXT NOT NULL DEFAULT 'x-webhook-timestamp',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  last_success_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS generic_webhook_outbox (
+  id BIGSERIAL PRIMARY KEY,
+  endpoint_id BIGINT NOT NULL REFERENCES generic_webhook_endpoints(id) ON DELETE CASCADE,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'failed', 'delivered', 'dead_letter')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_until TIMESTAMPTZ,
+  last_error TEXT,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (endpoint_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_generic_webhook_outbox_due
+  ON generic_webhook_outbox(status, available_at, locked_until);
 
 CREATE TABLE IF NOT EXISTS process_effort_assessments (
   id SERIAL PRIMARY KEY,
@@ -338,6 +390,7 @@ CREATE TABLE IF NOT EXISTS company_mcp_configs (
   api_key_hash TEXT,
   api_key_prefix TEXT,
   allowed_domains JSONB NOT NULL DEFAULT '{"logs": true, "processes": true, "mappings": true, "integrations": true}',
+  allowed_scopes TEXT[] NOT NULL DEFAULT '{}',
   access_mode TEXT NOT NULL DEFAULT 'company'
     CONSTRAINT chk_company_mcp_access_mode CHECK (access_mode IN ('company', 'delegated')),
   require_contact_tag_match BOOLEAN NOT NULL DEFAULT FALSE,

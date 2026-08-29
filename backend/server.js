@@ -52,6 +52,8 @@ const processesRouter = require('./routes/processes');
 const processEffortRouter = require('./routes/process-effort.routes');
 const adminMcpRouter = require('./routes/admin-mcp.routes');
 const mcpRouter = require('./routes/mcp.routes');
+const webhookEndpointsRouter = require('./routes/webhook-endpoints.routes');
+const { dispatchPendingWebhookEvents } = require('./services/genericWebhookPublisher');
 
 app.use('/auth/login', authLimiter);
 app.use('/auth/admin/login', authLimiter);
@@ -59,6 +61,7 @@ app.use('/auth/password/forgot', authLimiter);
 app.use('/auth/password/reset', authLimiter);
 
 app.use('/auth/admin/mcp', adminMcpRouter);
+app.use('/auth/admin/webhook-endpoints', webhookEndpointsRouter);
 app.use('/mcp', mcpRouter);
 app.use('/auth', authRouter);
 app.use('/lambda', lambdaRouter);
@@ -119,5 +122,10 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+const webhookDispatcher = setInterval(() => {
+  dispatchPendingWebhookEvents().catch(error => console.error('[Generic webhook dispatcher]', error.message));
+}, 10_000);
+webhookDispatcher.unref();
 
 module.exports = app;

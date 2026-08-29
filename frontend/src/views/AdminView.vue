@@ -1401,6 +1401,16 @@
               <input type="checkbox" v-model="mcpPermissionsForm.integrations" class="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
               <span class="ml-3 text-sm text-slate-700 font-medium">Listar Integrações / Funções</span>
             </label>
+            <fieldset class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <legend class="px-1 text-sm font-semibold text-amber-950">Tools de escrita publicadas</legend>
+              <p class="mb-3 text-xs text-amber-800">Sem estes escopos, o servidor publica apenas consultas. Todas as escritas exigem idempotência e não oferecem exclusão.</p>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <label v-for="scope in mcpWriteScopeOptions" :key="scope.value" class="flex items-start gap-2 rounded bg-white px-3 py-2 text-sm text-slate-700">
+                  <input v-model="mcpAllowedScopes" type="checkbox" :value="scope.value" class="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600" />
+                  <span><strong class="block font-medium">{{ scope.label }}</strong><span class="text-xs text-slate-500">{{ scope.description }}</span></span>
+                </label>
+              </div>
+            </fieldset>
           </div>
           
           <div class="mt-6 flex justify-end gap-3">
@@ -1465,7 +1475,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpCompaniesResponse, McpTokenResponse } from '@/types'
+import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpWriteScope, McpCompaniesResponse, McpTokenResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import AdminProcessManager from '@/components/AdminProcessManager.vue'
 import MappingWorkspace from '@/components/MappingWorkspace.vue'
@@ -1502,13 +1512,29 @@ const generatedTokenData = ref<McpTokenResponse | null>(null)
 const mcpPermissionsModal = ref(false)
 const editingMcpCompany = ref<CompanyMcpConfig | null>(null)
 const mcpPermissionsForm = ref<McpAllowedDomains>({ logs: true, processes: true, mappings: true, integrations: true })
+const mcpAllowedScopes = ref<McpWriteScope[]>([])
+const mcpWriteScopeOptions: Array<{ value: McpWriteScope; label: string; description: string }> = [
+  { value: 'processes:create', label: 'Criar solicitações', description: 'Publica create_process_request.' },
+  { value: 'processes:write', label: 'Atualizar processos', description: 'Publica update_process.' },
+  { value: 'processes:comment', label: 'Adicionar comentários', description: 'Publica add_process_comment.' },
+  { value: 'processes:checklist', label: 'Gerenciar checklist', description: 'Publica criação e atualização de itens.' },
+  { value: 'processes:deliveries', label: 'Criar entregas', description: 'Publica create_delivery.' },
+  { value: 'processes:review', label: 'Revisar entregas', description: 'Publica review_delivery.' },
+]
 const mcpAccessMode = ref<'company' | 'delegated'>('company')
 const mcpRequireContactTagMatch = ref(false)
 const mcpGrantedCompanyIds = ref<number[]>([])
 const mcpMaxRequestsPerMinute = ref(60)
 const mcpAuditModal = ref(false)
 const mcpAuditCompany = ref<CompanyMcpConfig | null>(null)
-const mcpAuditLogs = ref<any[]>([])
+type McpAuditLog = {
+  id: number | string
+  created_at: string
+  method: string
+  status: 'success' | 'error' | string
+  duration_ms: number | null
+}
+const mcpAuditLogs = ref<McpAuditLog[]>([])
 
 const windowLocationHost = computed(() => typeof window !== 'undefined' ? window.location.host : 'localhost:3000')
 
@@ -1595,6 +1621,7 @@ const openMcpPermissionsModal = (company: CompanyMcpConfig) => {
     integrations: company.allowedDomains?.integrations ?? true
   }
   mcpAccessMode.value = company.accessMode ?? 'company'
+  mcpAllowedScopes.value = [...(company.allowedScopes ?? [])]
   mcpRequireContactTagMatch.value = company.requireContactTagMatch ?? false
   mcpGrantedCompanyIds.value = [...(company.grantedCompanyIds ?? [])]
   mcpMaxRequestsPerMinute.value = company.maxRequestsPerMinute ?? 60
@@ -1606,6 +1633,7 @@ const saveMcpPermissions = async () => {
   try {
     await api.put(`/auth/admin/mcp/company/${editingMcpCompany.value.companyId}/permissions`, {
       allowedDomains: mcpPermissionsForm.value,
+      allowedScopes: mcpAllowedScopes.value,
       accessMode: mcpAccessMode.value,
       requireContactTagMatch: mcpRequireContactTagMatch.value,
       grantedCompanyIds: mcpAccessMode.value === 'delegated' ? mcpGrantedCompanyIds.value : [],
@@ -1624,7 +1652,7 @@ const openMcpAuditModal = async (company: CompanyMcpConfig) => {
   mcpAuditLogs.value = []
   mcpAuditModal.value = true
   try {
-    const res = await api.get<{ logs: any[] }>(`/auth/admin/mcp/company/${company.companyId}/audit`)
+    const res = await api.get<{ logs: McpAuditLog[] }>(`/auth/admin/mcp/company/${company.companyId}/audit`)
     mcpAuditLogs.value = res.logs
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao carregar auditoria MCP')

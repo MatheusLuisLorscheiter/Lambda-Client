@@ -23,6 +23,7 @@ router.get('/companies', authenticateToken, requireAdmin, async (_req, res) => {
                cfg.id AS config_id, COALESCE(cfg.is_enabled, FALSE) AS is_enabled,
                cfg.api_key_prefix,
                COALESCE(cfg.allowed_domains, '{"logs": true, "processes": true, "mappings": true, "integrations": true}'::jsonb) AS allowed_domains,
+               COALESCE(cfg.allowed_scopes, ARRAY[]::TEXT[]) AS allowed_scopes,
                COALESCE(cfg.access_mode, 'company') AS access_mode,
                COALESCE(cfg.require_contact_tag_match, FALSE) AS require_contact_tag_match,
                COALESCE(cfg.max_requests_per_minute, 60) AS max_requests_per_minute,
@@ -53,6 +54,7 @@ router.get('/companies', authenticateToken, requireAdmin, async (_req, res) => {
         apiKeyPrefix: row.api_key_prefix || null,
         hasToken: Boolean(row.api_key_prefix),
         allowedDomains: row.allowed_domains,
+        allowedScopes: row.allowed_scopes || [],
         accessMode: row.access_mode,
         requireContactTagMatch: row.require_contact_tag_match,
         grantedCompanyIds: row.granted_company_ids || [],
@@ -147,6 +149,7 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
     requireContactTagMatch = false,
     grantedCompanyIds = [],
     maxRequestsPerMinute = 60,
+    allowedScopes = [],
   } = req.body || {};
   if (!companyId || !allowedDomains || typeof allowedDomains !== 'object' || !['company', 'delegated'].includes(accessMode)) {
     return res.status(400).json({ error: 'Parâmetros inválidos' });
@@ -157,6 +160,9 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
     mappings: Boolean(allowedDomains.mappings),
     integrations: Boolean(allowedDomains.integrations),
   };
+  const validScopes = new Set(['processes:create', 'processes:write', 'processes:comment', 'processes:checklist', 'processes:deliveries', 'processes:review']);
+  const scopes = Array.from(new Set((Array.isArray(allowedScopes) ? allowedScopes : []).map(String).filter(scope => validScopes.has(scope))));
+  if (Array.isArray(allowedScopes) && scopes.length !== allowedScopes.length) return res.status(400).json({ error: 'Um ou mais escopos MCP são inválidos' });
   const grantIds = Array.from(new Set((Array.isArray(grantedCompanyIds) ? grantedCompanyIds : [])
     .map(Number).filter((id) => Number.isInteger(id) && id > 0 && id !== companyId)));
   const rateLimit = Math.min(Math.max(Number(maxRequestsPerMinute) || 60, 1), 1000);
@@ -177,13 +183,14 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
     }
     const result = await client.query(`
       INSERT INTO company_mcp_configs
-        (company_id, allowed_domains, access_mode, require_contact_tag_match, max_requests_per_minute, updated_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
+        (company_id, allowed_domains, allowed_scopes, access_mode, require_contact_tag_match, max_requests_per_minute, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
       ON CONFLICT (company_id) DO UPDATE SET allowed_domains = EXCLUDED.allowed_domains,
+        allowed_scopes = EXCLUDED.allowed_scopes,
         access_mode = EXCLUDED.access_mode, require_contact_tag_match = EXCLUDED.require_contact_tag_match,
         max_requests_per_minute = EXCLUDED.max_requests_per_minute, updated_at = NOW()
-      RETURNING allowed_domains, access_mode, require_contact_tag_match, max_requests_per_minute
-    `, [companyId, JSON.stringify(domains), accessMode, Boolean(requireContactTagMatch), rateLimit]);
+      RETURNING allowed_domains, allowed_scopes, access_mode, require_contact_tag_match, max_requests_per_minute
+    `, [companyId, JSON.stringify(domains), scopes, accessMode, Boolean(requireContactTagMatch), rateLimit]);
     await client.query('DELETE FROM company_mcp_access_grants WHERE principal_company_id = $1', [companyId]);
     if (accessMode === 'delegated' && grantIds.length) {
       await client.query(`
@@ -191,7 +198,7 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
         SELECT $1, target_id, TRUE FROM unnest($2::int[]) AS target_id
       `, [companyId, grantIds]);
     }
-    const metadata = { allowedDomains: domains, accessMode, requireContactTagMatch: Boolean(requireContactTagMatch), grantedCompanyIds: accessMode === 'delegated' ? grantIds : [], maxRequestsPerMinute: rateLimit };
+    const metadata = { allowedDomains: domains, allowedScopes: scopes, accessMode, requireContactTagMatch: Boolean(requireContactTagMatch), grantedCompanyIds: accessMode === 'delegated' ? grantIds : [], maxRequestsPerMinute: rateLimit };
     await client.query(`
       INSERT INTO audit_logs (company_id, user_id, action, resource_type, resource_id, metadata)
       VALUES ($1, $2, 'mcp.update_permissions', 'company_mcp_configs', $3, $4)

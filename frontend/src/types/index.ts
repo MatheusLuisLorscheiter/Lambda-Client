@@ -470,6 +470,14 @@ export interface McpAllowedDomains {
   integrations: boolean
 }
 
+export type McpWriteScope =
+  | 'processes:create'
+  | 'processes:write'
+  | 'processes:comment'
+  | 'processes:checklist'
+  | 'processes:deliveries'
+  | 'processes:review'
+
 export interface CompanyMcpConfig {
   companyId: number
   companyName: string
@@ -479,6 +487,7 @@ export interface CompanyMcpConfig {
   apiKeyPrefix: string | null
   hasToken: boolean
   allowedDomains: McpAllowedDomains
+  allowedScopes: McpWriteScope[]
   accessMode: 'company' | 'delegated'
   requireContactTagMatch: boolean
   grantedCompanyIds: number[]

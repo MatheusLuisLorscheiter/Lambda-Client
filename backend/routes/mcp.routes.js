@@ -6,6 +6,8 @@ const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js'
 const { ListToolsRequestSchema, CallToolRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 const { query } = require('../db');
 const { client: redisClient, connectRedis } = require('../cache/redis');
+const processDomain = require('../services/processDomainService');
+const { publishDurableProcessEvent } = require('../services/processEvents');
 
 const router = express.Router();
 const legacySseSessions = new Map();
@@ -30,6 +32,11 @@ function effectiveDomains(principalDomains, targetDomains = DEFAULT_DOMAINS) {
     result[domain] = principalDomains[domain] !== false && targetDomains[domain] !== false;
     return result;
   }, {});
+}
+
+function effectiveScopes(principalScopes, targetScopes = []) {
+  const target = new Set(Array.isArray(targetScopes) ? targetScopes : []);
+  return new Set([...principalScopes].filter(scope => target.has(scope)));
 }
 
 function normalizeIdentity(value) {
@@ -104,7 +111,7 @@ async function mcpAuthMiddleware(req, res, next) {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   try {
     const result = await query(`
-      SELECT cfg.company_id, cfg.is_enabled, cfg.allowed_domains, cfg.access_mode,
+      SELECT cfg.company_id, cfg.is_enabled, cfg.allowed_domains, cfg.allowed_scopes, cfg.access_mode,
              cfg.require_contact_tag_match, cfg.max_requests_per_minute, c.name AS company_name
         FROM company_mcp_configs cfg
         JOIN companies c ON c.id = cfg.company_id
@@ -128,6 +135,7 @@ async function mcpAuthMiddleware(req, res, next) {
       accessMode: config.access_mode === 'delegated' ? 'delegated' : 'company',
       requireContactTagMatch: config.require_contact_tag_match === true,
       allowedDomains: parseDomains(config.allowed_domains),
+      allowedScopes: new Set(Array.isArray(config.allowed_scopes) ? config.allowed_scopes : []),
     };
     query('UPDATE company_mcp_configs SET last_accessed_at = NOW() WHERE company_id = $1', [config.company_id]).catch(() => {});
     next();
@@ -209,10 +217,51 @@ const MCP_TOOL_DEFINITIONS = [
   },
 ].map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
 
+const IDEMPOTENCY = { idempotencyKey: { type: 'string', minLength: 8, maxLength: 240 } };
+const EXPECTED_VERSION = { expectedVersion: { type: 'integer', minimum: 1 } };
+const MCP_WRITE_TOOL_DEFINITIONS = [
+  {
+    name: 'create_process_request', scope: 'processes:create', domain: 'processes',
+    description: 'Cria uma solicitação de processo. Requer idempotencyKey e nunca exclui dados.',
+    inputSchema: withContext({ ...IDEMPOTENCY, title: { type: 'string', minLength: 1, maxLength: 160 }, description: { type: 'string', minLength: 1, maxLength: 5000 }, objective: { type: 'string', maxLength: 3000 }, scope: { type: 'string', maxLength: 5000 }, acceptanceCriteria: { type: 'string', maxLength: 5000 }, category: { type: 'string', enum: ['automation', 'integration', 'maintenance', 'improvement', 'support'] }, tags: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 40 } } }, ['idempotencyKey', 'title', 'description']),
+  },
+  {
+    name: 'update_process', scope: 'processes:write', domain: 'processes',
+    description: 'Atualiza campos operacionais de um processo com controle otimista de versão.',
+    inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, title: { type: 'string', maxLength: 160 }, description: { type: 'string', maxLength: 5000 }, status: { type: 'string', enum: ['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused', 'cancelled'] }, priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, health: { type: 'string', enum: ['on_track', 'at_risk', 'off_track', 'blocked'] }, progress: { type: 'integer', minimum: 0, maximum: 100 }, latestUpdate: { type: 'string', maxLength: 5000 } }, ['idempotencyKey', 'expectedVersion', 'processId']),
+  },
+  {
+    name: 'add_process_comment', scope: 'processes:comment', domain: 'processes',
+    description: 'Adiciona um comentário público ao processo com idempotência e versão esperada.',
+    inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, message: { type: 'string', minLength: 1, maxLength: 5000 } }, ['idempotencyKey', 'expectedVersion', 'processId', 'message']),
+  },
+  {
+    name: 'create_checklist_item', scope: 'processes:checklist', domain: 'processes',
+    description: 'Cria um item não destrutivo na checklist de um processo.',
+    inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, title: { type: 'string', minLength: 1, maxLength: 240 }, description: { type: 'string', maxLength: 3000 } }, ['idempotencyKey', 'expectedVersion', 'processId', 'title']),
+  },
+  {
+    name: 'update_checklist_item', scope: 'processes:checklist', domain: 'processes',
+    description: 'Atualiza um item da checklist com controle otimista; não oferece exclusão.',
+    inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, itemId: { type: 'integer', minimum: 1 }, title: { type: 'string', maxLength: 240 }, description: { type: 'string', maxLength: 3000 }, status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'blocked'] } }, ['idempotencyKey', 'expectedVersion', 'processId', 'itemId']),
+  },
+  {
+    name: 'create_delivery', scope: 'processes:deliveries', domain: 'processes',
+    description: 'Cria uma entrega para validação com evidência reconciliável.',
+    inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, title: { type: 'string', minLength: 1, maxLength: 240 }, summary: { type: 'string', minLength: 1, maxLength: 5000 }, version: { type: 'string', maxLength: 120 }, environment: { type: 'string', enum: ['development', 'staging', 'production'] }, status: { type: 'string', enum: ['draft', 'ready'] }, artifactLinks: { type: 'array', maxItems: 20, items: { type: 'string', format: 'uri' } }, releaseNotes: { type: 'string', maxLength: 5000 }, rollbackPlan: { type: 'string', maxLength: 5000 } }, ['idempotencyKey', 'expectedVersion', 'processId', 'title', 'summary']),
+  },
+  {
+    name: 'review_delivery', scope: 'processes:review', domain: 'processes',
+    description: 'Aceita ou rejeita uma entrega em validação usando a versão esperada da entrega.',
+    inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, deliveryId: { type: 'integer', minimum: 1 }, status: { type: 'string', enum: ['accepted', 'rejected'] }, acceptanceNote: { type: 'string', maxLength: 5000 } }, ['idempotencyKey', 'expectedVersion', 'processId', 'deliveryId', 'status']),
+  },
+].map(tool => ({ ...tool, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
+
 function publicToolsFor(principal) {
-  return MCP_TOOL_DEFINITIONS
+  return [...MCP_TOOL_DEFINITIONS, ...MCP_WRITE_TOOL_DEFINITIONS]
     .filter((tool) => !tool.domain || principal.allowedDomains[tool.domain] !== false || (tool.name === 'list_integration_logs' && principal.allowedDomains.logs !== false))
-    .map(({ domain, ...tool }) => tool);
+    .filter(tool => !tool.scope || principal.allowedScopes.has(tool.scope))
+    .map(({ domain, scope, ...tool }) => tool);
 }
 
 function readClientContext(args) {
@@ -224,14 +273,14 @@ function readClientContext(args) {
 
 async function resolveTargetCompany(principal, args) {
   if (principal.accessMode !== 'delegated') {
-    return { id: principal.id, name: principal.name, allowedDomains: principal.allowedDomains };
+    return { id: principal.id, name: principal.name, allowedDomains: principal.allowedDomains, allowedScopes: principal.allowedScopes };
   }
 
   const context = readClientContext(args);
   if (!context.email) throw new Error('O contato não possui email válido para resolver o acesso delegado.');
 
   const result = await query(`
-    SELECT DISTINCT c.id, c.name, cfg.allowed_domains
+    SELECT DISTINCT c.id, c.name, cfg.allowed_domains, cfg.allowed_scopes
       FROM users u
       JOIN companies c ON c.id = u.company_id
       JOIN company_mcp_access_grants grant_cfg
@@ -264,6 +313,7 @@ async function resolveTargetCompany(principal, args) {
     id: Number(target.id),
     name: target.name,
     allowedDomains: effectiveDomains(principal.allowedDomains, parseDomains(target.allowed_domains)),
+    allowedScopes: effectiveScopes(principal.allowedScopes, target.allowed_scopes),
   };
 }
 
@@ -277,6 +327,30 @@ function safeLimit(value, fallback = 20) {
 
 async function executeMcpTool(toolName, args, principal, resolvedTarget = null) {
   const target = resolvedTarget || await resolveTargetCompany(principal, args || {});
+  const writeTool = MCP_WRITE_TOOL_DEFINITIONS.find(tool => tool.name === toolName);
+  if (writeTool) {
+    requireDomain(target, 'processes', 'Acesso a processos não está liberado.');
+    if (!principal.allowedScopes.has(writeTool.scope) || !target.allowedScopes.has(writeTool.scope)) throw new Error('A credencial MCP não possui o escopo desta escrita para a empresa alvo.');
+    const handlerByName = {
+      create_process_request: processDomain.createProcessRequest,
+      update_process: processDomain.updateProcess,
+      add_process_comment: processDomain.addProcessComment,
+      create_checklist_item: processDomain.createChecklistItem,
+      update_checklist_item: processDomain.updateChecklistItem,
+      create_delivery: processDomain.createDelivery,
+      review_delivery: processDomain.reviewDelivery,
+    };
+    const result = await handlerByName[toolName]({ companyId: target.id, input: args || {} });
+    const processId = Number(result.evidence?.processId || result.process?.id || args?.processId) || null;
+    await publishDurableProcessEvent({
+      companyId: target.id,
+      processId,
+      type: `process.mcp.${toolName}`,
+      eventId: `mcp:${target.id}:${toolName}:${args?.idempotencyKey}`,
+      data: { tool: toolName, reference: result.externalReference, evidence: result.evidence, idempotentReplay: Boolean(result.idempotentReplay) },
+    });
+    return result;
+  }
   switch (toolName) {
     case 'get_company_summary': {
       const [integrations, processes, mappings] = await Promise.all([

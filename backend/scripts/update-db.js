@@ -45,6 +45,8 @@ const run = async () => {
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS is_client_visible BOOLEAN NOT NULL DEFAULT TRUE',
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ',
         'ALTER TABLE process_items ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1',
+        'ALTER TABLE process_checklist_items ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1',
+        'ALTER TABLE process_deliveries ADD COLUMN IF NOT EXISTS row_version INTEGER NOT NULL DEFAULT 1',
         'ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES process_updates(id) ON DELETE SET NULL',
         "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'update'",
         "ALTER TABLE process_updates ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'client'",
@@ -238,6 +240,7 @@ const run = async () => {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
         "ALTER TABLE company_mcp_configs ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'company'",
+        "ALTER TABLE company_mcp_configs ADD COLUMN IF NOT EXISTS allowed_scopes TEXT[] NOT NULL DEFAULT '{}'",
         'ALTER TABLE company_mcp_configs ADD COLUMN IF NOT EXISTS require_contact_tag_match BOOLEAN NOT NULL DEFAULT FALSE',
         `DO $$ BEGIN
           ALTER TABLE company_mcp_configs ADD CONSTRAINT chk_company_mcp_access_mode CHECK (access_mode IN ('company', 'delegated'));

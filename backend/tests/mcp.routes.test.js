@@ -84,6 +84,17 @@ test('cliente MCP oficial inicializa, lista tools e executa chamada stateless', 
   });
 });
 
+test('tools de escrita só são publicadas na interseção de escopos da credencial', () => {
+  const principal = {
+    allowedDomains: { logs: true, processes: true, mappings: true, integrations: true },
+    allowedScopes: new Set(['processes:create']),
+  };
+  const names = router._mcpInternals.publicToolsFor(principal).map((tool) => tool.name);
+  assert.ok(names.includes('create_process_request'));
+  assert.ok(!names.includes('update_process'));
+  assert.ok(!names.includes('review_delivery'));
+});
+
 test('acesso delegado falha fechado quando não há tag exata', async () => {
   await withClient('mcp_live_delegated', async (client) => {
     const result = await client.callTool({
