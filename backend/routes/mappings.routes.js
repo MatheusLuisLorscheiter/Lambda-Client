@@ -4,6 +4,7 @@ const { pool, query } = require('../db');
 const { getIntegrationForUser } = require('../services/integrations');
 const { logAudit } = require('../audit/logger');
 const { buildChangedFields, recordMappingChange } = require('../services/mappingHistory');
+const { enqueueGenericWebhookEvent } = require('../services/genericWebhookPublisher');
 
 const router = express.Router();
 const validStatuses = new Set(['draft', 'published', 'archived']);
@@ -298,6 +299,11 @@ const mappingSetSelect = `
   mapping_sets.client_can_delete_entries AS "clientCanDeleteEntries",
   mapping_sets.client_instructions AS "clientInstructions",
   mapping_sets.validation_rules AS "validationRules",
+  mapping_sets.approval_status AS "approvalStatus",
+  mapping_sets.approval_revision AS "approvalRevision",
+  mapping_sets.approval_requested_at AS "approvalRequestedAt",
+  mapping_sets.approved_at AS "approvedAt",
+  mapping_sets.approval_note AS "approvalNote",
   mapping_sets.last_client_edited_at AS "lastClientEditedAt",
   (
     SELECT users.email FROM users WHERE users.id = mapping_sets.last_client_edited_by
@@ -569,9 +575,15 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
       await client.query('BEGIN');
       const result = await client.query(
         `UPDATE integration_mapping_sets
-            SET content_markdown = $1,
-                revision = revision + 1,
-                last_client_edited_by = $2,
+          SET content_markdown = $1,
+              revision = revision + 1,
+              approval_status = 'not_requested',
+              approval_revision = NULL,
+              approval_requested_at = NULL,
+              approved_at = NULL,
+              approved_by = NULL,
+              approval_note = NULL,
+              last_client_edited_by = $2,
                 last_client_edited_at = NOW(),
                 updated_at = NOW()
           WHERE id = $3 AND revision = $4
@@ -679,6 +691,13 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
     }
     add('process_id', processId);
   }
+  const expectedRevision = expectedRevisionFrom(req.body);
+  if (Number.isNaN(expectedRevision)) {
+    return res.status(400).json({ error: 'Revisão esperada inválida' });
+  }
+  if (expectedRevision !== null && expectedRevision !== Number(existing.revision)) {
+    return res.status(409).json({ error: 'O mapeamento foi atualizado por outra pessoa. Recarregue antes de salvar.' });
+  }
   if (req.body.status !== undefined) {
     if (!validStatuses.has(req.body.status)) return res.status(400).json({ error: 'Status inválido' });
     if (req.body.status === 'published' && !existing.content_markdown) {
@@ -693,6 +712,16 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
       }
     }
     if (req.body.status === 'published') {
+      if (!Number.isInteger(expectedRevision)) {
+        return res.status(409).json({ error: 'Informe a revisão exata aprovada antes de publicar.' });
+      }
+      if (existing.approval_status !== 'approved' ||
+          Number(existing.approval_revision) !== expectedRevision ||
+          !existing.approved_by) {
+        return res.status(409).json({
+          error: 'Esta revisão ainda não possui aprovação humana explícita. Solicite e conclua a aprovação antes de publicar.'
+        });
+      }
       const qualityResult = await query(
         `SELECT
            COUNT(*)::int AS total,
@@ -746,12 +775,15 @@ router.patch('/mappings/:mappingSetId', authenticateToken, async (req, res) => {
     }
   }
   if (!fields.length) return res.status(400).json({ error: 'Nenhuma alteração informada' });
-  const expectedRevision = expectedRevisionFrom(req.body);
-  if (Number.isNaN(expectedRevision)) {
-    return res.status(400).json({ error: 'Revisão esperada inválida' });
-  }
-  if (expectedRevision !== null && expectedRevision !== Number(existing.revision)) {
-    return res.status(409).json({ error: 'O mapeamento foi atualizado por outra pessoa. Recarregue antes de salvar.' });
+  if (req.body.status !== 'published') {
+    fields.push(
+      "approval_status = 'not_requested'",
+      'approval_revision = NULL',
+      'approval_requested_at = NULL',
+      'approved_at = NULL',
+      'approved_by = NULL',
+      'approval_note = NULL'
+    );
   }
   fields.push('revision = revision + 1', 'updated_at = NOW()');
   values.push(mappingSetId);
@@ -965,6 +997,199 @@ router.post('/mappings/:mappingSetId/comments', authenticateToken, async (req, r
       mappingRevision: mappingSet.revision
     }
   });
+});
+
+router.post('/mappings/:mappingSetId/approval/request', authenticateToken, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const mappingSetId = Number(req.params.mappingSetId);
+  const mappingSet = await getMappingSet(mappingSetId, req.user);
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
+  const expectedRevision = expectedRevisionFrom(req.body);
+  if (!Number.isInteger(expectedRevision) || expectedRevision !== Number(mappingSet.revision)) {
+    return res.status(409).json({ error: 'O mapeamento mudou. Recarregue antes de solicitar aprovação.' });
+  }
+  if (mappingSet.status !== 'draft' || mappingSet.approval_status === 'pending') {
+    return res.status(409).json({ error: 'Este mapeamento não pode ser submetido neste estado.' });
+  }
+  const content = await query(
+    `SELECT NULLIF(BTRIM(content_markdown), '') IS NOT NULL
+            OR EXISTS(SELECT 1 FROM integration_mapping_entries WHERE mapping_set_id = $1)
+            OR EXISTS(SELECT 1 FROM integration_mapping_attachments WHERE mapping_set_id = $1) AS has_content
+       FROM integration_mapping_sets WHERE id = $1`,
+    [mappingSetId]
+  );
+  if (!content.rows[0]?.has_content) {
+    return res.status(409).json({ error: 'Adicione conteúdo, vínculos ou arquivos antes de solicitar aprovação.' });
+  }
+  let note = null;
+  try {
+    note = normalizeText(req.body.note, 'Observação da solicitação', 2000);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  const client = await pool.connect();
+  let reviewRequest;
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE integration_mapping_sets
+          SET approval_status = 'pending',
+              approval_revision = revision + 1,
+              approval_requested_at = NOW(),
+              approved_at = NULL,
+              approved_by = NULL,
+              approval_note = $1,
+              revision = revision + 1,
+              updated_at = NOW()
+        WHERE id = $2 AND revision = $3 AND status = 'draft' AND approval_status <> 'pending'
+        RETURNING id, revision, approval_status AS "approvalStatus",
+                  approval_revision AS "approvalRevision",
+                  approval_requested_at AS "approvalRequestedAt", approval_note AS "approvalNote"`,
+      [note, mappingSetId, expectedRevision]
+    );
+    if (!result.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'O mapeamento mudou durante a solicitação.' });
+    }
+    reviewRequest = result.rows[0];
+    await recordMappingChange({
+      db: client,
+      mappingSetId,
+      actorUserId: req.user.id,
+      actorRole: req.user.role,
+      action: 'review_request',
+      entityType: 'mapping_set',
+      entityId: mappingSetId,
+      summary: note ? `Aprovação solicitada: ${note}` : 'Aprovação solicitada',
+      beforeData: { approvalStatus: mappingSet.approval_status, revision: expectedRevision },
+      afterData: reviewRequest,
+      mappingRevision: reviewRequest.revision,
+      clientVisible: true
+    });
+    await enqueueGenericWebhookEvent({
+      db: client,
+      companyId: mappingSet.company_id,
+      eventId: `mapping-review-request:${mappingSetId}:${reviewRequest.revision}`,
+      type: 'mapping.review.requested',
+      subject: { type: 'mapping-set', id: String(mappingSetId), externalReference: `lambda-pulse:mapping-set:${mappingSetId}` },
+      data: { mappingSetId, previousRevision: expectedRevision, revision: reviewRequest.revision },
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: 'mapping.approval.request',
+    resourceType: 'mapping_set',
+    resourceId: String(mappingSetId),
+    metadata: { previousRevision: expectedRevision, revision: reviewRequest.revision, note },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+  res.json({ reviewRequest });
+});
+
+router.post('/mappings/:mappingSetId/approval', authenticateToken, async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const mappingSetId = Number(req.params.mappingSetId);
+  const mappingSet = await getMappingSet(mappingSetId, req.user);
+  if (!mappingSet) return res.status(404).json({ error: 'Mapeamento não encontrado' });
+  const expectedRevision = expectedRevisionFrom(req.body);
+  if (!Number.isInteger(expectedRevision) || expectedRevision !== Number(mappingSet.revision)) {
+    return res.status(409).json({ error: 'A revisão submetida mudou. Recarregue antes de decidir.' });
+  }
+  if (mappingSet.status !== 'draft' || mappingSet.approval_status !== 'pending' ||
+      Number(mappingSet.approval_revision) !== expectedRevision) {
+    return res.status(409).json({ error: 'Esta revisão não está aguardando aprovação.' });
+  }
+  const decision = String(req.body.decision || '').trim().toLowerCase();
+  if (!['approved', 'rejected'].includes(decision)) {
+    return res.status(400).json({ error: 'A decisão deve ser approved ou rejected.' });
+  }
+  let note = null;
+  try {
+    note = normalizeText(req.body.note, 'Observação da aprovação', 2000);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  if (decision === 'rejected' && !note) {
+    return res.status(400).json({ error: 'Informe o ajuste necessário ao rejeitar uma revisão.' });
+  }
+
+  const client = await pool.connect();
+  let approval;
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE integration_mapping_sets
+          SET approval_status = $1,
+              approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE NULL END,
+              approved_by = CASE WHEN $1 = 'approved' THEN $2 ELSE NULL END,
+              approval_note = $3,
+              updated_at = NOW()
+        WHERE id = $4
+          AND revision = $5
+          AND status = 'draft'
+          AND approval_status = 'pending'
+          AND approval_revision = $5
+        RETURNING id, revision, approval_status AS "approvalStatus",
+                  approval_revision AS "approvalRevision", approved_at AS "approvedAt",
+                  approved_by AS "approvedBy", approval_note AS "approvalNote", updated_at AS "updatedAt"`,
+      [decision, req.user.id, note, mappingSetId, expectedRevision]
+    );
+    if (!result.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'A revisão mudou durante a aprovação.' });
+    }
+    approval = result.rows[0];
+    await recordMappingChange({
+      db: client,
+      mappingSetId,
+      actorUserId: req.user.id,
+      actorRole: req.user.role,
+      action: 'review',
+      entityType: 'mapping_set',
+      entityId: mappingSetId,
+      summary: decision === 'approved'
+        ? 'Revisão aprovada para publicação'
+        : `Revisão rejeitada: ${note}`,
+      beforeData: { approvalStatus: mappingSet.approval_status, approvalRevision: mappingSet.approval_revision },
+      afterData: approval,
+      mappingRevision: expectedRevision,
+      clientVisible: true
+    });
+    await enqueueGenericWebhookEvent({
+      db: client,
+      companyId: mappingSet.company_id,
+      eventId: `mapping-approval:${mappingSetId}:${expectedRevision}:${decision}`,
+      type: decision === 'approved' ? 'mapping.review.approved' : 'mapping.review.rejected',
+      subject: { type: 'mapping-set', id: String(mappingSetId), externalReference: `lambda-pulse:mapping-set:${mappingSetId}` },
+      data: { mappingSetId, revision: expectedRevision, decision, approvedBy: approval.approvedBy },
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await logAudit({
+    companyId: mappingSet.company_id,
+    userId: req.user.id,
+    action: decision === 'approved' ? 'mapping.approval.approve' : 'mapping.approval.reject',
+    resourceType: 'mapping_set',
+    resourceId: String(mappingSetId),
+    metadata: { revision: expectedRevision, note },
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  });
+  res.json({ approval });
 });
 
 router.post('/mappings/:mappingSetId/review', authenticateToken, async (req, res) => {

@@ -1,0 +1,63 @@
+name: Lambda Pulse PR validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lambda-pulse-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Test and validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Scan tracked files for secrets
+        run: node scripts/scan-secrets.js
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Test backend
+        working-directory: backend
+        run: npm test
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint frontend without modifying files
+        working-directory: frontend
+        run: npm exec eslint -- . --cache
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Confirm clean generated state
+        shell: bash
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "A validação alterou arquivos rastreados. Execute os formatadores localmente e inclua o resultado no PR." >&2
+            git status --short
+            exit 1
+          fi

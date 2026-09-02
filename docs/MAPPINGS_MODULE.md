@@ -31,10 +31,12 @@ Na primeira migração para o novo contrato, valores antigos de `version` são p
 3. A equipe ajusta os vínculos e configura permissões e política de publicação.
 4. A seção administrativa Revisão apresenta cobertura, pendências e duplicidades.
 5. A equipe marca no documento os controles que o cliente preencherá e configura tipo, rótulo, opções e obrigatoriedade.
-6. A publicação disponibiliza ao cliente Documento, Dúvidas e histórico e Arquivos; Revisão nunca aparece no portal.
-7. Alterações liberadas ao cliente incrementam a revisão e ficam marcadas como aguardando revisão.
-8. O administrador confere a linha do tempo, pode restaurar uma alteração e conclui a revisão.
-9. Mudanças administrativas em conteúdo publicado são feitas em uma nova versão.
+6. A revisão exata é submetida para aprovação; o estado passa a `pending` e qualquer mudança posterior invalida a aprovação.
+7. Uma pessoa aprova ou rejeita a revisão. Somente `approved` para o mesmo número de revisão permite publicar.
+8. A publicação disponibiliza ao cliente Documento, Dúvidas e histórico e Arquivos; Revisão nunca aparece no portal.
+9. Alterações liberadas ao cliente incrementam a revisão e ficam marcadas como aguardando revisão.
+10. O administrador confere a linha do tempo, pode restaurar uma alteração e conclui a revisão.
+11. Mudanças administrativas em conteúdo publicado são feitas em uma nova versão.
 
 ## Histórico
 
@@ -77,7 +79,7 @@ O administrador pode tornar obrigatórias, de forma independente:
 - ausência de origens duplicadas na mesma seção;
 - preenchimento dos tipos de origem e destino.
 
-O padrão é informativo para preservar compatibilidade. Quando uma regra é ativada, a API também a aplica; não é apenas uma validação visual.
+O padrão é informativo para preservar compatibilidade. Quando uma regra é ativada, a API também a aplica; não é apenas uma validação visual. Independentemente dessas regras de qualidade, a API rejeita publicação sem aprovação humana explícita da revisão exata. A aprovação não avança a revisão; a publicação e alterações de conteúdo avançam.
 
 ## Endpoints principais
 
@@ -88,6 +90,8 @@ O padrão é informativo para preservar compatibilidade. Quando uma regra é ati
 | `PATCH` | `/lambda/mappings/:mappingSetId` | Atualizar documento, configuração ou status |
 | `GET` | `/lambda/mappings/:mappingSetId/history` | Consultar linha do tempo paginada |
 | `POST` | `/lambda/mappings/:mappingSetId/comments` | Registrar decisão ou comentário |
+| `POST` | `/lambda/mappings/:mappingSetId/approval/request` | Submeter a revisão exata para aprovação |
+| `POST` | `/lambda/mappings/:mappingSetId/approval` | Aprovar ou rejeitar a revisão pendente |
 | `POST` | `/lambda/mappings/:mappingSetId/review` | Concluir revisão de alterações do cliente |
 | `POST` | `/lambda/mappings/:mappingSetId/history/:changeId/restore` | Restaurar estado anterior |
 | `POST/PATCH` | `/lambda/mappings/:mappingSetId/entries/bulk` | Importar ou atualizar vínculos em lote |
@@ -104,7 +108,7 @@ npm test
 
 cd ../frontend
 npm run lint
-npm run build
+npm run type-check
 ```
 
 Se a conexão PostgreSQL configurada estiver indisponível, a migração falha e a API não inicia com schema parcial.

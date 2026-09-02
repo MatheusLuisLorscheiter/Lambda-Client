@@ -7,6 +7,8 @@ const { ListToolsRequestSchema, CallToolRequestSchema } = require('@modelcontext
 const { query } = require('../db');
 const { client: redisClient, connectRedis } = require('../cache/redis');
 const processDomain = require('../services/processDomainService');
+const mappingDomain = require('../services/mappingDomainService');
+const integrationObservability = require('../services/integrationObservabilityService');
 const { publishDurableProcessEvent } = require('../services/processEvents');
 
 const router = express.Router();
@@ -186,6 +188,18 @@ const MCP_TOOL_DEFINITIONS = [
     inputSchema: withContext({ limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }),
   },
   {
+    name: 'get_integration_observability',
+    domain: 'integrations',
+    description: 'Retorna saúde, métricas AWS e logs sanitizados de uma integração da empresa autorizada. Não executa nem altera a Lambda.',
+    inputSchema: withContext({
+      integrationId: { type: 'integer', minimum: 1 },
+      hours: { type: 'integer', minimum: 1, maximum: 168, default: 24 },
+      limit: { type: 'integer', minimum: 1, maximum: 20, default: 20 },
+      logType: { type: 'string', enum: ['relevant', 'errors', 'all'], default: 'relevant' },
+      search: { type: 'string', maxLength: 200 },
+    }, ['integrationId']),
+  },
+  {
     name: 'list_processes_and_docs',
     domain: 'processes',
     description: 'Lista processos visíveis ao cliente e seus entregáveis.',
@@ -219,6 +233,7 @@ const MCP_TOOL_DEFINITIONS = [
 
 const IDEMPOTENCY = { idempotencyKey: { type: 'string', minLength: 8, maxLength: 240 } };
 const EXPECTED_VERSION = { expectedVersion: { type: 'integer', minimum: 1 } };
+const EXPECTED_REVISION = { expectedRevision: { type: 'integer', minimum: 1 } };
 const MCP_WRITE_TOOL_DEFINITIONS = [
   {
     name: 'create_process_request', scope: 'processes:create', domain: 'processes',
@@ -254,6 +269,103 @@ const MCP_WRITE_TOOL_DEFINITIONS = [
     name: 'review_delivery', scope: 'processes:review', domain: 'processes',
     description: 'Aceita ou rejeita uma entrega em validação usando a versão esperada da entrega.',
     inputSchema: withContext({ ...IDEMPOTENCY, ...EXPECTED_VERSION, processId: { type: 'integer', minimum: 1 }, deliveryId: { type: 'integer', minimum: 1 }, status: { type: 'string', enum: ['accepted', 'rejected'] }, acceptanceNote: { type: 'string', maxLength: 5000 } }, ['idempotencyKey', 'expectedVersion', 'processId', 'deliveryId', 'status']),
+  },
+  {
+    name: 'create_mapping_draft', scope: 'mappings:write', domain: 'mappings',
+    description: 'Cria uma nova revisão de De-Para em rascunho. Não publica e exige idempotência.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY,
+      integrationId: { type: 'integer', minimum: 1 },
+      processId: { type: ['integer', 'null'], minimum: 1 },
+      name: { type: 'string', minLength: 1, maxLength: 160 },
+      description: { type: 'string', maxLength: 3000 },
+      contentMarkdown: { type: 'string', maxLength: 250000 },
+      sourceSystem: { type: 'string', minLength: 1, maxLength: 160 },
+      targetSystem: { type: 'string', minLength: 1, maxLength: 160 },
+      validationRules: { type: 'object', additionalProperties: { type: 'boolean' } },
+    }, ['idempotencyKey', 'integrationId', 'name', 'sourceSystem', 'targetSystem']),
+  },
+  {
+    name: 'update_mapping_draft', scope: 'mappings:write', domain: 'mappings',
+    description: 'Atualiza um De-Para em rascunho usando a revisão esperada e invalida aprovações anteriores.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_REVISION,
+      mappingSetId: { type: 'integer', minimum: 1 },
+      processId: { type: ['integer', 'null'], minimum: 1 },
+      name: { type: 'string', maxLength: 160 },
+      description: { type: ['string', 'null'], maxLength: 3000 },
+      contentMarkdown: { type: ['string', 'null'], maxLength: 250000 },
+      sourceSystem: { type: 'string', maxLength: 160 },
+      targetSystem: { type: 'string', maxLength: 160 },
+      validationRules: { type: 'object', additionalProperties: { type: 'boolean' } },
+    }, ['idempotencyKey', 'expectedRevision', 'mappingSetId']),
+  },
+  {
+    name: 'propose_mapping_entry', scope: 'mappings:write', domain: 'mappings',
+    description: 'Propõe uma entrada estruturada no De-Para em rascunho e avança sua revisão.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_REVISION,
+      mappingSetId: { type: 'integer', minimum: 1 },
+      sourcePath: { type: 'string', minLength: 1, maxLength: 500 },
+      sourceType: { type: ['string', 'null'], maxLength: 80 },
+      targetPath: { type: 'string', minLength: 1, maxLength: 500 },
+      targetType: { type: ['string', 'null'], maxLength: 80 },
+      direction: { type: 'string', enum: ['source_to_target', 'target_to_source', 'bidirectional'] },
+      transformation: { type: ['string', 'null'], maxLength: 5000 },
+      fallbackValue: { type: ['string', 'null'], maxLength: 2000 },
+      isRequired: { type: 'boolean' },
+      notes: { type: ['string', 'null'], maxLength: 3000 },
+      examples: { type: 'object' },
+      section: { type: ['string', 'null'], maxLength: 240 },
+      mappingStatus: { type: 'string', enum: ['mapped', 'pending', 'attention', 'ignored'] },
+    }, ['idempotencyKey', 'expectedRevision', 'mappingSetId', 'sourcePath', 'targetPath']),
+  },
+  {
+    name: 'update_mapping_entry', scope: 'mappings:write', domain: 'mappings',
+    description: 'Atualiza uma entrada de De-Para com controle otimista de revisão.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_REVISION,
+      mappingSetId: { type: 'integer', minimum: 1 },
+      entryId: { type: 'integer', minimum: 1 },
+      sourcePath: { type: 'string', maxLength: 500 },
+      sourceType: { type: ['string', 'null'], maxLength: 80 },
+      targetPath: { type: 'string', maxLength: 500 },
+      targetType: { type: ['string', 'null'], maxLength: 80 },
+      direction: { type: 'string', enum: ['source_to_target', 'target_to_source', 'bidirectional'] },
+      transformation: { type: ['string', 'null'], maxLength: 5000 },
+      fallbackValue: { type: ['string', 'null'], maxLength: 2000 },
+      isRequired: { type: 'boolean' },
+      notes: { type: ['string', 'null'], maxLength: 3000 },
+      examples: { type: 'object' },
+      section: { type: ['string', 'null'], maxLength: 240 },
+      mappingStatus: { type: 'string', enum: ['mapped', 'pending', 'attention', 'ignored'] },
+    }, ['idempotencyKey', 'expectedRevision', 'mappingSetId', 'entryId']),
+  },
+  {
+    name: 'add_mapping_comment', scope: 'mappings:comment', domain: 'mappings',
+    description: 'Registra comentário rastreável no De-Para sem alterar seu conteúdo.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_REVISION,
+      mappingSetId: { type: 'integer', minimum: 1 },
+      message: { type: 'string', minLength: 1, maxLength: 2000 },
+    }, ['idempotencyKey', 'expectedRevision', 'mappingSetId', 'message']),
+  },
+  {
+    name: 'request_mapping_review', scope: 'mappings:review', domain: 'mappings',
+    description: 'Submete a revisão exata de um De-Para para aprovação humana. Não publica.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_REVISION,
+      mappingSetId: { type: 'integer', minimum: 1 },
+      note: { type: ['string', 'null'], maxLength: 2000 },
+    }, ['idempotencyKey', 'expectedRevision', 'mappingSetId']),
+  },
+  {
+    name: 'publish_mapping', scope: 'mappings:publish', domain: 'mappings',
+    description: 'Publica somente a revisão exata previamente aprovada por uma pessoa no Lambda Pulse.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_REVISION,
+      mappingSetId: { type: 'integer', minimum: 1 },
+    }, ['idempotencyKey', 'expectedRevision', 'mappingSetId']),
   },
 ].map(tool => ({ ...tool, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
 
@@ -329,7 +441,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
   const target = resolvedTarget || await resolveTargetCompany(principal, args || {});
   const writeTool = MCP_WRITE_TOOL_DEFINITIONS.find(tool => tool.name === toolName);
   if (writeTool) {
-    requireDomain(target, 'processes', 'Acesso a processos não está liberado.');
+    requireDomain(target, writeTool.domain, `Acesso a ${writeTool.domain} não está liberado.`);
     if (!principal.allowedScopes.has(writeTool.scope) || !target.allowedScopes.has(writeTool.scope)) throw new Error('A credencial MCP não possui o escopo desta escrita para a empresa alvo.');
     const handlerByName = {
       create_process_request: processDomain.createProcessRequest,
@@ -339,16 +451,26 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       update_checklist_item: processDomain.updateChecklistItem,
       create_delivery: processDomain.createDelivery,
       review_delivery: processDomain.reviewDelivery,
+      create_mapping_draft: mappingDomain.createMappingDraft,
+      update_mapping_draft: mappingDomain.updateMappingDraft,
+      propose_mapping_entry: mappingDomain.proposeMappingEntry,
+      update_mapping_entry: mappingDomain.updateMappingEntry,
+      add_mapping_comment: mappingDomain.addMappingComment,
+      request_mapping_review: mappingDomain.requestMappingReview,
+      publish_mapping: mappingDomain.publishMapping,
     };
+    if (!handlerByName[toolName]) throw new Error('Ferramenta MCP de escrita desconhecida.');
     const result = await handlerByName[toolName]({ companyId: target.id, input: args || {} });
-    const processId = Number(result.evidence?.processId || result.process?.id || args?.processId) || null;
-    await publishDurableProcessEvent({
-      companyId: target.id,
-      processId,
-      type: `process.mcp.${toolName}`,
-      eventId: `mcp:${target.id}:${toolName}:${args?.idempotencyKey}`,
-      data: { tool: toolName, reference: result.externalReference, evidence: result.evidence, idempotentReplay: Boolean(result.idempotentReplay) },
-    });
+    if (writeTool.domain === 'processes') {
+      const processId = Number(result.evidence?.processId || result.process?.id || args?.processId) || null;
+      await publishDurableProcessEvent({
+        companyId: target.id,
+        processId,
+        type: `process.mcp.${toolName}`,
+        eventId: `mcp:${target.id}:${toolName}:${args?.idempotencyKey}`,
+        data: { tool: toolName, reference: result.externalReference, evidence: result.evidence, idempotentReplay: Boolean(result.idempotentReplay) },
+      });
+    }
     return result;
   }
   switch (toolName) {
@@ -370,6 +492,55 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
         ? await query(`SELECT id, action, resource_type, resource_id, created_at FROM audit_logs WHERE company_id = $1 ORDER BY created_at DESC LIMIT $2`, [target.id, limit])
         : { rows: [] };
       return { integrations: integrations.rows, recentEvents: logs.rows };
+    }
+    case 'get_integration_observability': {
+      if (!target.allowedDomains.logs || !target.allowedDomains.integrations) {
+        throw new Error('Acesso simultâneo a logs e integrações é necessário para esta consulta.');
+      }
+      const integrationId = Number(args.integrationId);
+      if (!Number.isInteger(integrationId) || integrationId < 1) throw new Error('integrationId inválido.');
+      const integrationResult = await query(
+        `SELECT id, name, function_name, region, lifecycle_status, last_check_status,
+                last_check_message, last_checked_at, access_key_encrypted, secret_key_encrypted
+           FROM integrations
+          WHERE id = $1 AND company_id = $2`,
+        [integrationId, target.id],
+      );
+      const integration = integrationResult.rows[0];
+      if (!integration) throw new Error('Integração não encontrada nesta empresa.');
+      const hours = Math.min(Math.max(Number(args.hours) || 24, 1), 168);
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 20);
+      const logType = ['relevant', 'errors', 'all'].includes(args.logType) ? args.logType : 'relevant';
+      const [metrics, logs] = await Promise.all([
+        integrationObservability.getMetricsSnapshot({ integration, hours }),
+        integrationObservability.getLogsSnapshot({
+          integration,
+          hours,
+          limit,
+          type: logType,
+          search: String(args.search || '').slice(0, 200),
+          includeRaw: false,
+        }),
+      ]);
+      const health = metrics.summary.errors > 0 || metrics.summary.throttles > 0
+        ? 'attention'
+        : integration.last_check_status === 'error' ? 'attention' : 'healthy';
+      return {
+        integration: {
+          id: integration.id,
+          externalReference: `lambda-pulse:integration:${integration.id}`,
+          name: integration.name,
+          functionName: integration.function_name,
+          region: integration.region,
+          lifecycleStatus: integration.lifecycle_status,
+          lastCheckStatus: integration.last_check_status,
+          lastCheckMessage: integration.last_check_message,
+          lastCheckedAt: integration.last_checked_at,
+        },
+        health,
+        metrics,
+        executionsAndErrors: logs,
+      };
     }
     case 'list_processes_and_docs': {
       requireDomain(target, 'processes', 'Acesso a processos e documentos não está liberado.');
@@ -422,6 +593,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       params.push(safeLimit(args.limit));
       const sets = await query(`
         SELECT s.id, s.name, LEFT(s.description, 2000) AS description, s.source_system, s.target_system, s.version, s.revision, s.status,
+               s.approval_status, s.approval_revision, s.approval_requested_at, s.approved_at,
                s.created_at, s.updated_at,
                (SELECT COUNT(*)::int FROM integration_mapping_entries e WHERE e.mapping_set_id = s.id) AS entries_count,
                (SELECT COUNT(*)::int FROM integration_mapping_attachments a WHERE a.mapping_set_id = s.id) AS attachments_count
@@ -443,7 +615,8 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
         SELECT id, name, LEFT(description, 2000) AS description, LEFT(content_markdown, 16000) AS content_markdown,
                source_system, target_system, version, revision, status,
                client_edit_mode, client_can_add_entries, client_can_delete_entries, client_instructions,
-               validation_rules, published_at, closed_at, created_at, updated_at
+               validation_rules, approval_status, approval_revision, approval_requested_at,
+               approved_at, approved_by, approval_note, published_at, closed_at, created_at, updated_at
           FROM integration_mapping_sets WHERE id = $1 AND company_id = $2
       `, [mappingSetId, target.id]);
       if (!setResult.rows[0]) throw new Error('Conjunto de mapeamento não encontrado para esta empresa.');
@@ -470,6 +643,8 @@ function auditMetadata(args, status, targetCompanyId, durationMs, requestId) {
       status: args?.status,
       processId: args?.processId,
       mappingSetId: args?.mappingSetId,
+      integrationId: args?.integrationId,
+      entryId: args?.entryId,
       hasContactContext: Boolean(args?.client_context || args?.client_email),
       contactLabelCount: Array.isArray(args?.client_context?.labels) ? args.client_context.labels.length : 0,
     },

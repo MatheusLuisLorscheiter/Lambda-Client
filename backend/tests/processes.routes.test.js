@@ -62,6 +62,9 @@ const query = async (sql, params = []) => {
     currentItem.updates = [{ id: 1, message: params[2], createdAt: new Date().toISOString() }];
     return { rowCount: 1, rows: [] };
   }
+  if (sql.includes('INSERT INTO generic_webhook_outbox')) {
+    return { rowCount: 0, rows: [] };
+  }
   if (sql.startsWith('UPDATE process_items')) {
     capturedUpdateSql = sql;
     capturedUpdateParams = params;

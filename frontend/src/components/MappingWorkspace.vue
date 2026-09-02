@@ -49,6 +49,9 @@
             <div class="flex flex-wrap items-center gap-2">
               <h3 class="text-lg font-semibold tracking-tight text-slate-950">{{ selectedSet.name }}</h3>
               <span :class="setStatusClass(selectedSet.status)" class="rounded-full px-2 py-0.5 text-xs font-medium">{{ setStatusLabel(selectedSet.status) }}</span>
+              <span v-if="auth.isAdmin && selectedSet.status === 'draft'" :class="approvalStatusClass(selectedSet.approvalStatus)" class="rounded-full px-2 py-0.5 text-xs font-medium">
+                {{ approvalStatusLabel(selectedSet.approvalStatus) }}
+              </span>
               <span class="text-xs text-slate-400">versão {{ selectedSet.version }}<template v-if="auth.isAdmin"> · revisão {{ selectedSet.revision }}</template></span>
               <span v-if="selectedSet.hasUnreviewedClientChanges" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                 {{ auth.isAdmin ? 'Alterações aguardando revisão' : 'Alterações enviadas à equipe' }}
@@ -69,7 +72,16 @@
             <button v-if="auth.isAdmin && selectedSet.status !== 'draft'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="cloneSet">
               Criar nova versão
             </button>
-            <button v-if="auth.isAdmin && selectedSet.status === 'draft'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft' && !['pending', 'approved'].includes(selectedSet.approvalStatus)" :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50" @click="requestMappingApproval">
+              Solicitar aprovação
+            </button>
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft' && selectedSet.approvalStatus === 'pending'" :disabled="saving" class="rounded-md bg-emerald-700 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50" @click="reviewMappingApproval('approved')">
+              Aprovar revisão
+            </button>
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft' && selectedSet.approvalStatus === 'pending'" :disabled="saving" class="rounded-md border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50" @click="reviewMappingApproval('rejected')">
+              Rejeitar
+            </button>
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft' && selectedSet.approvalStatus === 'approved'" class="rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" @click="publishConfirmOpen = true">
               Publicar para o cliente
             </button>
             <button v-if="auth.isAdmin && selectedSet.status !== 'archived'" class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" @click="archiveConfirmOpen = true">
@@ -377,8 +389,8 @@
             <p class="mt-2 text-xs leading-5 text-slate-500">
               {{ mappingQuality.ready ? 'O conteúdo atende à política de publicação configurada.' : 'Resolva os itens exigidos pela política antes de publicar.' }}
             </p>
-            <button v-if="auth.isAdmin && selectedSet.status === 'draft'" type="button" class="mt-4 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white" @click="publishConfirmOpen = true">
-              Revisar publicação
+            <button v-if="auth.isAdmin && selectedSet.status === 'draft'" type="button" :disabled="saving" class="mt-4 w-full rounded-md bg-slate-950 px-3 py-2 text-xs font-medium text-white disabled:opacity-50" @click="handlePublicationPrimaryAction">
+              {{ publicationActionLabel }}
             </button>
           </aside>
         </div>
@@ -706,6 +718,7 @@
             O cliente passará a ver esta versão e poderá editar o que foi liberado. Cada mudança ficará registrada no histórico para revisão da equipe.
           </template>
         </p>
+        <p class="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Revisão {{ selectedSet.approvalRevision }} aprovada explicitamente. A publicação será bloqueada se o conteúdo mudar.</p>
         <p v-if="pendingCount" class="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">Há {{ pendingCount }} vínculo{{ pendingCount === 1 ? '' : 's' }} pendente{{ pendingCount === 1 ? '' : 's' }} ou com atenção.</p>
         <div class="mt-5 flex justify-end gap-2"><button class="rounded-md border border-slate-300 px-3 py-2 text-sm" @click="publishConfirmOpen = false">Revisar</button><button :disabled="saving" class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" @click="publishSet">{{ saving ? 'Publicando…' : 'Publicar versão' }}</button></div>
       </div>
@@ -868,6 +881,11 @@ const emptyEntryForm = () => ({
 const entryForm = ref(emptyEntryForm())
 
 const selectedSet = computed(() => mappingSets.value.find(item => String(item.id) === selectedSetId.value) || null)
+const publicationActionLabel = computed(() => {
+  if (selectedSet.value?.approvalStatus === 'approved') return 'Publicar versão aprovada'
+  if (selectedSet.value?.approvalStatus === 'pending') return 'Aprovar revisão'
+  return 'Solicitar aprovação'
+})
 const documentFields = computed(() => extractMappingDocumentFields(selectedSet.value?.contentMarkdown || ''))
 const editorDocumentFields = computed(() => extractMappingDocumentFields(documentDraft.value))
 const clientNextAction = computed(() => {
@@ -1066,6 +1084,18 @@ const editorSnippets = [
 ]
 
 const setStatusLabel = (status: MappingSet['status']) => ({ draft: 'Rascunho', published: 'Publicado', archived: 'Arquivado' }[status])
+const approvalStatusLabel = (status: MappingSet['approvalStatus']) => ({
+  not_requested: 'Aprovação não solicitada',
+  pending: 'Aguardando aprovação',
+  approved: 'Revisão aprovada',
+  rejected: 'Ajustes solicitados'
+}[status])
+const approvalStatusClass = (status: MappingSet['approvalStatus']) => ({
+  not_requested: 'bg-slate-100 text-slate-600',
+  pending: 'bg-amber-100 text-amber-800',
+  approved: 'bg-emerald-100 text-emerald-800',
+  rejected: 'bg-red-50 text-red-700'
+}[status])
 const clientEditModeLabel = (mode: MappingSet['clientEditMode']) => ({ none: 'Somente leitura', all: 'Edição completa', selected: 'Campos selecionados' }[mode])
 const setStatusClass = (status: MappingSet['status']) => ({
   draft: 'bg-amber-100 text-amber-800',
@@ -1557,6 +1587,58 @@ const deleteAttachment = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const requestMappingApproval = async () => {
+  if (!selectedSet.value) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    await api.post(`/lambda/mappings/${selectedSet.value.id}/approval/request`, {
+      expectedRevision: selectedSet.value.revision
+    })
+    await fetchMappings()
+    showSuccess('Revisão enviada para aprovação')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível solicitar aprovação'
+  } finally {
+    saving.value = false
+  }
+}
+
+const reviewMappingApproval = async (decision: 'approved' | 'rejected') => {
+  if (!selectedSet.value) return
+  const note = decision === 'rejected'
+    ? window.prompt('Descreva o ajuste necessário antes de rejeitar esta revisão:')?.trim()
+    : null
+  if (decision === 'rejected' && !note) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    await api.post(`/lambda/mappings/${selectedSet.value.id}/approval`, {
+      expectedRevision: selectedSet.value.revision,
+      decision,
+      note
+    })
+    await fetchMappings()
+    showSuccess(decision === 'approved' ? 'Revisão aprovada' : 'Revisão devolvida para ajustes')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Não foi possível registrar a decisão'
+  } finally {
+    saving.value = false
+  }
+}
+
+const handlePublicationPrimaryAction = () => {
+  if (selectedSet.value?.approvalStatus === 'approved') {
+    publishConfirmOpen.value = true
+    return
+  }
+  if (selectedSet.value?.approvalStatus === 'pending') {
+    void reviewMappingApproval('approved')
+    return
+  }
+  void requestMappingApproval()
 }
 
 const publishSet = async () => {

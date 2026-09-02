@@ -66,6 +66,12 @@ const run = async () => {
              "blockDuplicateSources": false,
              "requireTypes": false
            }'`,
+        "ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS approval_status TEXT NOT NULL DEFAULT 'not_requested'",
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS approval_revision INTEGER',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS approval_requested_at TIMESTAMPTZ',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE integration_mapping_sets ADD COLUMN IF NOT EXISTS approval_note TEXT',
         `DO $$ BEGIN
             IF NOT EXISTS (
               SELECT 1
@@ -112,6 +118,25 @@ const run = async () => {
                     CHECK (revision > 0);
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         `DO $$ BEGIN
+                    ALTER TABLE integration_mapping_sets
+                    ADD CONSTRAINT chk_mapping_approval_status
+                    CHECK (approval_status IN ('not_requested', 'pending', 'approved', 'rejected'));
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+        `DO $$ BEGIN
+                    ALTER TABLE integration_mapping_sets
+                    ADD CONSTRAINT chk_mapping_approval_revision_positive
+                    CHECK (approval_revision IS NULL OR approval_revision > 0);
+                EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+        `DO $$ BEGIN
+                    ALTER TABLE integration_mapping_changes DROP CONSTRAINT IF EXISTS integration_mapping_changes_action_check;
+                    ALTER TABLE integration_mapping_changes
+                    ADD CONSTRAINT integration_mapping_changes_action_check
+                    CHECK (action IN (
+                      'create', 'update', 'delete', 'publish', 'archive', 'clone', 'upload',
+                      'review', 'review_request', 'comment', 'restore', 'bulk_import', 'bulk_update'
+                    ));
+                END $$;`,
+        `DO $$ BEGIN
                     ALTER TABLE integration_mapping_entries
                     ADD CONSTRAINT chk_mapping_entry_status
                     CHECK (mapping_status IN ('mapped', 'pending', 'attention', 'ignored'));
@@ -128,6 +153,7 @@ const run = async () => {
                     CHECK (working_days_per_month > 0 AND working_days_per_month <= 31);
                 EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
         'CREATE INDEX IF NOT EXISTS idx_mapping_sets_client_visibility ON integration_mapping_sets(company_id, integration_id, status)',
+        'CREATE INDEX IF NOT EXISTS idx_mapping_sets_approval ON integration_mapping_sets(company_id, approval_status, updated_at DESC)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_mapping_sets_semantic_version ON integration_mapping_sets(integration_id, name, version)',
         'CREATE INDEX IF NOT EXISTS idx_mapping_changes_set ON integration_mapping_changes(mapping_set_id, created_at DESC, id DESC)',
         'CREATE INDEX IF NOT EXISTS idx_mapping_changes_actor ON integration_mapping_changes(actor_user_id, created_at DESC)',

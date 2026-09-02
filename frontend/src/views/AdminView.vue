@@ -1520,6 +1520,10 @@ const mcpWriteScopeOptions: Array<{ value: McpWriteScope; label: string; descrip
   { value: 'processes:checklist', label: 'Gerenciar checklist', description: 'Publica criação e atualização de itens.' },
   { value: 'processes:deliveries', label: 'Criar entregas', description: 'Publica create_delivery.' },
   { value: 'processes:review', label: 'Revisar entregas', description: 'Publica review_delivery.' },
+  { value: 'mappings:write', label: 'Propor De-Para', description: 'Cria e atualiza rascunhos e entradas, sem publicar.' },
+  { value: 'mappings:comment', label: 'Comentar De-Para', description: 'Registra comentários rastreáveis.' },
+  { value: 'mappings:review', label: 'Solicitar revisão', description: 'Submete uma revisão exata à aprovação humana.' },
+  { value: 'mappings:publish', label: 'Publicar De-Para aprovado', description: 'Publica apenas uma revisão já aprovada por uma pessoa.' },
 ]
 const mcpAccessMode = ref<'company' | 'delegated'>('company')
 const mcpRequireContactTagMatch = ref(false)

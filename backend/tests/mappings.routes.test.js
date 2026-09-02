@@ -44,6 +44,22 @@ const query = async (sql, params = []) => {
       rows: [{ total: 3, unresolved: 2, missing_types: 0, duplicate_sources: 0 }]
     };
   }
+  if (sql.includes("NULLIF(BTRIM(content_markdown), '')")) {
+    return { rowCount: 1, rows: [{ has_content: true }] };
+  }
+  if (sql.includes("SET approval_status = 'pending'")) {
+    return {
+      rowCount: 1,
+      rows: [{ id: 91, revision: 5, approvalStatus: 'pending', approvalRevision: 5, approvalRequestedAt: new Date().toISOString(), approvalNote: null }]
+    };
+  }
+  if (sql.includes('SET approval_status = $1')) {
+    return {
+      rowCount: 1,
+      rows: [{ id: 91, revision: 5, approvalStatus: params[0], approvalRevision: 5, approvedAt: new Date().toISOString(), approvedBy: params[1], approvalNote: params[2], updatedAt: new Date().toISOString() }]
+    };
+  }
+  if (sql.includes('INSERT INTO generic_webhook_outbox')) return { rowCount: 1, rows: [] };
   if (sql.includes('FROM integration_mapping_changes changes')) {
     return {
       rowCount: 1,
@@ -222,6 +238,12 @@ const historyHandler = router.stack
   .route.stack.at(-1).handle;
 const reviewHandler = router.stack
   .find(layer => layer.route?.path === '/mappings/:mappingSetId/review' && layer.route.methods.post)
+  .route.stack.at(-1).handle;
+const requestApprovalHandler = router.stack
+  .find(layer => layer.route?.path === '/mappings/:mappingSetId/approval/request' && layer.route.methods.post)
+  .route.stack.at(-1).handle;
+const decideApprovalHandler = router.stack
+  .find(layer => layer.route?.path === '/mappings/:mappingSetId/approval' && layer.route.methods.post)
   .route.stack.at(-1).handle;
 
 const invoke = async (handler, { user, params = {}, query: queryParams = {}, body = {} }) => {
@@ -537,6 +559,9 @@ test('configured publication policy blocks unresolved entries on the server', as
     status: 'draft',
     version: 3,
     revision: 4,
+    approval_status: 'approved',
+    approval_revision: 4,
+    approved_by: 7,
     content_markdown: '# De-para',
     client_edit_mode: 'none',
     validation_rules: {
@@ -558,6 +583,87 @@ test('configured publication policy blocks unresolved entries on the server', as
     item.sql.includes('UPDATE integration_mapping_sets') &&
     item.sql.includes("SET status = 'archived'")
   ), false);
+});
+
+test('approval request advances the revision and records a pending review', async () => {
+  queries = [];
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'draft',
+    revision: 4,
+    approval_status: 'not_requested'
+  };
+  const response = await invoke(requestApprovalHandler, {
+    user: { id: 7, email: 'admin@example.com', role: 'admin', companyId: null },
+    params: { mappingSetId: '91' },
+    body: { expectedRevision: 4 }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.reviewRequest.approvalStatus, 'pending');
+  assert.equal(response.body.reviewRequest.revision, 5);
+  const historyInsert = queries.find(item => item.sql.includes('INSERT INTO integration_mapping_changes'));
+  assert.equal(historyInsert.params[3], 'review_request');
+});
+
+test('human approval binds the decision to the exact pending revision', async () => {
+  queries = [];
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'draft',
+    revision: 5,
+    approval_status: 'pending',
+    approval_revision: 5
+  };
+  const response = await invoke(decideApprovalHandler, {
+    user: { id: 7, email: 'admin@example.com', role: 'admin', companyId: null },
+    params: { mappingSetId: '91' },
+    body: { expectedRevision: 5, decision: 'approved' }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.approval.approvalStatus, 'approved');
+  assert.equal(response.body.approval.approvalRevision, 5);
+  const decisionUpdate = queries.find(item => item.sql.includes('SET approval_status = $1'));
+  assert.equal(decisionUpdate.params[0], 'approved');
+  assert.equal(decisionUpdate.params[1], 7);
+});
+
+test('publication is blocked before quality checks when the exact revision lacks human approval', async () => {
+  queries = [];
+  mappingSetFixture = {
+    id: 91,
+    company_id: 12,
+    integration_id: 4,
+    integration_company_id: 12,
+    name: 'Pedidos',
+    status: 'draft',
+    version: 3,
+    revision: 4,
+    content_markdown: '# De-para',
+    client_edit_mode: 'none',
+    approval_status: 'pending',
+    approval_revision: 4,
+    approved_by: null,
+    validation_rules: {}
+  };
+  const response = await invoke(updateSetHandler, {
+    user: { id: 7, role: 'admin', companyId: null },
+    params: { mappingSetId: '91' },
+    body: { status: 'published', expectedRevision: 4 }
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.error, /aprovação humana explícita/i);
+  assert.equal(queries.some(item => item.sql.includes('COUNT(*)::int AS total')), false);
 });
 
 test('published mapping must be archived before permanent deletion', async () => {
