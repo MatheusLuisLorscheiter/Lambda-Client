@@ -3,12 +3,9 @@
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <div class="flex items-center gap-2">
-          <h3 class="text-sm font-semibold text-slate-900">Conexões AWS reutilizáveis</h3>
+          <h3 class="text-sm font-semibold text-slate-900">Conexões AWS</h3>
           <span class="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">{{ connections.length }}</span>
         </div>
-        <p class="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-          Cadastre uma credencial por conta e empresa. Depois descubra e selecione as funções que devem aparecer no Lambda Pulse.
-        </p>
       </div>
       <button class="min-h-9 shrink-0 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700" @click="openCreate">
         + Conectar conta AWS
