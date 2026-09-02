@@ -35,4 +35,11 @@ const classifyIntegrationHealthError = (error) => {
   return { code: 'AWS_HEALTH_CHECK_FAILED', message: 'Não foi possível acessar a função com as credenciais configuradas.' };
 };
 
-module.exports = { classifyIntegrationHealthError };
+const integrationHealthStatusForFailure = (failureCode) => (
+  failureCode === 'AWS_ACCESS_DENIED' ? 'degraded' : 'unavailable'
+);
+
+module.exports = {
+  classifyIntegrationHealthError,
+  integrationHealthStatusForFailure
+};

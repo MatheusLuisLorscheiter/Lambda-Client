@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { classifyIntegrationHealthError } = require('../services/integrationHealth');
+const {
+  classifyIntegrationHealthError,
+  integrationHealthStatusForFailure
+} = require('../services/integrationHealth');
 
 test('identifica chave de criptografia divergente sem expor o erro bruto', () => {
   const result = classifyIntegrationHealthError(new Error('Unsupported state or unable to authenticate data'));
@@ -20,4 +23,10 @@ test('mantem fallback sanitizado para falhas desconhecidas', () => {
   const result = classifyIntegrationHealthError(new Error('segredo que nao pode aparecer'));
   assert.equal(result.code, 'AWS_HEALTH_CHECK_FAILED');
   assert.doesNotMatch(result.message, /segredo/);
+});
+
+test('falta de permissao degrada o monitoramento sem declarar a Lambda indisponivel', () => {
+  assert.equal(integrationHealthStatusForFailure('AWS_ACCESS_DENIED'), 'degraded');
+  assert.equal(integrationHealthStatusForFailure('AWS_CREDENTIALS_REJECTED'), 'unavailable');
+  assert.equal(integrationHealthStatusForFailure('AWS_CONNECTION_FAILED'), 'unavailable');
 });

@@ -1258,7 +1258,7 @@
                 No console da AWS, vá em <strong>IAM → Users → Create user</strong> e crie um usuário para integração.
               </li>
               <li>
-                Na etapa <strong>Permissions</strong>, escolha <strong>Attach policies directly</strong> e clique em <strong>Create policy</strong>. No editor <strong>JSON</strong>, adicione ações necessárias: <strong>lambda:ListFunctions</strong>, <strong>cloudwatch:GetMetricData</strong>, <strong>logs:FilterLogEvents</strong>, <strong>logs:StartQuery</strong> e <strong>logs:GetQueryResults</strong>. Salve a policy e associe ao usuário.
+                Na etapa <strong>Permissions</strong>, escolha <strong>Attach policies directly</strong> e clique em <strong>Create policy</strong>. No editor <strong>JSON</strong>, use a policy completa abaixo. Ela permite validar e invocar as funções autorizadas, além de consultar métricas e logs. Salve a policy e associe ao usuário.
               </li>
               <li>
                 Ao clicar em <strong>Create policy</strong>, a AWS abre uma nova aba. Salve a policy nessa aba, volte para a aba do usuário e clique no <strong>ícone de refresh</strong> na lista de policies para ela aparecer e ser selecionada.
@@ -1821,6 +1821,8 @@ const integrationPolicyJson = `{
       "Effect": "Allow",
       "Action": [
         "lambda:ListFunctions",
+        "lambda:GetFunction",
+        "lambda:InvokeFunction",
         "cloudwatch:GetMetricData",
         "logs:FilterLogEvents",
         "logs:StartQuery",
