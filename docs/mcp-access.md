@@ -51,7 +51,9 @@ O CloudWhats sobrescreve `client_email` e `client_context` com o contato carrega
 
 ## Ferramentas operacionais
 
-As consultas incluem resumo da empresa, processos, entregas, checklist, De-Para, `get_integration_observability` e `get_lambda_source`. A consulta de observabilidade combina métricas reais do CloudWatch e logs sanitizados, limita a janela a sete dias e nunca executa ou altera uma Lambda. A leitura de fonte exige caminhos explícitos e respeita limites de tamanho e quantidade.
+As consultas incluem resumo da empresa, processos, entregas, checklist, De-Para, `get_integration_observability`, `get_lambda_source` e `list_lambda_source_revisions`. A consulta de observabilidade combina métricas reais do CloudWatch e logs sanitizados, limita a janela a sete dias e nunca executa ou altera uma Lambda. A leitura de fonte exige caminhos explícitos e respeita limites de tamanho e quantidade.
+
+`list_lambda_source_revisions` é a fonte de evidência para auditorias de mudanças: aceita integração, período e estado opcionais; devolve resumos, arquivos alterados, revisão, aprovação e publicação sem expor o código. O bloco `coverage` diferencia um histórico completo de um resultado truncado. Conversas e solicitações externas não devem ser tratadas como prova de implementação sem reconciliar esta consulta ou outra fonte de implantação autorizada.
 
 O escopo `integrations:source:read` libera a leitura seletiva; `integrations:source:write` permite `propose_lambda_source_revision`; `integrations:source:review` permite `request_lambda_source_review`. Nenhum deles aprova ou publica código. Aprovação humana e publicação na AWS permanecem no workspace administrativo, com auditoria e proteção por hash da origem.
 

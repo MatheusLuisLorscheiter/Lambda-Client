@@ -212,6 +212,19 @@ const MCP_TOOL_DEFINITIONS = [
     }, ['integrationId']),
   },
   {
+    name: 'list_lambda_source_revisions',
+    domain: 'integrations',
+    scope: 'integrations:source:read',
+    description: 'Lista o histórico de revisões de código das Lambdas da empresa no período, incluindo resumo, arquivos alterados, aprovação e publicação. Retorna cobertura explícita para auditorias e conciliação; não expõe o conteúdo nem altera a AWS.',
+    inputSchema: withContext({
+      integrationId: { type: 'integer', minimum: 1 },
+      since: { type: 'string', format: 'date-time' },
+      until: { type: 'string', format: 'date-time' },
+      status: { type: 'string', enum: ['draft', 'pending_review', 'approved', 'publishing', 'published', 'rejected', 'failed'] },
+      limit: { type: 'integer', minimum: 1, maximum: 500, default: 500 },
+    }),
+  },
+  {
     name: 'list_processes_and_docs',
     domain: 'processes',
     description: 'Lista processos visíveis ao cliente e seus entregáveis.',
@@ -612,6 +625,82 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
         excludedFileCount: source.excluded.length,
         files: contents,
         nextStep: requested.length ? 'Use propose_lambda_source_revision para criar um rascunho; a publicação continuará bloqueada até aprovação humana.' : 'Solicite novamente com filePaths para ler o conteúdo necessário.'
+      };
+    }
+    case 'list_lambda_source_revisions': {
+      requireDomain(target, 'integrations', 'Acesso a integrações não está liberado.');
+      const values = [target.id];
+      const conditions = ['integrations.company_id = $1'];
+      const integrationId = args.integrationId === undefined ? null : Number(args.integrationId);
+      if (integrationId !== null) {
+        if (!Number.isInteger(integrationId) || integrationId < 1) throw new Error('integrationId inválido.');
+        values.push(integrationId);
+        conditions.push(`revisions.integration_id = $${values.length}`);
+      }
+      const parseBoundary = (value, label) => {
+        if (!value) return null;
+        const parsed = new Date(String(value));
+        if (Number.isNaN(parsed.getTime())) throw new Error(`${label} inválido.`);
+        return parsed.toISOString();
+      };
+      const since = parseBoundary(args.since, 'since');
+      const until = parseBoundary(args.until, 'until');
+      if (since && until && since > until) throw new Error('since não pode ser posterior a until.');
+      if (since) {
+        values.push(since);
+        conditions.push(`revisions.created_at >= $${values.length}`);
+      }
+      if (until) {
+        values.push(until);
+        conditions.push(`revisions.created_at <= $${values.length}`);
+      }
+      if (args.status) {
+        values.push(String(args.status));
+        conditions.push(`revisions.status = $${values.length}`);
+      }
+      const where = conditions.join(' AND ');
+      const limit = Math.min(Math.max(Number(args.limit) || 500, 1), 500);
+      const count = await query(
+        `SELECT COUNT(*)::int AS count
+           FROM lambda_source_revisions revisions
+           JOIN integrations ON integrations.id = revisions.integration_id
+          WHERE ${where}`,
+        values,
+      );
+      const rowValues = [...values, limit];
+      const result = await query(
+        `SELECT revisions.id, revisions.integration_id AS "integrationId", integrations.name AS "integrationName",
+                integrations.function_name AS "functionName", revisions.revision, revisions.status,
+                revisions.summary, revisions.files, revisions.deleted_files AS "deletedFiles",
+                revisions.review_requested_at AS "reviewRequestedAt", revisions.approved_at AS "approvedAt",
+                revisions.published_at AS "publishedAt", revisions.created_at AS "createdAt",
+                revisions.updated_at AS "updatedAt", revisions.base_code_sha256 AS "baseCodeSha256",
+                revisions.aws_code_sha256 AS "awsCodeSha256"
+           FROM lambda_source_revisions revisions
+           JOIN integrations ON integrations.id = revisions.integration_id
+          WHERE ${where}
+          ORDER BY revisions.created_at ASC, revisions.id ASC
+          LIMIT $${rowValues.length}`,
+        rowValues,
+      );
+      const total = Number(count.rows[0]?.count || 0);
+      const revisions = result.rows.map(({ files, ...revision }) => ({
+        ...revision,
+        changedFiles: files && typeof files === 'object' && !Array.isArray(files) ? Object.keys(files) : [],
+        deletedFiles: Array.isArray(revision.deletedFiles) ? revision.deletedFiles : [],
+      }));
+      return {
+        total,
+        returned: revisions.length,
+        revisions,
+        coverage: {
+          complete: revisions.length === total,
+          omitted: Math.max(0, total - revisions.length),
+          since,
+          until,
+          integrationId,
+          status: args.status || null,
+        },
       };
     }
     case 'list_processes_and_docs': {

@@ -15,7 +15,7 @@ const hashes = {
 const query = async (sql, params = []) => {
   if (sql.includes('WHERE cfg.api_key_hash')) {
     if (params[0] === hashes.company) {
-      return { rows: [{ company_id: 1, company_name: 'Empresa Teste', is_enabled: true, allowed_domains: { logs: true, processes: true, mappings: true, integrations: true }, access_mode: 'company', require_contact_tag_match: false, max_requests_per_minute: 60 }] };
+      return { rows: [{ company_id: 1, company_name: 'Empresa Teste', is_enabled: true, allowed_domains: { logs: true, processes: true, mappings: true, integrations: true }, allowed_scopes: ['integrations:source:read'], access_mode: 'company', require_contact_tag_match: false, max_requests_per_minute: 60 }] };
     }
     if (params[0] === hashes.delegated) {
       return { rows: [{ company_id: 99, company_name: 'CloudWhats', is_enabled: true, allowed_domains: { logs: true, processes: true, mappings: true, integrations: true }, access_mode: 'delegated', require_contact_tag_match: true, max_requests_per_minute: 60 }] };
@@ -115,12 +115,28 @@ test('código da Lambda exige escopos explícitos e nunca publica pela credencia
   };
   const names = router._mcpInternals.publicToolsFor(principal).map((tool) => tool.name);
   assert.ok(names.includes('get_lambda_source'));
+  assert.ok(names.includes('list_lambda_source_revisions'));
   assert.ok(names.includes('propose_lambda_source_revision'));
   assert.ok(names.includes('request_lambda_source_review'));
   assert.ok(!names.some((name) => /approve|publish.*lambda|lambda.*publish/.test(name)));
 
   const withoutSourceScope = router._mcpInternals.publicToolsFor({ ...principal, allowedScopes: new Set() }).map((tool) => tool.name);
   assert.ok(!withoutSourceScope.includes('get_lambda_source'));
+  assert.ok(!withoutSourceScope.includes('list_lambda_source_revisions'));
+});
+
+test('histórico de revisões informa cobertura mesmo quando o período está vazio', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const result = await client.callTool({
+      name: 'list_lambda_source_revisions',
+      arguments: { since: '2026-08-01T00:00:00.000Z', until: '2026-09-01T00:00:00.000Z' },
+    });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.total, 0);
+    assert.equal(data.coverage.complete, true);
+    assert.equal(data.coverage.since, '2026-08-01T00:00:00.000Z');
+  });
 });
 
 test('acesso delegado falha fechado quando não há tag exata', async () => {
