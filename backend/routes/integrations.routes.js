@@ -6,6 +6,7 @@ const { logAudit } = require('../audit/logger');
 const { getIntegrationForUser, normalizeDocumentationLinks } = require('../services/integrations');
 const { LambdaClient, GetFunctionCommand } = require('@aws-sdk/client-lambda');
 const { decrypt } = require('../security/crypto');
+const { classifyIntegrationHealthError } = require('../services/integrationHealth');
 
 const router = express.Router();
 const validProcessStatuses = new Set(['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused']);
@@ -301,6 +302,7 @@ router.post('/integrations/:integrationId/health-check', authenticateToken, asyn
   let status = 'healthy';
   let message = 'Credenciais válidas e função acessível.';
   let details = null;
+  let failureCode = null;
   try {
     const lambdaClient = new LambdaClient({
       region: integration.region,
@@ -332,9 +334,14 @@ router.post('/integrations/:integrationId/health-check', authenticateToken, asyn
     }
   } catch (error) {
     status = 'unavailable';
-    message = error.name === 'ResourceNotFoundException'
-      ? 'Função não encontrada na região configurada.'
-      : 'Não foi possível acessar a função com as credenciais configuradas.';
+    const failure = classifyIntegrationHealthError(error);
+    failureCode = failure.code;
+    message = failure.message;
+    console.warn('[Integration health check failed]', {
+      integrationId,
+      failureCode,
+      errorName: String(error?.name || 'UnknownError')
+    });
   }
 
   await query(
@@ -349,12 +356,12 @@ router.post('/integrations/:integrationId/health-check', authenticateToken, asyn
     action: 'integration.health_check',
     resourceType: 'integration',
     resourceId: String(integrationId),
-    metadata: { status, details },
+    metadata: { status, details, failureCode },
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
   });
 
-  const payload = { status, message, checkedAt: new Date().toISOString(), details };
+  const payload = { status, message, checkedAt: new Date().toISOString(), details, failureCode };
   res.json(payload);
 });
 

@@ -10,6 +10,15 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// A API publica passa por um unico proxy reverso da EasyPanel/Traefik. Limitar
+// a confianca a exatamente um salto permite que Express e express-rate-limit
+// usem o IP real sem aceitar uma cadeia X-Forwarded-For arbitraria do cliente.
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
+if (!Number.isInteger(trustProxyHops) || trustProxyHops < 1) {
+  throw new Error('TRUST_PROXY_HOPS must be a positive integer');
+}
+app.set('trust proxy', trustProxyHops);
+
 const frontendBaseUrl = process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
 const allowedOrigins = frontendBaseUrl.split(',').map(origin => origin.trim()).filter(Boolean);
 
