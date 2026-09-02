@@ -3,9 +3,8 @@ const { authenticateToken } = require('./auth');
 const { pool, query } = require('../db');
 const { encrypt } = require('../security/crypto');
 const { logAudit } = require('../audit/logger');
-const { getIntegrationForUser, normalizeDocumentationLinks } = require('../services/integrations');
+const { getIntegrationForUser, buildAwsClientCredentials, normalizeDocumentationLinks } = require('../services/integrations');
 const { LambdaClient, GetFunctionCommand } = require('@aws-sdk/client-lambda');
-const { decrypt } = require('../security/crypto');
 const {
   classifyIntegrationHealthError,
   integrationHealthStatusForFailure
@@ -137,6 +136,8 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.last_check_message AS "lastCheckMessage",
               integrations.last_checked_at AS "lastCheckedAt",
               integrations.documentation_links AS "documentationLinks",
+              integrations.aws_connection_id AS "awsConnectionId",
+              aws_connections.name AS "awsConnectionName",
               integrations.company_id AS "companyId",
               companies.name AS "companyName",
               integrations.owner_user_id AS "userId",
@@ -144,6 +145,7 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               ${processSelect}
        FROM integrations
        JOIN companies ON companies.id = integrations.company_id
+       LEFT JOIN aws_connections ON aws_connections.id = integrations.aws_connection_id
        ORDER BY integrations.id DESC`
     );
     return res.json({ integrations: result.rows });
@@ -161,6 +163,8 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.last_check_message AS "lastCheckMessage",
               integrations.last_checked_at AS "lastCheckedAt",
               integrations.documentation_links AS "documentationLinks",
+              integrations.aws_connection_id AS "awsConnectionId",
+              aws_connections.name AS "awsConnectionName",
               integrations.company_id AS "companyId",
               companies.name AS "companyName",
               integrations.owner_user_id AS "userId",
@@ -168,6 +172,7 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               ${processSelect}
        FROM integrations
        JOIN companies ON companies.id = integrations.company_id
+       LEFT JOIN aws_connections ON aws_connections.id = integrations.aws_connection_id
        WHERE integrations.company_id = $1
        ORDER BY integrations.id DESC`,
       [req.user.companyId]
@@ -184,10 +189,25 @@ router.post('/integrations', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Acesso de administrador obrigatório' });
   }
 
-  const { name, functionName, region, accessKeyId, secretAccessKey, memoryMb, companyId, showCostEstimate, documentationLinks, processIds, createProcess } = req.body;
+  const { name, functionName, region, awsConnectionId, accessKeyId, secretAccessKey, memoryMb, companyId, showCostEstimate, documentationLinks, processIds, createProcess } = req.body;
 
-  if (!name || !functionName || !region || !accessKeyId || !secretAccessKey) {
+  if (!name || !functionName || !region || (!awsConnectionId && (!accessKeyId || !secretAccessKey))) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
+  }
+
+  let resolvedAwsConnectionId = null;
+  let resolvedConnectionCompanyId = null;
+  if (awsConnectionId) {
+    const parsedConnectionId = Number(awsConnectionId);
+    if (!Number.isInteger(parsedConnectionId) || parsedConnectionId <= 0) {
+      return res.status(400).json({ error: 'Conexão AWS inválida' });
+    }
+    const connectionResult = await query('SELECT id, company_id FROM aws_connections WHERE id = $1', [parsedConnectionId]);
+    if (!connectionResult.rowCount) {
+      return res.status(400).json({ error: 'Conexão AWS não encontrada' });
+    }
+    resolvedAwsConnectionId = parsedConnectionId;
+    resolvedConnectionCompanyId = Number(connectionResult.rows[0].company_id);
   }
 
   let resolvedMemoryMb = 128;
@@ -229,9 +249,12 @@ router.post('/integrations', authenticateToken, async (req, res) => {
   if (!resolvedCompanyId) {
     return res.status(400).json({ error: 'companyId é obrigatório' });
   }
+  if (resolvedAwsConnectionId && resolvedConnectionCompanyId !== Number(resolvedCompanyId)) {
+    return res.status(400).json({ error: 'A conexão AWS pertence a outra empresa' });
+  }
 
-  const encryptedAccessKey = encrypt(accessKeyId);
-  const encryptedSecretKey = encrypt(secretAccessKey);
+  const encryptedAccessKey = resolvedAwsConnectionId ? null : encrypt(accessKeyId);
+  const encryptedSecretKey = resolvedAwsConnectionId ? null : encrypt(secretAccessKey);
   let resolvedProcessIds;
   try {
     resolvedProcessIds = normalizeProcessIds(processIds) || [];
@@ -246,10 +269,10 @@ router.post('/integrations', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
     result = await client.query(
       `INSERT INTO integrations
-        (company_id, name, function_name, region, memory_mb, show_cost_estimate, documentation_links, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", show_cost_estimate AS "showCostEstimate", documentation_links AS "documentationLinks", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
-      [resolvedCompanyId, name, functionName, region, resolvedMemoryMb, resolvedShowCostEstimate, JSON.stringify(resolvedDocumentationLinks), encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
+        (company_id, name, function_name, region, memory_mb, show_cost_estimate, documentation_links, aws_connection_id, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", show_cost_estimate AS "showCostEstimate", documentation_links AS "documentationLinks", aws_connection_id AS "awsConnectionId", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
+      [resolvedCompanyId, name, functionName, region, resolvedMemoryMb, resolvedShowCostEstimate, JSON.stringify(resolvedDocumentationLinks), resolvedAwsConnectionId, encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
     );
     linkedProcesses = await syncIntegrationProcesses({
       db: client,
@@ -280,6 +303,7 @@ router.post('/integrations', authenticateToken, async (req, res) => {
       name,
       functionName,
       region,
+      awsConnectionId: resolvedAwsConnectionId,
       memoryMb: resolvedMemoryMb,
       companyId: resolvedCompanyId,
       showCostEstimate: resolvedShowCostEstimate,
@@ -309,10 +333,7 @@ router.post('/integrations/:integrationId/health-check', authenticateToken, asyn
   try {
     const lambdaClient = new LambdaClient({
       region: integration.region,
-      credentials: {
-        accessKeyId: decrypt(integration.access_key_encrypted),
-        secretAccessKey: decrypt(integration.secret_key_encrypted)
-      }
+      credentials: buildAwsClientCredentials(integration)
     });
     const result = await lambdaClient.send(new GetFunctionCommand({
       FunctionName: integration.function_name
@@ -412,14 +433,15 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
     return res.status(404).json({ error: 'Integração não encontrada' });
   }
 
-  const { name, memoryMb, showCostEstimate, companyId, documentationLinks, processIds, createProcess } = req.body;
+  const { name, memoryMb, showCostEstimate, companyId, awsConnectionId, documentationLinks, processIds, createProcess } = req.body;
 
   const updates = {
     name: name !== undefined ? String(name).trim() : integration.name,
     memory_mb: integration.memory_mb,
     show_cost_estimate: integration.show_cost_estimate,
     company_id: integration.company_id,
-    documentation_links: integration.documentation_links || []
+    documentation_links: integration.documentation_links || [],
+    aws_connection_id: integration.aws_connection_id || null
   };
 
   if (!updates.name) {
@@ -464,6 +486,25 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
     }
   }
 
+  if (awsConnectionId !== undefined && awsConnectionId !== null && awsConnectionId !== '') {
+    const parsedConnectionId = Number(awsConnectionId);
+    const connection = Number.isInteger(parsedConnectionId) && parsedConnectionId > 0
+      ? await query('SELECT id, company_id FROM aws_connections WHERE id = $1', [parsedConnectionId])
+      : { rowCount: 0, rows: [] };
+    if (!connection.rowCount) return res.status(400).json({ error: 'Conexão AWS não encontrada' });
+    if (Number(connection.rows[0].company_id) !== Number(updates.company_id)) {
+      return res.status(400).json({ error: 'A conexão AWS pertence a outra empresa' });
+    }
+    updates.aws_connection_id = parsedConnectionId;
+  }
+
+  if (updates.aws_connection_id) {
+    const finalConnection = await query('SELECT company_id FROM aws_connections WHERE id = $1', [updates.aws_connection_id]);
+    if (!finalConnection.rowCount || Number(finalConnection.rows[0].company_id) !== Number(updates.company_id)) {
+      return res.status(400).json({ error: 'Selecione uma conexão AWS pertencente à empresa de destino' });
+    }
+  }
+
   let resolvedProcessIds;
   try {
     resolvedProcessIds = normalizeProcessIds(processIds);
@@ -486,8 +527,11 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
             memory_mb = $2,
             show_cost_estimate = $3,
             company_id = $4,
-            documentation_links = $5
-          WHERE id = $6
+            documentation_links = $5,
+            aws_connection_id = $6,
+            access_key_encrypted = CASE WHEN $6 IS DISTINCT FROM aws_connection_id THEN NULL ELSE access_key_encrypted END,
+            secret_key_encrypted = CASE WHEN $6 IS DISTINCT FROM aws_connection_id THEN NULL ELSE secret_key_encrypted END
+          WHERE id = $7
       RETURNING id,
                 name,
                 function_name AS "functionName",
@@ -495,10 +539,11 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
                 memory_mb AS "memoryMb",
                 show_cost_estimate AS "showCostEstimate",
                 documentation_links AS "documentationLinks",
+                aws_connection_id AS "awsConnectionId",
                 company_id AS "companyId",
                 owner_user_id AS "userId",
                 client_user_id AS "clientId"`,
-      [updates.name, updates.memory_mb, updates.show_cost_estimate, updates.company_id, JSON.stringify(updates.documentation_links || []), integrationId]
+      [updates.name, updates.memory_mb, updates.show_cost_estimate, updates.company_id, JSON.stringify(updates.documentation_links || []), updates.aws_connection_id, integrationId]
     );
 
     if (resolvedProcessIds !== undefined || createProcess?.enabled) {
@@ -543,6 +588,7 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
       memoryMb: updates.memory_mb,
       showCostEstimate: updates.show_cost_estimate,
       companyId: updates.company_id,
+      awsConnectionId: updates.aws_connection_id,
       documentationLinks: updates.documentation_links,
       linkedProcessIds: linkedProcesses.map(process => process.id),
       processCreatedFromIntegration: Boolean(createProcess?.enabled)

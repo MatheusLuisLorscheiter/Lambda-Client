@@ -167,6 +167,11 @@
 
         <!-- Integrations Tab -->
         <div v-if="activeTab === 'integrations'" class="p-6">
+          <AwsConnectionsPanel
+            :companies="companies"
+            @changed="handleAwsConnectionsChanged"
+            @imported="fetchIntegrations"
+          />
           <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <label class="block min-w-0 flex-1 sm:max-w-lg"><span class="mb-1 block text-xs font-medium text-slate-500">Buscar integração</span><input v-model="integrationSearch" type="search" placeholder="Nome, função, região ou empresa" class="min-h-10 w-full rounded-md border border-slate-300 px-3 text-sm" /></label>
             <button class="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-medium text-white" @click="integrationCreateModal = true">+ Nova integração</button>
@@ -384,22 +389,36 @@
                     </div>
                   </div>
                 </div>
-                <div>
+                <div class="md:col-span-2 lg:col-span-3">
+                  <label class="block text-sm font-medium text-slate-700 mb-1">Conexão AWS</label>
+                  <select
+                    v-model="newIntegration.awsConnectionId"
+                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
+                    @change="applyNewIntegrationConnection"
+                  >
+                    <option :value="null">Credencial avulsa (compatibilidade)</option>
+                    <option v-for="connection in newIntegrationConnectionOptions" :key="connection.id" :value="connection.id">
+                      {{ connection.name }} · {{ connection.defaultRegion }} · {{ connection.accessKeyHint }}
+                    </option>
+                  </select>
+                  <p class="mt-1 text-xs text-slate-500">Recomendado: use uma conexão reutilizável. A credencial é informada uma vez e pode importar várias funções.</p>
+                </div>
+                <div v-if="!newIntegration.awsConnectionId">
                   <label class="block text-sm font-medium text-slate-700 mb-1">Access Key ID da AWS</label>
                   <input
                     v-model="newIntegration.accessKeyId"
                     type="text"
-                    required
+                    :required="!newIntegration.awsConnectionId"
                     placeholder="AKIA..."
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
                   />
                 </div>
-                <div>
+                <div v-if="!newIntegration.awsConnectionId">
                   <label class="block text-sm font-medium text-slate-700 mb-1">Secret Access Key da AWS</label>
                   <input
                     v-model="newIntegration.secretAccessKey"
                     type="password"
-                    required
+                    :required="!newIntegration.awsConnectionId"
                     placeholder="••••••••"
                     class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
                   />
@@ -432,8 +451,8 @@
               :key="integration.id"
               class="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow"
             >
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-4">
+              <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div class="flex min-w-0 items-center space-x-4">
                   <div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
                     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -470,6 +489,10 @@
                       >
                         {{ integration.companyName }}
                       </span>
+                      <span v-if="integration.awsConnectionName" class="mx-2">•</span>
+                      <span v-if="integration.awsConnectionName" class="inline-flex items-center rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                        AWS: {{ integration.awsConnectionName }}
+                      </span>
                     </p>
                     <p v-if="integration.lastCheckMessage" class="mt-1 text-xs text-slate-400">
                       {{ integration.lastCheckMessage }}<span v-if="integration.lastCheckedAt"> · {{ new Date(integration.lastCheckedAt).toLocaleString('pt-BR') }}</span>
@@ -488,7 +511,13 @@
                     </div>
                   </div>
                 </div>
-                <div class="flex items-center space-x-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    @click="openCodeWorkspace(integration)"
+                    class="inline-flex items-center px-3 py-2 border border-violet-300 rounded-lg text-sm font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 transition-colors"
+                  >
+                    Código
+                  </button>
                   <button
                     @click="openEditIntegration(integration)"
                     class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
@@ -1056,6 +1085,13 @@
                 </option>
               </select>
             </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Conexão AWS reutilizável</label>
+              <select v-model="editModal.form.awsConnectionId" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white text-sm">
+                <option :value="null">Manter credencial avulsa existente</option>
+                <option v-for="connection in editIntegrationConnectionOptions" :key="connection.id" :value="connection.id">{{ connection.name }} · {{ connection.defaultRegion }} · {{ connection.accessKeyHint }}</option>
+              </select>
+            </div>
             <div class="rounded-lg border border-slate-200 p-4">
               <h4 class="text-sm font-semibold text-slate-900">Processos relacionados</h4>
               <p class="mt-1 text-xs text-slate-500">O cliente verá estas automações dentro dos detalhes de cada processo.</p>
@@ -1258,7 +1294,7 @@
                 No console da AWS, vá em <strong>IAM → Users → Create user</strong> e crie um usuário para integração.
               </li>
               <li>
-                Na etapa <strong>Permissions</strong>, escolha <strong>Attach policies directly</strong> e clique em <strong>Create policy</strong>. No editor <strong>JSON</strong>, use a policy completa abaixo. Ela permite validar e invocar as funções autorizadas, além de consultar métricas e logs. Salve a policy e associe ao usuário.
+                Na etapa <strong>Permissions</strong>, escolha <strong>Attach policies directly</strong> e clique em <strong>Create policy</strong>. No editor <strong>JSON</strong>, use a policy abaixo e substitua o ARN de exemplo pelos ARNs das funções que poderão receber publicações. Ela permite descobrir e testar funções, consultar métricas/logs e publicar somente uma revisão aprovada.
               </li>
               <li>
                 Ao clicar em <strong>Create policy</strong>, a AWS abre uma nova aba. Salve a policy nessa aba, volte para a aba do usuário e clique no <strong>ícone de refresh</strong> na lista de policies para ela aparecer e ser selecionada.
@@ -1267,13 +1303,13 @@
                 Após criar o usuário, selecione o usuário criado, vá em <strong>Security credentials → Create access key</strong>, selecione <strong>Application running on an AWS compute service</strong>, marque o checkbox e avance, opcionalmente crie uma descrição e clique em <strong>Create access key</strong> para gerar o <strong>Access key ID</strong> e <strong>Secret access key</strong> copie e faça o download (o secret é exibido apenas uma vez).
               </li>
               <li>
-                No console do <strong>AWS Lambda</strong>, copie o <strong>Function name</strong>, a <strong>Region</strong> e a <strong>Memory size</strong> configurada da função.
+                Em <strong>Conexões AWS reutilizáveis</strong>, cadastre a chave uma única vez, clique em <strong>Selecionar funções</strong> e escolha na lista quais Lambdas devem aparecer para a empresa.
               </li>
               <li>
-                Preencha o formulário da integração no sistema e clique em <strong>Adicionar integração</strong>.
+                O cadastro manual continua disponível para compatibilidade. Nesse caso, selecione uma conexão já cadastrada; não é necessário repetir a chave em cada função.
               </li>
               <li>
-                Por fim, clique em <strong>Testar</strong> para validar a conexão com a função e as permissões.
+                Clique em <strong>Testar</strong> para validar acesso. Para editar, abra <strong>Código</strong>, salve uma revisão, solicite revisão, aprove e só então publique na AWS.
               </li>
             </ol>
             <div>
@@ -1467,6 +1503,11 @@
         </div>
       </div>
     </transition>
+    <LambdaCodeWorkspace
+      v-if="codeWorkspaceIntegration"
+      v-model="codeWorkspaceVisible"
+      :integration="codeWorkspaceIntegration"
+    />
   </div>
 </template>
 
@@ -1475,10 +1516,12 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { ClientUser, Integration, AuditLog, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpWriteScope, McpCompaniesResponse, McpTokenResponse } from '@/types'
+import type { ClientUser, Integration, AuditLog, AwsConnection, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpWriteScope, McpCompaniesResponse, McpTokenResponse } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import AdminProcessManager from '@/components/AdminProcessManager.vue'
 import MappingWorkspace from '@/components/MappingWorkspace.vue'
+import AwsConnectionsPanel from '@/components/AwsConnectionsPanel.vue'
+import LambdaCodeWorkspace from '@/components/LambdaCodeWorkspace.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -1524,6 +1567,9 @@ const mcpWriteScopeOptions: Array<{ value: McpWriteScope; label: string; descrip
   { value: 'mappings:comment', label: 'Comentar De-Para', description: 'Registra comentários rastreáveis.' },
   { value: 'mappings:review', label: 'Solicitar revisão', description: 'Submete uma revisão exata à aprovação humana.' },
   { value: 'mappings:publish', label: 'Publicar De-Para aprovado', description: 'Publica apenas uma revisão já aprovada por uma pessoa.' },
+  { value: 'integrations:source:read', label: 'Ler código das Lambdas', description: 'Libera leitura seletiva de arquivos-fonte para o agente.' },
+  { value: 'integrations:source:write', label: 'Propor alteração de código', description: 'Permite ao agente criar rascunhos versionados, sem publicar na AWS.' },
+  { value: 'integrations:source:review', label: 'Solicitar revisão de código', description: 'Permite ao agente encaminhar um rascunho para aprovação humana.' },
 ]
 const mcpAccessMode = ref<'company' | 'delegated'>('company')
 const mcpRequireContactTagMatch = ref(false)
@@ -1677,6 +1723,9 @@ const integrationCreateModal = ref(false)
 const companyCreateModal = ref(false)
 const clientCreateModal = ref(false)
 const integrations = ref<Integration[]>([])
+const awsConnections = ref<AwsConnection[]>([])
+const codeWorkspaceVisible = ref(false)
+const codeWorkspaceIntegration = ref<Integration | null>(null)
 const clients = ref<ClientUser[]>([])
 const companies = ref<Company[]>([])
 const auditLogs = ref<AuditLog[]>([])
@@ -1711,6 +1760,7 @@ const newIntegration = ref({
     status: 'in_progress'
   },
   companyId: null as number | null,
+  awsConnectionId: null as number | null,
   accessKeyId: '',
   secretAccessKey: ''
 })
@@ -1756,6 +1806,7 @@ interface EditIntegrationForm {
   memoryMb: number
   showCostEstimate: boolean
   companyId: number | null
+  awsConnectionId: number | null
   documentationLinks?: string[]
   processIds: number[]
   createProcess: {
@@ -1786,6 +1837,7 @@ const editModal = ref({
     memoryMb: 128,
     showCostEstimate: true,
     companyId: null,
+    awsConnectionId: null,
     processIds: [],
     createProcess: { enabled: false, title: '', description: '', status: 'in_progress' }
   } as EditIntegrationForm
@@ -1798,6 +1850,12 @@ const editDocumentationLink = ref('')
 const showEditDocsPreview = ref(false)
 const newIntegrationProcessOptions = computed(() =>
   processOptions.value.filter(process => process.companyId === Number(newIntegration.value.companyId))
+)
+const newIntegrationConnectionOptions = computed(() =>
+  awsConnections.value.filter(connection => connection.companyId === Number(newIntegration.value.companyId))
+)
+const editIntegrationConnectionOptions = computed(() =>
+  awsConnections.value.filter(connection => connection.companyId === Number(editModal.value.form.companyId))
 )
 const editIntegrationProcessOptions = computed(() =>
   processOptions.value.filter(process => process.companyId === Number(editModal.value.form.companyId))
@@ -1817,18 +1875,27 @@ const integrationPolicyJson = `{
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "LambdaMonitoringReadOnly",
+      "Sid": "LambdaPulseDiscoveryAndMonitoring",
       "Effect": "Allow",
       "Action": [
         "lambda:ListFunctions",
         "lambda:GetFunction",
         "lambda:InvokeFunction",
+        "sts:GetCallerIdentity",
         "cloudwatch:GetMetricData",
         "logs:FilterLogEvents",
         "logs:StartQuery",
         "logs:GetQueryResults"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "LambdaPulseApprovedSourcePublish",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionCode"
+      ],
+      "Resource": "arn:aws:lambda:*:*:function:SUBSTITUA-PELAS-FUNCOES-AUTORIZADAS"
     }
   ]
 }`
@@ -1851,6 +1918,36 @@ const copyIntegrationPolicyJson = async () => {
     showToast('error', 'Não foi possível copiar o JSON')
   }
 }
+
+const handleAwsConnectionsChanged = (connections: AwsConnection[]) => {
+  awsConnections.value = connections
+}
+
+const applyNewIntegrationConnection = () => {
+  const connection = awsConnections.value.find(item => item.id === Number(newIntegration.value.awsConnectionId))
+  if (connection) {
+    newIntegration.value.region = connection.defaultRegion
+    newIntegration.value.accessKeyId = ''
+    newIntegration.value.secretAccessKey = ''
+  }
+}
+
+const openCodeWorkspace = (integration: Integration) => {
+  codeWorkspaceIntegration.value = integration
+  codeWorkspaceVisible.value = true
+}
+
+watch(() => newIntegration.value.companyId, companyId => {
+  if (newIntegration.value.awsConnectionId && !awsConnections.value.some(connection => connection.id === Number(newIntegration.value.awsConnectionId) && connection.companyId === Number(companyId))) {
+    newIntegration.value.awsConnectionId = null
+  }
+})
+
+watch(() => editModal.value.form.companyId, companyId => {
+  if (editModal.value.form.awsConnectionId && !awsConnections.value.some(connection => connection.id === Number(editModal.value.form.awsConnectionId) && connection.companyId === Number(companyId))) {
+    editModal.value.form.awsConnectionId = null
+  }
+})
 
 const addDocumentationLink = () => {
   const link = newDocumentationLink.value.trim()
@@ -2053,6 +2150,7 @@ const addIntegration = async () => {
       processIds: [],
       createProcess: { enabled: false, title: '', description: '', status: 'in_progress' },
       companyId: defaultCompanyId.value,
+      awsConnectionId: null,
       accessKeyId: '',
       secretAccessKey: ''
     }
@@ -2175,6 +2273,7 @@ const openEditIntegration = (integration: Integration) => {
     memoryMb: integration.memoryMb || 128,
     showCostEstimate: integration.showCostEstimate !== false,
     companyId: integration.companyId ?? null,
+    awsConnectionId: integration.awsConnectionId ?? null,
     documentationLinks: integration.documentationLinks ? [...integration.documentationLinks] : [],
     processIds: integration.processes?.map(process => process.id) || [],
     createProcess: { enabled: false, title: '', description: '', status: 'in_progress' }
@@ -2190,6 +2289,7 @@ const closeEditModal = () => {
     memoryMb: 128,
     showCostEstimate: true,
     companyId: null,
+    awsConnectionId: null,
     documentationLinks: [],
     processIds: [],
     createProcess: { enabled: false, title: '', description: '', status: 'in_progress' }
@@ -2207,6 +2307,7 @@ const saveEditIntegration = async () => {
       memoryMb: Number(editModal.value.form.memoryMb) || 128,
       showCostEstimate: Boolean(editModal.value.form.showCostEstimate),
       companyId: editModal.value.form.companyId,
+      awsConnectionId: editModal.value.form.awsConnectionId,
       documentationLinks: editModal.value.form.documentationLinks,
       processIds: editModal.value.form.processIds,
       createProcess: editModal.value.form.createProcess

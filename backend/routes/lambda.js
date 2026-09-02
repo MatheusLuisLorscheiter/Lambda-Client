@@ -3,6 +3,8 @@ const integrationsRoutes = require('./integrations.routes');
 const logsRoutes = require('./logs.routes');
 const metricsRoutes = require('./metrics.routes');
 const mappingsRoutes = require('./mappings.routes');
+const awsConnectionsRoutes = require('./aws-connections.routes');
+const lambdaSourceRoutes = require('./lambda-source.routes');
 
 // This router only aggregates the feature-specific routers below. Route
 // implementations live in integrations.routes.js, logs.routes.js and
@@ -11,6 +13,8 @@ const mappingsRoutes = require('./mappings.routes');
 const router = express.Router();
 
 router.use(integrationsRoutes);
+router.use(awsConnectionsRoutes);
+router.use(lambdaSourceRoutes);
 router.use(mappingsRoutes);
 router.use(logsRoutes);
 router.use(metricsRoutes);

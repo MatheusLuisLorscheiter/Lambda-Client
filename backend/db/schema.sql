@@ -18,6 +18,25 @@ CREATE TABLE IF NOT EXISTS users (
   CHECK (role <> 'client' OR company_id IS NOT NULL)
 );
 
+CREATE TABLE IF NOT EXISTS aws_connections (
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  default_region TEXT NOT NULL DEFAULT 'us-east-1',
+  access_key_encrypted TEXT NOT NULL,
+  secret_key_encrypted TEXT NOT NULL,
+  access_key_hint TEXT NOT NULL,
+  external_account_id TEXT,
+  last_check_status TEXT
+    CHECK (last_check_status IS NULL OR last_check_status IN ('healthy', 'unavailable')),
+  last_check_message TEXT,
+  last_checked_at TIMESTAMPTZ,
+  owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (company_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS integrations (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -33,12 +52,43 @@ CREATE TABLE IF NOT EXISTS integrations (
   last_check_message TEXT,
   last_checked_at TIMESTAMPTZ,
   documentation_links JSONB NOT NULL DEFAULT '[]',
-  access_key_encrypted TEXT NOT NULL,
-  secret_key_encrypted TEXT NOT NULL,
+  aws_connection_id INTEGER REFERENCES aws_connections(id) ON DELETE RESTRICT,
+  access_key_encrypted TEXT,
+  secret_key_encrypted TEXT,
   owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   client_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS lambda_source_revisions (
+  id BIGSERIAL PRIMARY KEY,
+  integration_id INTEGER NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL CHECK (revision > 0),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'pending_review', 'approved', 'publishing', 'published', 'rejected', 'failed')),
+  base_code_sha256 TEXT NOT NULL,
+  files JSONB NOT NULL DEFAULT '{}',
+  deleted_files JSONB NOT NULL DEFAULT '[]',
+  summary TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  review_requested_at TIMESTAMPTZ,
+  approved_at TIMESTAMPTZ,
+  approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approval_note TEXT,
+  published_at TIMESTAMPTZ,
+  published_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  aws_code_sha256 TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (integration_id, revision)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aws_connections_owner ON aws_connections(owner_user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aws_connections_company ON aws_connections(company_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_integrations_aws_connection ON integrations(aws_connection_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_connection_function ON integrations(company_id, aws_connection_id, region, function_name) WHERE aws_connection_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lambda_source_revisions_integration ON lambda_source_revisions(integration_id, revision DESC);
 
 
 CREATE TABLE IF NOT EXISTS password_resets (

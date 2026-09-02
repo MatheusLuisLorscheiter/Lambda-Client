@@ -2,18 +2,12 @@ const express = require('express');
 const { LambdaClient, ListFunctionsCommand, InvokeCommand } = require('@aws-sdk/client-lambda');
 const { CloudWatchClient, GetMetricDataCommand } = require('@aws-sdk/client-cloudwatch');
 const { authenticateToken } = require('./auth');
-const { decrypt } = require('../security/crypto');
 const { client: redisClient, connectRedis } = require('../cache/redis');
 const { logAudit } = require('../audit/logger');
-const { getIntegrationForUser } = require('../services/integrations');
+const { getIntegrationForUser, buildAwsClientCredentials } = require('../services/integrations');
 const { calculateCostEstimate } = require('../services/pricing');
 
 const router = express.Router();
-
-const buildAwsClientCredentials = (integration) => ({
-  accessKeyId: decrypt(integration.access_key_encrypted),
-  secretAccessKey: decrypt(integration.secret_key_encrypted)
-});
 
 // Get Lambda function details
 router.get('/functions/:integrationId', authenticateToken, async (req, res) => {

@@ -16,6 +16,7 @@ O projeto é estruturado como um monorepo contendo backend e frontend:
 - **Banco de Dados**: PostgreSQL
 - **Cache**: Redis
 - **Infraestrutura**: AWS SDK (Lambda, CloudWatch, CloudWatch Logs)
+- **Operação AWS**: conexões reutilizáveis por empresa, descoberta seletiva de funções e workspace de código com aprovação
 - **Email**: Resend
 - **Autenticação**: JWT & Bcrypt
 

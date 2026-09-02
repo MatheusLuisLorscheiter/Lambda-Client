@@ -2,7 +2,17 @@ const { query } = require('../db');
 
 const getIntegrationForUser = async (integrationId, user) => {
   const result = await query(
-    'SELECT id, name, function_name, region, memory_mb, show_cost_estimate, lifecycle_status, last_check_status, last_check_message, last_checked_at, documentation_links, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id, company_id FROM integrations WHERE id = $1',
+    `SELECT integrations.id, integrations.name, integrations.function_name, integrations.region,
+            integrations.memory_mb, integrations.show_cost_estimate, integrations.lifecycle_status,
+            integrations.last_check_status, integrations.last_check_message, integrations.last_checked_at,
+            integrations.documentation_links, integrations.owner_user_id, integrations.client_user_id,
+            integrations.company_id, integrations.aws_connection_id,
+            aws_connections.name AS aws_connection_name,
+            COALESCE(integrations.access_key_encrypted, aws_connections.access_key_encrypted) AS access_key_encrypted,
+            COALESCE(integrations.secret_key_encrypted, aws_connections.secret_key_encrypted) AS secret_key_encrypted
+       FROM integrations
+       LEFT JOIN aws_connections ON aws_connections.id = integrations.aws_connection_id
+      WHERE integrations.id = $1`,
     [integrationId]
   );
 
@@ -20,6 +30,20 @@ const getIntegrationForUser = async (integrationId, user) => {
   }
 
   return null;
+};
+
+const buildAwsClientCredentials = (integration) => {
+  if (!integration?.access_key_encrypted || !integration?.secret_key_encrypted) {
+    const error = new Error('A integração não possui uma conexão AWS válida.');
+    error.code = 'AWS_CONNECTION_MISSING';
+    error.statusCode = 409;
+    throw error;
+  }
+  const { decrypt } = require('../security/crypto');
+  return {
+    accessKeyId: decrypt(integration.access_key_encrypted),
+    secretAccessKey: decrypt(integration.secret_key_encrypted)
+  };
 };
 
 const normalizeDocumentationLinks = (input) => {
@@ -63,5 +87,6 @@ const normalizeDocumentationLinks = (input) => {
 
 module.exports = {
   getIntegrationForUser,
+  buildAwsClientCredentials,
   normalizeDocumentationLinks
 };

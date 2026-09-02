@@ -108,6 +108,21 @@ test('escopos de De-Para separam proposta, revisão e publicação', () => {
   assert.ok(!names.includes('add_mapping_comment'));
 });
 
+test('código da Lambda exige escopos explícitos e nunca publica pela credencial MCP', () => {
+  const principal = {
+    allowedDomains: { logs: true, processes: true, mappings: true, integrations: true },
+    allowedScopes: new Set(['integrations:source:read', 'integrations:source:write', 'integrations:source:review']),
+  };
+  const names = router._mcpInternals.publicToolsFor(principal).map((tool) => tool.name);
+  assert.ok(names.includes('get_lambda_source'));
+  assert.ok(names.includes('propose_lambda_source_revision'));
+  assert.ok(names.includes('request_lambda_source_review'));
+  assert.ok(!names.some((name) => /approve|publish.*lambda|lambda.*publish/.test(name)));
+
+  const withoutSourceScope = router._mcpInternals.publicToolsFor({ ...principal, allowedScopes: new Set() }).map((tool) => tool.name);
+  assert.ok(!withoutSourceScope.includes('get_lambda_source'));
+});
+
 test('acesso delegado falha fechado quando não há tag exata', async () => {
   await withClient('mcp_live_delegated', async (client) => {
     const result = await client.callTool({

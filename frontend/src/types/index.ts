@@ -12,6 +12,8 @@ export interface Integration {
   documentationLinks?: string[]
   companyId?: number
   companyName?: string
+  awsConnectionId?: number | null
+  awsConnectionName?: string | null
   accessKeyId?: string
   secretAccessKey?: string
   userId: number
@@ -21,6 +23,78 @@ export interface Integration {
     title: string
     status: ProcessStatus
   }>
+}
+
+export interface AwsConnection {
+  id: number
+  name: string
+  companyId: number
+  companyName: string
+  defaultRegion: string
+  accessKeyHint: string
+  accountId: string | null
+  lastCheckStatus: 'healthy' | 'unavailable' | null
+  lastCheckMessage: string | null
+  lastCheckedAt: string | null
+  integrationCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AwsLambdaFunction {
+  functionName: string
+  functionArn: string
+  runtime: string | null
+  memorySize: number
+  timeout: number
+  lastModified: string | null
+  codeSize: number
+  description: string
+  importedIntegrationId: number | null
+  importedWithConnectionId?: number | null
+}
+
+export interface LambdaSourceSnapshot {
+  integrationId: number
+  functionName: string
+  region: string
+  runtime: string | null
+  handler: string | null
+  codeSha256: string
+  revisionId: string | null
+  lastModified: string | null
+  files: Record<string, string>
+  excludedFiles: string[]
+  editableBytes: number
+}
+
+export type LambdaSourceRevisionStatus =
+  | 'draft'
+  | 'pending_review'
+  | 'approved'
+  | 'publishing'
+  | 'published'
+  | 'rejected'
+  | 'failed'
+
+export interface LambdaSourceRevision {
+  id: number
+  integrationId: number
+  revision: number
+  status: LambdaSourceRevisionStatus
+  baseCodeSha256: string
+  summary: string
+  changedFiles: string[]
+  deletedFiles: string[]
+  files?: Record<string, string>
+  reviewRequestedAt: string | null
+  approvedAt: string | null
+  approvalNote: string | null
+  publishedAt: string | null
+  awsCodeSha256: string | null
+  errorMessage: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface MappingEntry {
@@ -487,6 +561,9 @@ export type McpWriteScope =
   | 'mappings:comment'
   | 'mappings:review'
   | 'mappings:publish'
+  | 'integrations:source:read'
+  | 'integrations:source:write'
+  | 'integrations:source:review'
 
 export interface CompanyMcpConfig {
   companyId: number

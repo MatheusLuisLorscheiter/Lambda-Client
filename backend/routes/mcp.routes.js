@@ -9,6 +9,8 @@ const { client: redisClient, connectRedis } = require('../cache/redis');
 const processDomain = require('../services/processDomainService');
 const mappingDomain = require('../services/mappingDomainService');
 const integrationObservability = require('../services/integrationObservabilityService');
+const lambdaSourceDomain = require('../services/lambdaSourceDomainService');
+const { fetchLambdaArchive, extractEditableFiles } = require('../services/lambdaSource');
 const { publishDurableProcessEvent } = require('../services/processEvents');
 
 const router = express.Router();
@@ -200,6 +202,16 @@ const MCP_TOOL_DEFINITIONS = [
     }, ['integrationId']),
   },
   {
+    name: 'get_lambda_source',
+    domain: 'integrations',
+    scope: 'integrations:source:read',
+    description: 'Lista os arquivos editáveis do pacote atual de uma Lambda e, opcionalmente, retorna o conteúdo dos caminhos solicitados. Somente leitura.',
+    inputSchema: withContext({
+      integrationId: { type: 'integer', minimum: 1 },
+      filePaths: { type: 'array', maxItems: 30, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    }, ['integrationId']),
+  },
+  {
     name: 'list_processes_and_docs',
     domain: 'processes',
     description: 'Lista processos visíveis ao cliente e seus entregáveis.',
@@ -367,6 +379,27 @@ const MCP_WRITE_TOOL_DEFINITIONS = [
       mappingSetId: { type: 'integer', minimum: 1 },
     }, ['idempotencyKey', 'expectedRevision', 'mappingSetId']),
   },
+  {
+    name: 'propose_lambda_source_revision', scope: 'integrations:source:write', domain: 'integrations',
+    description: 'Cria uma revisão de código em rascunho. Não publica na AWS e exige aprovação humana posterior.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY,
+      integrationId: { type: 'integer', minimum: 1 },
+      baseCodeSha256: { type: 'string', minLength: 1, maxLength: 200 },
+      summary: { type: 'string', minLength: 1, maxLength: 1000 },
+      files: { type: 'object', minProperties: 1, maxProperties: 150, additionalProperties: { type: 'string', maxLength: 524288 } },
+      deletedFiles: { type: 'array', maxItems: 150, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    }, ['idempotencyKey', 'integrationId', 'baseCodeSha256', 'summary', 'files']),
+  },
+  {
+    name: 'request_lambda_source_review', scope: 'integrations:source:review', domain: 'integrations',
+    description: 'Envia um rascunho de código para aprovação humana no Lambda Pulse. Não publica na AWS.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY,
+      integrationId: { type: 'integer', minimum: 1 },
+      revisionId: { type: 'integer', minimum: 1 },
+    }, ['idempotencyKey', 'integrationId', 'revisionId']),
+  },
 ].map(tool => ({ ...tool, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
 
 function publicToolsFor(principal) {
@@ -458,6 +491,8 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       add_mapping_comment: mappingDomain.addMappingComment,
       request_mapping_review: mappingDomain.requestMappingReview,
       publish_mapping: mappingDomain.publishMapping,
+      propose_lambda_source_revision: lambdaSourceDomain.proposeLambdaSourceRevision,
+      request_lambda_source_review: lambdaSourceDomain.requestLambdaSourceReview,
     };
     if (!handlerByName[toolName]) throw new Error('Ferramenta MCP de escrita desconhecida.');
     const result = await handlerByName[toolName]({ companyId: target.id, input: args || {} });
@@ -500,10 +535,14 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       const integrationId = Number(args.integrationId);
       if (!Number.isInteger(integrationId) || integrationId < 1) throw new Error('integrationId inválido.');
       const integrationResult = await query(
-        `SELECT id, name, function_name, region, lifecycle_status, last_check_status,
-                last_check_message, last_checked_at, access_key_encrypted, secret_key_encrypted
+        `SELECT integrations.id, integrations.name, integrations.function_name, integrations.region,
+                integrations.lifecycle_status, integrations.last_check_status,
+                integrations.last_check_message, integrations.last_checked_at,
+                COALESCE(integrations.access_key_encrypted, aws_connections.access_key_encrypted) AS access_key_encrypted,
+                COALESCE(integrations.secret_key_encrypted, aws_connections.secret_key_encrypted) AS secret_key_encrypted
            FROM integrations
-          WHERE id = $1 AND company_id = $2`,
+           LEFT JOIN aws_connections ON aws_connections.id = integrations.aws_connection_id
+          WHERE integrations.id = $1 AND integrations.company_id = $2`,
         [integrationId, target.id],
       );
       const integration = integrationResult.rows[0];
@@ -540,6 +579,39 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
         health,
         metrics,
         executionsAndErrors: logs,
+      };
+    }
+    case 'get_lambda_source': {
+      requireDomain(target, 'integrations', 'Acesso a integrações não está liberado.');
+      const integrationId = Number(args.integrationId);
+      if (!Number.isInteger(integrationId) || integrationId < 1) throw new Error('integrationId inválido.');
+      const result = await query(
+        `SELECT integrations.id, integrations.name, integrations.function_name, integrations.region, integrations.company_id,
+                COALESCE(integrations.access_key_encrypted, aws_connections.access_key_encrypted) AS access_key_encrypted,
+                COALESCE(integrations.secret_key_encrypted, aws_connections.secret_key_encrypted) AS secret_key_encrypted
+           FROM integrations
+           LEFT JOIN aws_connections ON aws_connections.id = integrations.aws_connection_id
+          WHERE integrations.id = $1 AND integrations.company_id = $2`,
+        [integrationId, target.id]
+      );
+      const integration = result.rows[0];
+      if (!integration) throw new Error('Integração não encontrada nesta empresa.');
+      const snapshot = await fetchLambdaArchive(integration);
+      const source = extractEditableFiles(snapshot.archive);
+      const requested = Array.isArray(args.filePaths) ? [...new Set(args.filePaths.map(String))].slice(0, 30) : [];
+      const contents = Object.fromEntries(requested.filter(name => Object.hasOwn(source.files, name)).map(name => [name, source.files[name]]));
+      return {
+        integrationId,
+        functionName: integration.function_name,
+        region: integration.region,
+        runtime: snapshot.configuration.Runtime || null,
+        handler: snapshot.configuration.Handler || null,
+        codeSha256: snapshot.configuration.CodeSha256 || null,
+        lastModified: snapshot.configuration.LastModified || null,
+        editableFiles: Object.keys(source.files),
+        excludedFileCount: source.excluded.length,
+        files: contents,
+        nextStep: requested.length ? 'Use propose_lambda_source_revision para criar um rascunho; a publicação continuará bloqueada até aprovação humana.' : 'Solicite novamente com filePaths para ler o conteúdo necessário.'
       };
     }
     case 'list_processes_and_docs': {

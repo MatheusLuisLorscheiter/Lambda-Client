@@ -170,7 +170,10 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
     'mappings:write',
     'mappings:comment',
     'mappings:review',
-    'mappings:publish',
+      'mappings:publish',
+      'integrations:source:read',
+      'integrations:source:write',
+    'integrations:source:review',
   ]);
   const scopes = Array.from(new Set((Array.isArray(allowedScopes) ? allowedScopes : []).map(String).filter(scope => validScopes.has(scope))));
   if (Array.isArray(allowedScopes) && scopes.length !== allowedScopes.length) return res.status(400).json({ error: 'Um ou mais escopos MCP são inválidos' });
