@@ -383,7 +383,6 @@ CREATE INDEX IF NOT EXISTS idx_process_effort_assessments
 CREATE INDEX IF NOT EXISTS idx_process_effort_items
   ON process_effort_items(assessment_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_sets_integration ON integration_mapping_sets(integration_id, status, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_mapping_sets_approval ON integration_mapping_sets(company_id, approval_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_entries_set ON integration_mapping_entries(mapping_set_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_attachments_set ON integration_mapping_attachments(mapping_set_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_changes_set
