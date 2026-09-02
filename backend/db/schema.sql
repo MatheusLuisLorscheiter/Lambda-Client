@@ -86,8 +86,6 @@ CREATE TABLE IF NOT EXISTS lambda_source_revisions (
 
 CREATE INDEX IF NOT EXISTS idx_aws_connections_owner ON aws_connections(owner_user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_aws_connections_company ON aws_connections(company_id, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_integrations_aws_connection ON integrations(aws_connection_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_connection_function ON integrations(company_id, aws_connection_id, region, function_name) WHERE aws_connection_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lambda_source_revisions_integration ON lambda_source_revisions(integration_id, revision DESC);
 
 

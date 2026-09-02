@@ -25,6 +25,9 @@ test('cria conexões AWS e revisões de fonte antes das migrações incrementais
   const migration = fs.readFileSync(path.join(root, 'scripts', 'update-db.js'), 'utf8');
   assert.ok(schema.indexOf('CREATE TABLE IF NOT EXISTS aws_connections') < schema.indexOf('CREATE TABLE IF NOT EXISTS integrations'));
   assert.ok(schema.includes('CREATE TABLE IF NOT EXISTS lambda_source_revisions'));
+  assert.doesNotMatch(schema, /CREATE INDEX IF NOT EXISTS idx_integrations_aws_connection/);
+  assert.doesNotMatch(schema, /CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_connection_function/);
   assert.ok(migration.includes('ALTER TABLE integrations ADD COLUMN IF NOT EXISTS aws_connection_id'));
   assert.ok(migration.includes('ALTER TABLE integrations ALTER COLUMN access_key_encrypted DROP NOT NULL'));
+  assert.ok(migration.indexOf('CREATE INDEX IF NOT EXISTS idx_integrations_aws_connection') > migration.indexOf('ADD COLUMN IF NOT EXISTS aws_connection_id'));
 });
