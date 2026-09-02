@@ -79,6 +79,11 @@ export interface MappingSet {
     blockDuplicateSources: boolean
     requireTypes: boolean
   }
+  approvalStatus: 'not_requested' | 'pending' | 'approved' | 'rejected'
+  approvalRevision: number | null
+  approvalRequestedAt: string | null
+  approvedAt: string | null
+  approvalNote: string | null
   clonedFromMappingSetId: number | null
   lastClientEditedAt: string | null
   lastClientEditedByEmail: string | null
@@ -102,6 +107,7 @@ export type MappingChangeAction =
   | 'clone'
   | 'upload'
   | 'review'
+  | 'review_request'
   | 'comment'
   | 'restore'
   | 'bulk_import'
@@ -477,6 +483,10 @@ export type McpWriteScope =
   | 'processes:checklist'
   | 'processes:deliveries'
   | 'processes:review'
+  | 'mappings:write'
+  | 'mappings:comment'
+  | 'mappings:review'
+  | 'mappings:publish'
 
 export interface CompanyMcpConfig {
   companyId: number

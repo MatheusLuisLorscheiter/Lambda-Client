@@ -95,6 +95,19 @@ test('tools de escrita só são publicadas na interseção de escopos da credenc
   assert.ok(!names.includes('review_delivery'));
 });
 
+test('escopos de De-Para separam proposta, revisão e publicação', () => {
+  const principal = {
+    allowedDomains: { logs: true, processes: true, mappings: true, integrations: true },
+    allowedScopes: new Set(['mappings:write', 'mappings:review']),
+  };
+  const names = router._mcpInternals.publicToolsFor(principal).map((tool) => tool.name);
+  assert.ok(names.includes('create_mapping_draft'));
+  assert.ok(names.includes('propose_mapping_entry'));
+  assert.ok(names.includes('request_mapping_review'));
+  assert.ok(!names.includes('publish_mapping'));
+  assert.ok(!names.includes('add_mapping_comment'));
+});
+
 test('acesso delegado falha fechado quando não há tag exata', async () => {
   await withClient('mcp_live_delegated', async (client) => {
     const result = await client.callTool({

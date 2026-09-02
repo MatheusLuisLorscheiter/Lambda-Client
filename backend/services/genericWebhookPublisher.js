@@ -41,6 +41,16 @@ async function assertSafeUrl(raw) {
 
 function newSecret() { return `whsec_${crypto.randomBytes(32).toString('base64url')}`; }
 
+function validateSigningSecret(value) {
+  const secret = String(value || '');
+  if (!/^[\x21-\x7e]{32,256}$/.test(secret)) throw new Error('O segredo de assinatura deve ter entre 32 e 256 caracteres ASCII visíveis, sem espaços.');
+  return secret;
+}
+
+function signWebhookBody(secret, timestamp, body) {
+  return `v1=${crypto.createHmac('sha256', validateSigningSecret(secret)).update(`${timestamp}.${body}`).digest('hex')}`;
+}
+
 function safeHeaderName(value, fallback) {
   const header = String(value || fallback).trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(header) || ['authorization', 'cookie', 'host', 'content-length', 'content-type'].includes(header)) throw new Error('Nome de cabeçalho inválido.');
@@ -52,13 +62,22 @@ async function listWebhookEndpoints(companyId) {
   return result.rows;
 }
 
-async function createWebhookEndpoint({ companyId, name, url, eventTypes = [], signatureHeader = 'x-webhook-signature', timestampHeader = 'x-webhook-timestamp' }) {
-  const safeUrl = await assertSafeUrl(url); const secret = newSecret(); const safeName = String(name || '').trim();
+async function getWebhookDeliveryStatus(companyId, endpointId, eventId) {
+  const result = await query(`SELECT outbox.status, outbox.attempts, outbox.last_error AS "lastError", outbox.delivered_at AS "deliveredAt"
+    FROM generic_webhook_outbox outbox
+    INNER JOIN generic_webhook_endpoints endpoint ON endpoint.id = outbox.endpoint_id
+    WHERE outbox.company_id = $1 AND outbox.endpoint_id = $2 AND outbox.event_id = $3 AND endpoint.company_id = $1
+    LIMIT 1`, [companyId, endpointId, eventId]);
+  return result.rows[0] || null;
+}
+
+async function createWebhookEndpoint({ companyId, name, url, eventTypes = [], signatureHeader = 'x-webhook-signature', timestampHeader = 'x-webhook-timestamp', signingSecret = null }) {
+  const safeUrl = await assertSafeUrl(url); const importedSecret = signingSecret !== null && signingSecret !== undefined; const secret = importedSecret ? validateSigningSecret(signingSecret) : newSecret(); const safeName = String(name || '').trim();
   if (!safeName) throw new Error('Nome é obrigatório.');
   if (!Array.isArray(eventTypes) || eventTypes.some(item => typeof item !== 'string')) throw new Error('Tipos de evento inválidos.');
   signatureHeader = safeHeaderName(signatureHeader, 'x-webhook-signature'); timestampHeader = safeHeaderName(timestampHeader, 'x-webhook-timestamp');
   const result = await query(`INSERT INTO generic_webhook_endpoints (company_id, name, url, encrypted_secret, event_types, signature_header, timestamp_header) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, name, url, event_types AS "eventTypes", is_active AS "isActive", signature_header AS "signatureHeader", timestamp_header AS "timestampHeader", created_at AS "createdAt"`, [companyId, safeName, safeUrl, encryptSecret(secret), eventTypes, signatureHeader, timestampHeader]);
-  return { endpoint: result.rows[0], secret };
+  return importedSecret ? { endpoint: result.rows[0], importedSecret: true } : { endpoint: result.rows[0], secret, importedSecret: false };
 }
 
 async function rotateWebhookSecret(companyId, endpointId) {
@@ -72,6 +91,7 @@ async function updateWebhookEndpoint(companyId, endpointId, input) {
   if (input.name !== undefined) { const name = String(input.name || '').trim(); if (!name) throw new Error('Nome inválido.'); add('name', name); }
   if (input.url !== undefined) add('url', await assertSafeUrl(input.url));
   if (input.eventTypes !== undefined) { if (!Array.isArray(input.eventTypes) || input.eventTypes.some(item => typeof item !== 'string')) throw new Error('Tipos de evento inválidos.'); add('event_types', Array.from(new Set(input.eventTypes.map(item => item.trim()).filter(Boolean)))); }
+  if (input.signingSecret !== undefined) add('encrypted_secret', encryptSecret(validateSigningSecret(input.signingSecret)));
   if (input.isActive !== undefined) add('is_active', Boolean(input.isActive));
   if (!fields.length) throw new Error('Nenhuma alteração informada.');
   values.push(endpointId, companyId); fields.push('updated_at = NOW()');
@@ -80,14 +100,15 @@ async function updateWebhookEndpoint(companyId, endpointId, input) {
   return result.rows[0];
 }
 
-async function enqueueGenericWebhookEvent({ companyId, endpointId = null, type, subject, data = {}, eventId, occurredAt }) {
+async function enqueueGenericWebhookEvent({ companyId, endpointId = null, type, subject, data = {}, eventId, occurredAt, db = null, bypassEventTypeFilter = false }) {
   const envelope = { id: eventId || crypto.randomUUID(), type, occurredAt: occurredAt || new Date().toISOString(), subject, data };
-  await query(`INSERT INTO generic_webhook_outbox (endpoint_id, company_id, event_id, event_type, payload)
+  const execute = db && typeof db.query === 'function' ? db.query.bind(db) : query;
+  await execute(`INSERT INTO generic_webhook_outbox (endpoint_id, company_id, event_id, event_type, payload)
     SELECT endpoint.id, $1, $2, $3, $4 FROM generic_webhook_endpoints endpoint
     WHERE endpoint.company_id = $1 AND endpoint.is_active = TRUE
       AND ($5::bigint IS NULL OR endpoint.id = $5)
-      AND (cardinality(endpoint.event_types) = 0 OR $3 = ANY(endpoint.event_types))
-    ON CONFLICT (endpoint_id, event_id) DO NOTHING`, [companyId, envelope.id, type, JSON.stringify(envelope), endpointId]);
+      AND ($6::boolean = TRUE OR cardinality(endpoint.event_types) = 0 OR $3 = ANY(endpoint.event_types))
+    ON CONFLICT (endpoint_id, event_id) DO NOTHING`, [companyId, envelope.id, type, JSON.stringify(envelope), endpointId, bypassEventTypeFilter]);
   return envelope;
 }
 
@@ -109,7 +130,7 @@ async function dispatchPendingWebhookEvents(limit = 50) {
     const endpoint = await query('SELECT * FROM generic_webhook_endpoints WHERE id = $1 AND is_active = TRUE', [row.endpoint_id]);
     if (!endpoint.rows[0]) { await query("UPDATE generic_webhook_outbox SET status = 'dead_letter', last_error = 'Endpoint removido ou inativo', locked_until = NULL WHERE id = $1", [row.id]); failed += 1; continue; }
     const target = endpoint.rows[0]; const body = JSON.stringify(row.payload); const timestamp = new Date().toISOString();
-    const signature = `v1=${crypto.createHmac('sha256', decryptSecret(target.encrypted_secret)).update(`${timestamp}.${body}`).digest('hex')}`;
+    const signature = signWebhookBody(decryptSecret(target.encrypted_secret), timestamp, body);
     try {
       await assertSafeUrl(target.url);
       const response = await fetch(target.url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { 'content-type': 'application/json', [target.timestamp_header]: timestamp, [target.signature_header]: signature, 'x-webhook-id': row.event_id }, body });
@@ -125,4 +146,4 @@ async function dispatchPendingWebhookEvents(limit = 50) {
   return { processed: rows.length, succeeded, failed };
 }
 
-module.exports = { assertSafeUrl, listWebhookEndpoints, createWebhookEndpoint, updateWebhookEndpoint, rotateWebhookSecret, enqueueGenericWebhookEvent, dispatchPendingWebhookEvents };
+module.exports = { assertSafeUrl, validateSigningSecret, signWebhookBody, listWebhookEndpoints, getWebhookDeliveryStatus, createWebhookEndpoint, updateWebhookEndpoint, rotateWebhookSecret, enqueueGenericWebhookEvent, dispatchPendingWebhookEvents };

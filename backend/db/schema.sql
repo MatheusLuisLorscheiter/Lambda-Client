@@ -287,6 +287,13 @@ CREATE TABLE IF NOT EXISTS integration_mapping_sets (
     "blockDuplicateSources": false,
     "requireTypes": false
   }',
+  approval_status TEXT NOT NULL DEFAULT 'not_requested'
+    CHECK (approval_status IN ('not_requested', 'pending', 'approved', 'rejected')),
+  approval_revision INTEGER CHECK (approval_revision IS NULL OR approval_revision > 0),
+  approval_requested_at TIMESTAMPTZ,
+  approved_at TIMESTAMPTZ,
+  approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approval_note TEXT,
   cloned_from_mapping_set_id INTEGER REFERENCES integration_mapping_sets(id) ON DELETE SET NULL,
   last_client_edited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   last_client_edited_at TIMESTAMPTZ,
@@ -344,7 +351,7 @@ CREATE TABLE IF NOT EXISTS integration_mapping_changes (
   action TEXT NOT NULL
     CHECK (action IN (
       'create', 'update', 'delete', 'publish', 'archive', 'clone', 'upload',
-      'review', 'comment', 'restore', 'bulk_import', 'bulk_update'
+      'review', 'review_request', 'comment', 'restore', 'bulk_import', 'bulk_update'
     )),
   entity_type TEXT NOT NULL
     CHECK (entity_type IN ('mapping_set', 'mapping_entry', 'attachment', 'comment')),
@@ -376,6 +383,7 @@ CREATE INDEX IF NOT EXISTS idx_process_effort_assessments
 CREATE INDEX IF NOT EXISTS idx_process_effort_items
   ON process_effort_items(assessment_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_sets_integration ON integration_mapping_sets(integration_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mapping_sets_approval ON integration_mapping_sets(company_id, approval_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapping_entries_set ON integration_mapping_entries(mapping_set_id, sort_order, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_attachments_set ON integration_mapping_attachments(mapping_set_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_mapping_changes_set

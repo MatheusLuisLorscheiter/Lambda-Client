@@ -112,7 +112,7 @@ O administrador escolhe a política de colaboração de cada mapa:
 - `all`: documento e todos os campos editáveis, com inclusão e exclusão de vínculos opcionais;
 - `selected`: somente propriedades explicitamente liberadas em cada vínculo.
 
-Alterações do cliente são aceitas apenas na versão publicada da própria empresa, registram autor e data, incrementam a versão e entram na auditoria. Alterações administrativas de conteúdo continuam sendo feitas em rascunho; ao publicar uma nova versão, a anterior é arquivada. O cliente vê somente mapas publicados. Arquivar remove o mapa do portal sem apagar seu histórico, enquanto a exclusão permanente exige que ele já não esteja publicado.
+Alterações do cliente são aceitas apenas na versão publicada da própria empresa, registram autor e data, incrementam a revisão e entram na auditoria. Alterações administrativas de conteúdo continuam sendo feitas em rascunho. Antes da publicação, a revisão exata precisa ser submetida e aprovada explicitamente; qualquer mudança invalida a aprovação. Ao publicar uma nova versão, a anterior é arquivada. O cliente vê somente mapas publicados. Arquivar remove o mapa do portal sem apagar seu histórico, enquanto a exclusão permanente exige que ele já não esteja publicado.
 
 ### 7. Operação AWS
 
@@ -125,6 +125,24 @@ O dashboard consulta serviços reais:
 - provedor de IA configurado para o resumo de logs.
 
 Falhas de consulta não são convertidas em zeros “saudáveis”: a interface apresenta o monitoramento como indisponível e conserva a mensagem operacional.
+
+O MCP expõe a mesma fonte real por `get_integration_observability`, com janela e quantidade limitadas, métricas agregadas e logs sanitizados. A ferramenta é somente leitura e devolve uma referência estável da integração.
+
+## Eventos para o Nexo
+
+O vínculo com a entrada de eventos do CloudWhats deve ser configurado nesta ordem:
+
+1. crie no CloudWhats uma fonte Nexo do tipo `WEBHOOK` e copie, uma única vez, o segredo retornado e o `intakePath`;
+2. crie no Lambda Pulse um endpoint genérico apontando para a URL pública completa do `intakePath`;
+3. envie o segredo no campo `signingSecret` e configure `signatureHeader` como `x-nexo-signature` e `timestampHeader` como `x-nexo-timestamp`;
+4. mantenha o endpoint e a fonte pausados até o teste assinado retornar sucesso; depois ative ambos;
+5. filtre `eventTypes` para os eventos necessários ao piloto e monitore a outbox e a dead-letter.
+
+Quando `signingSecret` é fornecido, o Lambda Pulse valida e cifra o valor, mas não o devolve na resposta. Sem esse campo, o Lambda Pulse gera um segredo próprio e o retorna somente na criação. O corpo é assinado sem transformação como `v1=HMAC_SHA256(segredo, timestamp + "." + corpo)`. Segredos não devem aparecer em logs, comentários, processos ou documentação.
+
+Para rotação, gere primeiro um novo segredo na fonte do CloudWhats; ela ficará pausada até receber uma nova prova assinada. Atualize imediatamente o endpoint do Lambda Pulse por `PATCH`, usando `signingSecret`, dispare o teste e reative a fonte. A outbox mantém os demais eventos para retentativa durante a troca. Não use a rota de rotação autônoma do Lambda Pulse nessa integração, porque o consumidor não conheceria o novo segredo.
+
+A outbox deduplica por endpoint e ID do evento, aplica retentativas com backoff e envia falhas definitivas para dead-letter. Uma resposta incerta não deve provocar um segundo efeito no Nexo; o consumidor também deduplica o envelope por fonte e `id`.
 
 ## Segurança e isolamento
 
@@ -165,6 +183,8 @@ Falhas de consulta não são convertidas em zeros “saudáveis”: a interface 
 - `DELETE /lambda/mappings/:mappingSetId` (rascunho ou arquivado)
 - `POST|PATCH|DELETE /lambda/mappings/:mappingSetId/entries[...]`
 - `POST /lambda/mappings/:mappingSetId/clone`
+- `POST /lambda/mappings/:mappingSetId/approval/request`
+- `POST /lambda/mappings/:mappingSetId/approval`
 
 ### Operação
 
@@ -176,6 +196,7 @@ Falhas de consulta não são convertidas em zeros “saudáveis”: a interface 
 - `GET /audit/logs`
 - `GET /health/live`
 - `GET /health/ready`
+- `GET|POST /auth/admin/webhook-endpoints[...]`
 
 ## Implantação
 
@@ -194,11 +215,16 @@ Variáveis obrigatórias e integrações externas estão documentadas em `backen
 Antes de publicar:
 
 ```bash
+node scripts/scan-secrets.js
+
 cd backend
 npm test
 
 cd ../frontend
-npm run build
+npm run lint
+npm run type-check
 ```
 
 Após subir o backend, valide `GET /health/ready`. O status só é `ready` quando PostgreSQL e Redis respondem.
+
+O workflow `.github/workflows/pull-request-validation.yml` repete varredura, testes, lint sem escrita e type-check em todo PR e push para `main`. A implantação do Lambda Pulse permanece fora do workflow até que o serviço/digest do EasyPanel, o ambiente protegido e o mecanismo de rollback estejam explicitamente cadastrados; ausência desses dados é bloqueio de rollout, não autorização para deploy ad hoc.

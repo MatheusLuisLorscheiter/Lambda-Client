@@ -196,4 +196,14 @@ async function reviewDelivery({ companyId, input }) {
   }});
 }
 
-module.exports = { createProcessRequest, updateProcess, addProcessComment, createChecklistItem, updateChecklistItem, createDelivery, reviewDelivery, domainError };
+module.exports = {
+  createProcessRequest,
+  updateProcess,
+  addProcessComment,
+  createChecklistItem,
+  updateChecklistItem,
+  createDelivery,
+  reviewDelivery,
+  domainError,
+  withIdempotentEffect,
+};

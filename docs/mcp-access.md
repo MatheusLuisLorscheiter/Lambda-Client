@@ -23,6 +23,7 @@ O acesso a outra empresa exige, simultaneamente:
 3. um usuário cliente ativo cujo email corresponda ao contato;
 4. quando configurado, uma tag do contato igual ao nome da empresa;
 5. permissão de domínio tanto na credencial principal quanto na empresa-alvo.
+6. para escrita, o mesmo escopo explícito tanto na credencial principal quanto na empresa-alvo.
 
 Não existe empresa “Master” por ID ou variável de ambiente. Email e instruções do prompt não concedem autorização.
 
@@ -47,3 +48,16 @@ O CloudWhats sobrescreve `client_email` e `client_context` com o contato carrega
 - A auditoria grava ferramenta, empresa-alvo, duração, status e request ID, sem persistir email ou nomes de tags.
 - Processos internos (`is_client_visible = false`) e atualizações internas não são retornados.
 - Metadados brutos de auditoria não são retornados pela ferramenta de logs.
+
+## Ferramentas operacionais
+
+As consultas incluem resumo da empresa, processos, entregas, checklist, De-Para e `get_integration_observability`. A consulta de observabilidade combina métricas reais do CloudWatch e logs sanitizados, limita a janela a sete dias e nunca executa ou altera uma Lambda.
+
+As escritas exigem `idempotencyKey` e são divididas por escopo:
+
+- `processes:create`, `processes:write`, `processes:comment`, `processes:checklist`, `processes:deliveries` e `processes:review`;
+- `mappings:write`, `mappings:comment`, `mappings:review` e `mappings:publish`.
+
+Toda atualização de De-Para exige `expectedRevision`. Uma alteração invalida a aprovação anterior. `request_mapping_review` apenas submete a revisão; `publish_mapping` falha se essa revisão exata não tiver sido aprovada por uma pessoa no Lambda Pulse. A autorização MCP, isoladamente, nunca equivale a essa aprovação.
+
+As respostas de escrita usam referências estáveis como `lambda-pulse:process:<id>`, `LP-xxxxxx`, `lambda-pulse:mapping-set:<id>` e `lambda-pulse:mapping-entry:<id>`. Eventos seguem para a outbox assinada; um `eventId` repetido não cria uma segunda entrega para o mesmo endpoint.
