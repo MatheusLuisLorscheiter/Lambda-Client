@@ -34,7 +34,12 @@ async function assertSafeUrl(raw) {
   const url = new URL(raw);
   if (url.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && url.protocol === 'http:')) throw new Error('O webhook deve usar HTTPS.');
   if (url.username || url.password || url.hash) throw new Error('A URL do webhook não pode conter credenciais ou fragmento.');
-  const addresses = net.isIP(url.hostname) ? [url.hostname] : (await dns.lookup(url.hostname, { all: true })).map(item => item.address);
+  // WHATWG URL preserves brackets around an IPv6 literal in some Node.js
+  // versions. net.isIP and dns.lookup expect the address without brackets.
+  const hostname = url.hostname.startsWith('[') && url.hostname.endsWith(']')
+    ? url.hostname.slice(1, -1)
+    : url.hostname;
+  const addresses = net.isIP(hostname) ? [hostname] : (await dns.lookup(hostname, { all: true })).map(item => item.address);
   if (!addresses.length || addresses.some(privateIp)) throw new Error('O destino do webhook aponta para rede privada ou reservada.');
   return url.toString();
 }
