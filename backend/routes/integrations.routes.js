@@ -6,7 +6,10 @@ const { logAudit } = require('../audit/logger');
 const { getIntegrationForUser, normalizeDocumentationLinks } = require('../services/integrations');
 const { LambdaClient, GetFunctionCommand } = require('@aws-sdk/client-lambda');
 const { decrypt } = require('../security/crypto');
-const { classifyIntegrationHealthError } = require('../services/integrationHealth');
+const {
+  classifyIntegrationHealthError,
+  integrationHealthStatusForFailure
+} = require('../services/integrationHealth');
 
 const router = express.Router();
 const validProcessStatuses = new Set(['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused']);
@@ -333,9 +336,9 @@ router.post('/integrations/:integrationId/health-check', authenticateToken, asyn
       message = 'A última atualização da função falhou.';
     }
   } catch (error) {
-    status = 'unavailable';
     const failure = classifyIntegrationHealthError(error);
     failureCode = failure.code;
+    status = integrationHealthStatusForFailure(failureCode);
     message = failure.message;
     console.warn('[Integration health check failed]', {
       integrationId,
