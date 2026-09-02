@@ -106,6 +106,21 @@ async function consumeRateLimit(key, limit) {
   }
 }
 
+function isMeteredMcpRequest(body) {
+  const requests = Array.isArray(body) ? body : [body];
+  return requests.some((request) => {
+    const method = String(request?.method || '');
+    // initialize, ping and protocol notifications are transport overhead. The
+    // per-company budget protects discovery and business operations instead of
+    // charging several times before a single tool can run.
+    return method === 'tools/list'
+      || method === 'tools/call'
+      || method === 'resources/list'
+      || method === 'resources/read'
+      || (!method && request?.id != null);
+  });
+}
+
 async function mcpAuthMiddleware(req, res, next) {
   const token = readBearerToken(req);
   if (!token) {
@@ -127,8 +142,11 @@ async function mcpAuthMiddleware(req, res, next) {
     if (!config) return rpcError(res, 403, -32002, 'Token MCP inválido.', req.body?.id ?? null);
     if (!config.is_enabled) return rpcError(res, 403, -32003, 'O acesso MCP está desativado para esta empresa.', req.body?.id ?? null);
 
-    const rate = await consumeRateLimit(tokenHash.slice(0, 24), config.max_requests_per_minute);
-    res.setHeader('RateLimit-Limit', String(config.max_requests_per_minute || 60));
+    const configuredLimit = Number(config.max_requests_per_minute) || 60;
+    const rate = isMeteredMcpRequest(req.body)
+      ? await consumeRateLimit(tokenHash.slice(0, 24), configuredLimit)
+      : { allowed: true, remaining: configuredLimit };
+    res.setHeader('RateLimit-Limit', String(configuredLimit));
     res.setHeader('RateLimit-Remaining', String(rate.remaining));
     if (!rate.allowed) return rpcError(res, 429, -32005, 'Limite de requisições MCP excedido. Tente novamente no próximo minuto.', req.body?.id ?? null);
 
@@ -921,6 +939,6 @@ router.post('/message', mcpAuthMiddleware, async (req, res) => {
   }
 });
 
-router._mcpInternals = { executeMcpTool, resolveTargetCompany, publicToolsFor, normalizeIdentity, legacySseSessions };
+router._mcpInternals = { executeMcpTool, resolveTargetCompany, publicToolsFor, normalizeIdentity, isMeteredMcpRequest, legacySseSessions };
 
 module.exports = router;

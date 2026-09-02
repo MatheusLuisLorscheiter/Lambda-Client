@@ -5,7 +5,7 @@
 - Endpoint principal: `POST /mcp` usando MCP Streamable HTTP stateless.
 - Compatibilidade legada: `GET /mcp/sse` e `POST /mcp/message`.
 - Autenticação: somente `Authorization: Bearer <token>`. Tokens em query string são recusados.
-- Cada token pertence a uma empresa principal e possui permissões de domínio e limite por minuto.
+- Cada token pertence a uma empresa principal e possui permissões de domínio e limite por minuto. O limite contabiliza descoberta e operações (`tools/list`, `tools/call` e recursos), não a negociação técnica `initialize`, `ping` ou notificações do protocolo.
 - O servidor usa o SDK oficial do MCP e não mantém estado para o transporte principal.
 
 ## Modos de acesso

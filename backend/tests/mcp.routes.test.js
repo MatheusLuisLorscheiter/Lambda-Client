@@ -125,6 +125,15 @@ test('código da Lambda exige escopos explícitos e nunca publica pela credencia
   assert.ok(!withoutSourceScope.includes('list_lambda_source_revisions'));
 });
 
+test('limite operacional não cobra mensagens de negociação do protocolo MCP', () => {
+  const { isMeteredMcpRequest } = router._mcpInternals;
+  assert.equal(isMeteredMcpRequest({ jsonrpc: '2.0', id: 1, method: 'initialize' }), false);
+  assert.equal(isMeteredMcpRequest({ jsonrpc: '2.0', method: 'notifications/initialized' }), false);
+  assert.equal(isMeteredMcpRequest({ jsonrpc: '2.0', id: 2, method: 'ping' }), false);
+  assert.equal(isMeteredMcpRequest({ jsonrpc: '2.0', id: 3, method: 'tools/list' }), true);
+  assert.equal(isMeteredMcpRequest({ jsonrpc: '2.0', id: 4, method: 'tools/call' }), true);
+});
+
 test('histórico de revisões informa cobertura mesmo quando o período está vazio', async () => {
   await withClient('mcp_live_company', async (client) => {
     const result = await client.callTool({
