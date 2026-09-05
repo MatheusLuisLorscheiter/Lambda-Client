@@ -28,6 +28,12 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
+app.use((req, res, next) => {
+  const requestId = req.get('x-request-id') || crypto.randomUUID();
+  req.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+  next();
+});
 // MCP aceita apenas JSON pequeno; anexos base64 das demais rotas continuam com
 // o limite maior e com a validação específica do módulo de mapeamentos.
 const mcpJsonParser = express.json({ limit: '1mb' });
@@ -38,13 +44,6 @@ app.use((req, res, next) => {
     : applicationJsonParser;
   return parser(req, res, next);
 });
-app.use((req, res, next) => {
-  const requestId = req.get('x-request-id') || crypto.randomUUID();
-  req.requestId = requestId;
-  res.setHeader('x-request-id', requestId);
-  next();
-});
-
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
@@ -141,15 +140,20 @@ app.use((req, res) => {
 // Global JSON error handler
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error('[unhandled error]', { requestId: req.requestId, message: err.message, stack: err.stack });
   if (res.headersSent) {
     return;
   }
+  const malformedJson = err instanceof SyntaxError && err.type === 'entity.parse.failed';
   const candidateStatus = Number(err.status || err.statusCode);
-  const status = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599
+  const status = malformedJson ? 400 : Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599
     ? candidateStatus
     : 500;
-  const error = status < 500 && err.message
+  if (status >= 500) {
+    console.error('[unhandled error]', { requestId: req.requestId, message: err.message, stack: err.stack });
+  }
+  const error = malformedJson
+    ? 'JSON inválido'
+    : status < 500 && err.message
     ? err.message
     : 'Erro interno do servidor';
   res.status(status).json({ error, requestId: req.requestId });
