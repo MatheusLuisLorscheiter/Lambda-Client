@@ -639,10 +639,11 @@
           <!-- Add Client Form -->
           <div v-if="clientCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div class="absolute inset-0 bg-slate-950/55" @click="clientCreateModal = false"></div>
-            <div class="relative w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
-            <div class="mb-4 flex items-center justify-between"><h3 class="text-lg font-semibold text-slate-900">Criar cliente</h3><button class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="clientCreateModal = false">✕</button></div>
+            <div class="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div class="border-b border-slate-200 bg-slate-50 px-6 py-5"><div class="flex items-start justify-between"><div><p class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Novo acesso</p><h3 class="mt-1 text-xl font-semibold text-slate-900">Convidar cliente</h3><p class="mt-1 text-sm text-slate-500">O cliente receberá um link individual para criar a própria senha.</p></div><button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-200" aria-label="Fechar" @click="clientCreateModal = false">✕</button></div></div>
+            <div class="p-6">
             <form @submit.prevent="addClient" class="space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="grid grid-cols-1 gap-4">
                 <div>
                   <label class="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
                   <input
@@ -654,17 +655,6 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">Senha</label>
-                  <input
-                    v-model="newClient.password"
-                    type="password"
-                    required
-                    minlength="8"
-                    placeholder="Mín. 8 caracteres"
-                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-                  />
-                </div>
-                <div class="md:col-span-2">
                   <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-medium text-slate-700">Empresa</label>
                     <label class="inline-flex items-center text-xs text-slate-500 space-x-2">
@@ -695,6 +685,10 @@
                   />
                 </div>
               </div>
+              <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                <p class="text-sm font-semibold text-indigo-950">Convite protegido</p>
+                <p class="mt-1 text-xs leading-5 text-indigo-800">O link expira em 72 horas, funciona uma única vez e qualquer reenvio invalida o anterior. Nenhuma senha é exibida ou compartilhada com o administrador.</p>
+              </div>
               <div class="flex justify-end pt-2">
                 <button
                   type="submit"
@@ -708,10 +702,11 @@
                   <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                   </svg>
-                  Criar cliente
+                  Enviar convite
                 </button>
               </div>
             </form>
+            </div>
             </div>
           </div>
 
@@ -722,7 +717,7 @@
               :key="client.id"
               class="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow"
             >
-              <div class="flex items-center justify-between">
+              <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-center space-x-4">
                   <div class="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center">
                     <span class="text-white text-lg font-semibold">{{ client.email.charAt(0).toUpperCase() }}</span>
@@ -734,19 +729,19 @@
                         Cliente
                       </span>
                       <span
-                        :class="client.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'"
+                        :class="clientStatusClass(client)"
                         class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ml-2"
                       >
-                        {{ client.isActive ? 'Ativo' : 'Inativo' }}
+                        {{ clientStatusLabel(client) }}
                       </span>
                       <span class="mx-2">•</span>
                       <span>{{ getCompanyIntegrationCount(client.companyId) }} integração(ões)</span>
                     </p>
-                    <p class="text-xs text-slate-400 mt-1">Empresa: {{ client.companyName }}</p>
+                    <p class="text-xs text-slate-400 mt-1">Empresa: {{ client.companyName }}<span v-if="client.invitationExpiresAt && client.mustSetPassword"> · convite expira {{ formatClientDate(client.invitationExpiresAt) }}</span><span v-else-if="client.lastLoginAt"> · último acesso {{ formatClientDate(client.lastLoginAt) }}</span></p>
                   </div>
                 </div>
-                <div class="flex items-center space-x-2">
-                  <div class="flex items-center space-x-2">
+                <div class="flex w-full flex-wrap items-center gap-2 lg:w-auto">
+                  <div v-if="!client.mustSetPassword" class="flex items-center space-x-2">
                     <select
                       v-model="transferSelection[client.id]"
                       class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -766,15 +761,17 @@
                     </button>
                   </div>
                   <button
+                    v-if="client.mustSetPassword"
                     @click="resendInvite(client)"
                     class="inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
                   >
                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    Reenviar convite
+                    {{ client.invitationStatus === 'delivery_failed' ? 'Tentar envio' : 'Reenviar convite' }}
                   </button>
                   <button
+                    v-if="!client.mustSetPassword"
                     @click="toggleClientStatus(client)"
                     class="inline-flex items-center px-3 py-2 border rounded-lg text-sm font-medium transition-colors"
                     :class="client.isActive
@@ -793,7 +790,7 @@
                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
-                    Excluir
+                    {{ client.mustSetPassword ? 'Cancelar convite' : 'Excluir' }}
                   </button>
                 </div>
               </div>
@@ -1870,7 +1867,6 @@ const newIntegration = ref({
 
 const newClient = ref({
   email: '',
-  password: '',
   companyId: '',
   companyName: ''
 })
@@ -2440,8 +2436,7 @@ const addClient = async () => {
     }
 
     const payload: Record<string, unknown> = {
-      email: newClient.value.email,
-      password: newClient.value.password
+      email: newClient.value.email.trim().toLowerCase()
     }
 
     if (createNewCompany.value) {
@@ -2450,9 +2445,9 @@ const addClient = async () => {
       payload.companyId = Number(newClient.value.companyId)
     }
 
-    await api.post('/auth/clients', payload)
-    showToast('success', 'Cliente criado com sucesso')
-    newClient.value = { email: '', password: '', companyId: '', companyName: '' }
+    const result = await api.post<{ inviteSent: boolean }>('/auth/clients', payload)
+    showToast(result.inviteSent ? 'success' : 'error', result.inviteSent ? 'Convite enviado com sucesso' : 'Cliente criado, mas o e-mail não foi entregue. Use “Tentar envio”.')
+    newClient.value = { email: '', companyId: '', companyName: '' }
     createNewCompany.value = false
     clientCreateModal.value = false
     await fetchCompanies()
@@ -2507,9 +2502,11 @@ const toggleClientStatus = async (client: ClientUser) => {
 
 const deleteClient = async (client: ClientUser) => {
   const confirmed = await requestConfirm({
-    title: 'Excluir cliente',
-    message: `Excluir ${client.email}? Esta ação não pode ser desfeita.`,
-    confirmLabel: 'Excluir'
+    title: client.mustSetPassword ? 'Cancelar convite' : 'Excluir cliente',
+    message: client.mustSetPassword
+      ? `Cancelar o convite de ${client.email}? O link deixará de funcionar imediatamente.`
+      : `Excluir ${client.email}? Esta ação não pode ser desfeita.`,
+    confirmLabel: client.mustSetPassword ? 'Cancelar convite' : 'Excluir'
   })
   if (!confirmed) {
     return
@@ -2517,7 +2514,7 @@ const deleteClient = async (client: ClientUser) => {
 
   try {
     await api.del(`/auth/clients/${client.id}`)
-    showToast('success', 'Cliente excluído com sucesso')
+    showToast('success', client.mustSetPassword ? 'Convite cancelado com sucesso' : 'Cliente excluído com sucesso')
     await fetchClients()
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao excluir cliente')
@@ -2576,6 +2573,24 @@ const resendInvite = async (client: ClientUser) => {
 const getCompanyIntegrationCount = (companyId: number): number => {
   return integrations.value.filter(i => i.companyId === companyId).length
 }
+
+const clientStatusLabel = (client: ClientUser): string => {
+  const labels: Record<ClientUser['invitationStatus'], string> = {
+    pending: 'Convite pendente', delivery_failed: 'Falha no envio', expired: 'Convite expirado',
+    not_invited: 'Não convidado', accepted: 'Ativo', revoked: 'Convite revogado', active: 'Ativo', inactive: 'Inativo'
+  }
+  return labels[client.invitationStatus] || (client.isActive ? 'Ativo' : 'Inativo')
+}
+
+const clientStatusClass = (client: ClientUser): string => {
+  if (client.invitationStatus === 'delivery_failed' || client.invitationStatus === 'expired') return 'bg-red-100 text-red-700'
+  if (client.mustSetPassword) return 'bg-amber-100 text-amber-800'
+  return client.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+}
+
+const formatClientDate = (value: string): string => new Intl.DateTimeFormat('pt-BR', {
+  dateStyle: 'short', timeStyle: 'short'
+}).format(new Date(value))
 
 const getActionClass = (action: string): string => {
   if (action.includes('create') || action.includes('login')) {

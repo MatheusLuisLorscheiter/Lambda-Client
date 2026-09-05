@@ -105,7 +105,7 @@
         <div class="absolute inset-0 bg-slate-900/50" @click="closeCompanyLookup"></div>
         <div class="relative bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md mx-4 p-6">
           <h3 class="text-lg font-semibold text-slate-900">Encontrar empresa</h3>
-          <p class="mt-2 text-sm text-slate-600">Informe seu e-mail para localizar suas empresas.</p>
+          <p class="mt-2 text-sm text-slate-600">Informe seu e-mail. Se houver acessos vinculados, enviaremos os nomes com segurança.</p>
           <div class="mt-4 space-y-3">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
@@ -122,7 +122,7 @@
               :disabled="companyLookup.loading"
               class="w-full inline-flex justify-center items-center px-4 py-2.5 border border-transparent rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
             >
-              {{ companyLookup.loading ? 'Buscando...' : 'Buscar empresas' }}
+              {{ companyLookup.loading ? 'Enviando...' : 'Enviar por e-mail' }}
             </button>
           </div>
 
@@ -130,20 +130,7 @@
             {{ companyLookup.error }}
           </div>
 
-          <div v-if="companyLookup.companies.length" class="mt-4">
-            <p class="text-xs text-slate-500 mb-2">Selecione uma empresa:</p>
-            <div class="space-y-2">
-              <button
-                v-for="companyName in companyLookup.companies"
-                :key="companyName"
-                type="button"
-                @click="selectCompany(companyName)"
-                class="w-full text-left px-3 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 text-sm"
-              >
-                {{ companyName }}
-              </button>
-            </div>
-          </div>
+          <div v-if="companyLookup.sent" class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700">Se o e-mail estiver cadastrado, você receberá a lista em instantes.</div>
 
           <div class="mt-6 flex justify-end">
             <button
@@ -199,7 +186,7 @@ const error = ref('')
 const companyLookup = ref({
   visible: false,
   email: '',
-  companies: [] as string[],
+  sent: false,
   loading: false,
   error: ''
 })
@@ -207,7 +194,7 @@ const companyLookup = ref({
 const openCompanyLookup = () => {
   companyLookup.value.visible = true
   companyLookup.value.email = email.value
-  companyLookup.value.companies = []
+  companyLookup.value.sent = false
   companyLookup.value.error = ''
 }
 
@@ -218,7 +205,7 @@ const closeCompanyLookup = () => {
 const fetchCompaniesByEmail = async () => {
   companyLookup.value.loading = true
   companyLookup.value.error = ''
-  companyLookup.value.companies = []
+  companyLookup.value.sent = false
 
   try {
     const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/auth/companies/by-email`, {
@@ -233,20 +220,12 @@ const fetchCompaniesByEmail = async () => {
       return
     }
 
-    companyLookup.value.companies = data.companies || []
-    if (companyLookup.value.companies.length === 0) {
-      companyLookup.value.error = 'Nenhuma empresa encontrada para este e-mail.'
-    }
+    companyLookup.value.sent = true
   } catch {
     companyLookup.value.error = 'Falha ao buscar empresas. Tente novamente.'
   } finally {
     companyLookup.value.loading = false
   }
-}
-
-const selectCompany = (companyName: string) => {
-  company.value = companyName
-  closeCompanyLookup()
 }
 
 const handleLogin = async () => {

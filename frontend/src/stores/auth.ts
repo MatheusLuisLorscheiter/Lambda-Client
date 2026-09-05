@@ -10,6 +10,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isClient = computed(() => user.value?.role === 'client')
 
+  const establishSession = (data: { token: string; user: unknown }) => {
+    token.value = data.token
+    user.value = data.user
+    localStorage.setItem('token', data.token)
+    localStorage.setItem('user', JSON.stringify(data.user))
+  }
+
   const login = async (email: string, password: string, company: string) => {
     const response = await fetch(`${apiBaseUrl}/auth/login`, {
       method: 'POST',
@@ -24,11 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     const data = await response.json()
-    token.value = data.token
-    user.value = data.user
-
-    localStorage.setItem('token', data.token)
-    localStorage.setItem('user', JSON.stringify(data.user))
+    establishSession(data)
   }
 
   const adminLogin = async (email: string, password: string) => {
@@ -45,11 +48,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     const data = await response.json()
-    token.value = data.token
-    user.value = data.user
-
-    localStorage.setItem('token', data.token)
-    localStorage.setItem('user', JSON.stringify(data.user))
+    establishSession(data)
   }
 
   const logout = async () => {
@@ -102,6 +101,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     adminLogin,
     logout,
-    checkAuth
+    checkAuth,
+    establishSession
   }
 })

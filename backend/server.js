@@ -53,6 +53,22 @@ const authLimiter = rateLimit({
   message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' }
 });
 
+const invitationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas com este convite. Aguarde alguns minutos.' }
+});
+
+const invitationDeliveryLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite temporário de convites atingido. Tente novamente mais tarde.' }
+});
+
 // Routes
 const { router: authRouter } = require('./routes/auth');
 const lambdaRouter = require('./routes/lambda');
@@ -69,6 +85,9 @@ app.use('/auth/admin/login', authLimiter);
 app.use('/auth/password/forgot', authLimiter);
 app.use('/auth/password/reset', authLimiter);
 app.use('/auth/companies/by-email', authLimiter);
+app.use('/auth/invitations', invitationLimiter);
+app.post('/auth/clients', invitationDeliveryLimiter);
+app.post('/auth/clients/:clientId/invite', invitationDeliveryLimiter);
 
 app.use('/auth/admin/mcp', adminMcpRouter);
 app.use('/auth/admin/webhook-endpoints', webhookEndpointsRouter);

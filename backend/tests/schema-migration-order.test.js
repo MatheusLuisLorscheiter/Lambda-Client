@@ -31,3 +31,14 @@ test('cria conexões AWS e revisões de fonte antes das migrações incrementais
   assert.ok(migration.includes('ALTER TABLE integrations ALTER COLUMN access_key_encrypted DROP NOT NULL'));
   assert.ok(migration.indexOf('CREATE INDEX IF NOT EXISTS idx_integrations_aws_connection') > migration.indexOf('ADD COLUMN IF NOT EXISTS aws_connection_id'));
 });
+
+test('cria a infraestrutura de convites depois das colunas de onboarding em bases existentes', () => {
+  const root = path.resolve(__dirname, '..');
+  const schema = fs.readFileSync(path.join(root, 'db', 'schema.sql'), 'utf8');
+  const migration = fs.readFileSync(path.join(root, 'scripts', 'update-db.js'), 'utf8');
+  assert.ok(schema.includes('CREATE TABLE IF NOT EXISTS client_invitations'));
+  assert.ok(schema.includes('must_set_password BOOLEAN NOT NULL DEFAULT FALSE'));
+  assert.ok(migration.indexOf('ADD COLUMN IF NOT EXISTS must_set_password') >= 0);
+  assert.ok(migration.indexOf('CREATE TABLE IF NOT EXISTS client_invitations') > migration.indexOf('ADD COLUMN IF NOT EXISTS must_set_password'));
+  assert.ok(migration.indexOf('idx_client_invitations_active') > migration.indexOf('CREATE TABLE IF NOT EXISTS client_invitations'));
+});

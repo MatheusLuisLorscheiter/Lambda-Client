@@ -233,6 +233,14 @@ export interface ClientUser {
   isActive: boolean
   companyId: number
   companyName: string
+  mustSetPassword: boolean
+  invitationStatus: 'pending' | 'delivery_failed' | 'expired' | 'not_invited' | 'accepted' | 'revoked' | 'active' | 'inactive'
+  invitationExpiresAt: string | null
+  invitationSentAt: string | null
+  invitationDeliveryStatus: 'pending' | 'sent' | 'failed' | null
+  emailVerifiedAt: string | null
+  lastLoginAt: string | null
+  createdAt: string
 }
 
 export interface Company {

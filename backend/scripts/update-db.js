@@ -20,6 +20,30 @@ if (!fs.existsSync(schemaPath)) {
 const run = async () => {
     const sql = fs.readFileSync(schemaPath, 'utf8');
     const migrations = [
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS must_set_password BOOLEAN NOT NULL DEFAULT FALSE',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ',
+        'ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ',
+        'CREATE INDEX IF NOT EXISTS idx_users_normalized_email ON users(LOWER(BTRIM(email)))',
+        `CREATE TABLE IF NOT EXISTS client_invitations (
+          id BIGSERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          sent_at TIMESTAMPTZ,
+          accepted_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          delivery_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (delivery_status IN ('pending', 'sent', 'failed')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK (expires_at > created_at)
+        )`,
+        'CREATE INDEX IF NOT EXISTS idx_client_invitations_user ON client_invitations(user_id, created_at DESC)',
+        `CREATE INDEX IF NOT EXISTS idx_client_invitations_active
+           ON client_invitations(token_hash, expires_at)
+           WHERE accepted_at IS NULL AND revoked_at IS NULL`,
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS memory_mb INTEGER NOT NULL DEFAULT 128',
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS show_cost_estimate BOOLEAN NOT NULL DEFAULT TRUE',
         "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'active'",

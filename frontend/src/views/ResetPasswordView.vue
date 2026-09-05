@@ -13,7 +13,7 @@
       </div>
       <form class="mt-8 space-y-5" @submit.prevent="handleSubmit">
         <div class="space-y-4">
-          <div>
+          <div v-if="!token">
             <label for="token" class="block text-sm font-medium text-slate-700 mb-1">Token de redefinição</label>
             <input
               id="token"
@@ -33,9 +33,9 @@
               name="password"
               type="password"
               required
-              minlength="8"
+              minlength="12"
               class="block w-full px-4 py-2.5 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-              placeholder="Mínimo de 8 caracteres"
+              placeholder="Mínimo de 12 caracteres"
             />
           </div>
           <div>
@@ -46,7 +46,7 @@
               name="confirmPassword"
               type="password"
               required
-              minlength="8"
+              minlength="12"
               class="block w-full px-4 py-2.5 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
               placeholder="Confirme a nova senha"
             />
@@ -124,9 +124,9 @@ const message = ref('')
 
 onMounted(() => {
   const routeToken = route.params.token as string | undefined
-  if (routeToken) {
-    token.value = routeToken
-  }
+  const fragmentToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || ''
+  token.value = fragmentToken || routeToken || ''
+  if (fragmentToken) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
 })
 
 const handleSubmit = async () => {
@@ -135,8 +135,8 @@ const handleSubmit = async () => {
     return
   }
 
-  if (password.value.length < 8) {
-    error.value = 'A senha deve ter pelo menos 8 caracteres'
+  if (password.value.length < 12) {
+    error.value = 'A senha deve ter pelo menos 12 caracteres'
     return
   }
 
