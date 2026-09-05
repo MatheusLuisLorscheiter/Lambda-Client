@@ -11,8 +11,11 @@ const hashes = {
   company: crypto.createHash('sha256').update('mcp_live_company').digest('hex'),
   delegated: crypto.createHash('sha256').update('mcp_live_delegated').digest('hex'),
 };
+const sqlQueries = [];
+let returnProcessRow = false;
 
 const query = async (sql, params = []) => {
+  sqlQueries.push(sql);
   if (sql.includes('WHERE cfg.api_key_hash')) {
     if (params[0] === hashes.company) {
       return { rows: [{ company_id: 1, company_name: 'Empresa Teste', is_enabled: true, allowed_domains: { logs: true, processes: true, mappings: true, integrations: true }, allowed_scopes: ['integrations:source:read'], access_mode: 'company', require_contact_tag_match: false, max_requests_per_minute: 60 }] };
@@ -30,6 +33,7 @@ const query = async (sql, params = []) => {
   if (sql.includes('COUNT(*)::int AS count FROM integrations')) return { rows: [{ count: 3 }] };
   if (sql.includes('COUNT(*)::int AS count FROM process_items')) return { rows: [{ count: 5 }] };
   if (sql.includes('COUNT(*)::int AS count FROM integration_mapping_sets')) return { rows: [{ count: 2 }] };
+  if (returnProcessRow && sql.includes('SELECT p.id, p.reference_code')) return { rows: [{ id: 12, version: 4 }] };
   return { rows: [], rowCount: 0 };
 };
 
@@ -83,6 +87,8 @@ test('cliente MCP oficial inicializa, lista tools e executa chamada stateless', 
     assert.deepEqual(data.mcpAccess.authorizedClientEmails, ['cliente@example.com', 'financeiro@example.com']);
     assert.equal(data.mcpAccess.companyId, 1);
     assert.equal(data.mcpAccess.contactEmailMatched, null);
+    assert.equal(data.mcpAccess.accessGranted, true);
+    assert.equal(data.mcpAccess.accessMode, 'company_api_key');
   });
 });
 
@@ -162,6 +168,8 @@ test('configuração delegada antiga não troca o tenant identificado pela chave
     assert.equal(data.mcpAccess.companyId, 99);
     assert.deepEqual(data.mcpAccess.authorizedClientEmails, ['operacao@cloudwhats.example']);
     assert.equal(data.mcpAccess.contactEmailMatched, false);
+    assert.equal(data.mcpAccess.accessGranted, false);
+    assert.equal(data.totalIntegrations, undefined);
   });
 });
 
@@ -198,7 +206,50 @@ test('uma consulta detalhada com email explícito divergente falha antes de ler 
     });
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /não possui um email explícito autorizado/i);
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.mcpAccess.accessGranted, false);
+    assert.deepEqual(data.mcpAccess.authorizedClientEmails, ['cliente@example.com', 'financeiro@example.com']);
   });
+});
+
+test('publica consulta detalhada de integração sem expor ferramenta destrutiva', () => {
+  const principal = {
+    allowedDomains: { logs: true, processes: true, mappings: true, integrations: true },
+    allowedScopes: new Set(),
+  };
+  const tools = router._mcpInternals.publicToolsFor(principal);
+  const details = tools.find((tool) => tool.name === 'get_integration_details');
+  assert.ok(details);
+  assert.equal(details.annotations.readOnlyHint, true);
+  assert.equal(details.annotations.destructiveHint, false);
+});
+
+test('edição de metadados de integração exige escopo explícito', () => {
+  const base = { allowedDomains: { logs: true, processes: true, mappings: true, integrations: true } };
+  const withoutScope = router._mcpInternals.publicToolsFor({ ...base, allowedScopes: new Set() });
+  assert.ok(!withoutScope.some((tool) => tool.name === 'update_integration_metadata'));
+  const withScope = router._mcpInternals.publicToolsFor({ ...base, allowedScopes: new Set(['integrations:write']) });
+  const tool = withScope.find((item) => item.name === 'update_integration_metadata');
+  assert.ok(tool);
+  assert.equal(tool.annotations.destructiveHint, false);
+});
+
+test('leituras de processo devolvem as versões exigidas pelas escritas', async () => {
+  sqlQueries.length = 0;
+  const principal = {
+    id: 1,
+    name: 'Empresa Teste',
+    allowedDomains: { logs: true, processes: true, mappings: true, integrations: true },
+    allowedScopes: new Set(),
+  };
+  returnProcessRow = true;
+  const result = await router._mcpInternals.executeMcpTool('list_processes_and_docs', {}, principal);
+  returnProcessRow = false;
+  const processSql = sqlQueries.find((sql) => sql.includes('FROM process_items p'));
+  const deliveriesSql = sqlQueries.find((sql) => sql.includes('FROM process_deliveries d JOIN process_items p'));
+  assert.match(processSql, /p\.version/);
+  assert.match(deliveriesSql, /d\.row_version/);
+  assert.deepEqual(result.pagination, { total: 5, offset: 0, limit: 20, returned: 1, hasMore: true, nextOffset: 1, coverageComplete: false });
 });
 
 test('uma consulta detalhada com email explícito autorizado continua normalmente', async () => {

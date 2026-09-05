@@ -635,6 +635,7 @@ test('human approval binds the decision to the exact pending revision', async ()
   const decisionUpdate = queries.find(item => item.sql.includes('SET approval_status = $1'));
   assert.equal(decisionUpdate.params[0], 'approved');
   assert.equal(decisionUpdate.params[1], 7);
+  assert.match(decisionUpdate.sql, /THEN \$2::INTEGER ELSE NULL END/);
 });
 
 test('publication is blocked before quality checks when the exact revision lacks human approval', async () => {

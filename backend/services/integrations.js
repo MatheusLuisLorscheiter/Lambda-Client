@@ -6,6 +6,7 @@ const getIntegrationForUser = async (integrationId, user) => {
             integrations.memory_mb, integrations.show_cost_estimate, integrations.lifecycle_status,
             integrations.last_check_status, integrations.last_check_message, integrations.last_checked_at,
             integrations.documentation_links, integrations.owner_user_id, integrations.client_user_id,
+            integrations.metadata_version, integrations.updated_at,
             integrations.company_id, integrations.aws_connection_id,
             aws_connections.name AS aws_connection_name,
             COALESCE(integrations.access_key_encrypted, aws_connections.access_key_encrypted) AS access_key_encrypted,

@@ -68,6 +68,7 @@ app.use('/auth/login', authLimiter);
 app.use('/auth/admin/login', authLimiter);
 app.use('/auth/password/forgot', authLimiter);
 app.use('/auth/password/reset', authLimiter);
+app.use('/auth/companies/by-email', authLimiter);
 
 app.use('/auth/admin/mcp', adminMcpRouter);
 app.use('/auth/admin/webhook-endpoints', webhookEndpointsRouter);
@@ -125,7 +126,14 @@ app.use((err, req, res, next) => {
   if (res.headersSent) {
     return;
   }
-  res.status(err.status || 500).json({ error: err.message || 'Erro interno do servidor' });
+  const candidateStatus = Number(err.status || err.statusCode);
+  const status = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599
+    ? candidateStatus
+    : 500;
+  const error = status < 500 && err.message
+    ? err.message
+    : 'Erro interno do servidor';
+  res.status(status).json({ error, requestId: req.requestId });
 });
 
 app.listen(PORT, () => {

@@ -10,6 +10,8 @@ const processDomain = require('../services/processDomainService');
 const mappingDomain = require('../services/mappingDomainService');
 const integrationObservability = require('../services/integrationObservabilityService');
 const lambdaSourceDomain = require('../services/lambdaSourceDomainService');
+const integrationDomain = require('../services/integrationDomainService');
+const mcpContacts = require('../services/mcpContactsService');
 const { fetchLambdaArchive, extractEditableFiles } = require('../services/lambdaSource');
 const { publishDurableProcessEvent } = require('../services/processEvents');
 
@@ -182,7 +184,10 @@ const MCP_TOOL_DEFINITIONS = [
     name: 'list_integration_logs',
     domain: 'integrations',
     description: 'Lista integrações e eventos recentes visíveis da empresa proprietária da chave.',
-    inputSchema: withContext({ limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }),
+    inputSchema: withContext({
+      limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+      offset: { type: 'integer', minimum: 0, maximum: 100000, default: 0 },
+    }),
   },
   {
     name: 'get_integration_observability',
@@ -207,6 +212,12 @@ const MCP_TOOL_DEFINITIONS = [
     }, ['integrationId']),
   },
   {
+    name: 'get_integration_details',
+    domain: 'integrations',
+    description: 'Retorna metadados seguros, documentação, processos e De-Paras vinculados a uma integração. Nunca expõe credenciais AWS.',
+    inputSchema: withContext({ integrationId: { type: 'integer', minimum: 1 } }, ['integrationId']),
+  },
+  {
     name: 'list_lambda_source_revisions',
     domain: 'integrations',
     scope: 'integrations:source:read',
@@ -226,6 +237,7 @@ const MCP_TOOL_DEFINITIONS = [
     inputSchema: withContext({
       status: { type: 'string', enum: ['requested', 'analysis', 'queued', 'in_progress', 'validation', 'delivered', 'paused', 'cancelled'] },
       limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+      offset: { type: 'integer', minimum: 0, maximum: 100000, default: 0 },
     }),
   },
   {
@@ -241,13 +253,18 @@ const MCP_TOOL_DEFINITIONS = [
     inputSchema: withContext({
       status: { type: 'string', enum: ['draft', 'published', 'archived'] },
       limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+      offset: { type: 'integer', minimum: 0, maximum: 100000, default: 0 },
     }),
   },
   {
     name: 'get_mapping_details',
     domain: 'mappings',
     description: 'Retorna o detalhamento de um conjunto de mapeamento da empresa proprietária da chave.',
-    inputSchema: withContext({ mappingSetId: { type: 'integer', minimum: 1 } }, ['mappingSetId']),
+    inputSchema: withContext({
+      mappingSetId: { type: 'integer', minimum: 1 },
+      entryLimit: { type: 'integer', minimum: 1, maximum: 250, default: 250 },
+      entryOffset: { type: 'integer', minimum: 0, maximum: 100000, default: 0 },
+    }, ['mappingSetId']),
   },
 ].map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
 
@@ -408,6 +425,17 @@ const MCP_WRITE_TOOL_DEFINITIONS = [
       revisionId: { type: 'integer', minimum: 1 },
     }, ['idempotencyKey', 'integrationId', 'revisionId']),
   },
+  {
+    name: 'update_integration_metadata', scope: 'integrations:write', domain: 'integrations',
+    description: 'Atualiza nome, estado operacional e links de documentação de uma integração com idempotência e controle otimista. Não altera função, região ou credenciais AWS.',
+    inputSchema: withContext({
+      ...IDEMPOTENCY, ...EXPECTED_VERSION,
+      integrationId: { type: 'integer', minimum: 1 },
+      name: { type: 'string', minLength: 1, maxLength: 160 },
+      lifecycleStatus: { type: 'string', enum: ['active', 'paused', 'maintenance'] },
+      documentationLinks: { type: 'array', maxItems: 20, items: { type: 'string', format: 'uri', maxLength: 2000 } },
+    }, ['idempotencyKey', 'expectedVersion', 'integrationId']),
+  },
 ].map(tool => ({ ...tool, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
 
 function publicToolsFor(principal) {
@@ -434,17 +462,7 @@ async function resolveTargetCompany(principal, _args) {
 }
 
 async function getAuthorizedClientEmails(companyId) {
-  const result = await query(`
-    SELECT LOWER(BTRIM(email)) AS email
-      FROM users
-     WHERE company_id = $1
-       AND role = 'client'
-       AND is_active = TRUE
-       AND NULLIF(BTRIM(email), '') IS NOT NULL
-     GROUP BY LOWER(BTRIM(email))
-     ORDER BY LOWER(BTRIM(email)) ASC
-  `, [companyId]);
-  return result.rows.map(row => String(row.email)).filter(Boolean);
+  return mcpContacts.getAuthorizedEmails({ query }, companyId);
 }
 
 async function buildMcpAccessContext(target, args) {
@@ -454,14 +472,18 @@ async function buildMcpAccessContext(target, args) {
     Object.prototype.hasOwnProperty.call(args, 'client_context')
     || Object.prototype.hasOwnProperty.call(args, 'client_email')
   ));
+  const contactEmailMatched = contact.email ? authorizedClientEmails.includes(contact.email) : null;
+  const accessGranted = !contactContextProvided || contactEmailMatched === true;
   return {
     companyId: target.id,
     companyName: target.name,
     authorizedClientEmails,
+    accessGranted,
+    accessMode: contactContextProvided ? 'delegated_contact' : 'company_api_key',
     emailMatchPolicy: 'exact_after_trim_and_lowercase',
     contactContextProvided,
     providedContactEmail: contact.email || null,
-    contactEmailMatched: contact.email ? authorizedClientEmails.includes(contact.email) : null,
+    contactEmailMatched,
     guidance: 'Compartilhe dados ou execute mudanças somente quando o contato possuir um email explícito que corresponda exatamente a authorizedClientEmails.',
   };
 }
@@ -471,7 +493,23 @@ function requireDomain(target, domain, message) {
 }
 
 function safeLimit(value, fallback = 20) {
-  return Math.min(Math.max(Number(value) || fallback, 1), 50);
+  return Math.min(Math.max(Math.trunc(Number(value)) || fallback, 1), 50);
+}
+
+function safeOffset(value) {
+  return Math.min(Math.max(Math.trunc(Number(value)) || 0, 0), 100000);
+}
+
+function pagination(total, offset, returned, limit) {
+  return {
+    total,
+    offset,
+    limit,
+    returned,
+    hasMore: offset + returned < total,
+    nextOffset: offset + returned < total ? offset + returned : null,
+    coverageComplete: offset === 0 && returned >= total,
+  };
 }
 
 async function executeMcpTool(toolName, args, principal, resolvedTarget = null) {
@@ -497,6 +535,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       publish_mapping: mappingDomain.publishMapping,
       propose_lambda_source_revision: lambdaSourceDomain.proposeLambdaSourceRevision,
       request_lambda_source_review: lambdaSourceDomain.requestLambdaSourceReview,
+      update_integration_metadata: integrationDomain.updateIntegrationMetadata,
     };
     if (!handlerByName[toolName]) throw new Error('Ferramenta MCP de escrita desconhecida.');
     const result = await handlerByName[toolName]({ companyId: target.id, input: args || {} });
@@ -519,18 +558,82 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
         target.allowedDomains.processes ? query('SELECT COUNT(*)::int AS count FROM process_items WHERE company_id = $1 AND is_client_visible = TRUE', [target.id]) : Promise.resolve({ rows: [{ count: null }] }),
         target.allowedDomains.mappings ? query('SELECT COUNT(*)::int AS count FROM integration_mapping_sets WHERE company_id = $1', [target.id]) : Promise.resolve({ rows: [{ count: null }] }),
       ]);
-      return { companyName: target.name, totalIntegrations: integrations.rows[0].count, totalVisibleProcesses: processes.rows[0].count, totalMappingSets: mappings.rows[0].count, allowedDomains: target.allowedDomains };
+      return { companyName: target.name, totalIntegrations: integrations.rows[0].count, totalVisibleProcesses: processes.rows[0].count, totalMappingSets: mappings.rows[0].count, allowedDomains: target.allowedDomains, allowedScopes: [...target.allowedScopes].sort() };
     }
     case 'list_integration_logs': {
       if (!target.allowedDomains.logs && !target.allowedDomains.integrations) throw new Error('Acesso a logs e integrações não está liberado.');
       const limit = safeLimit(args.limit);
+      const offset = safeOffset(args.offset);
       const integrations = target.allowedDomains.integrations
-        ? await query(`SELECT id, name, function_name, region, lifecycle_status, last_check_status, last_check_message, last_checked_at, created_at FROM integrations WHERE company_id = $1 ORDER BY name ASC`, [target.id])
+        ? await query(`SELECT id, name, function_name, region, lifecycle_status, metadata_version, last_check_status, last_check_message, last_checked_at, created_at, updated_at FROM integrations WHERE company_id = $1 ORDER BY name ASC`, [target.id])
         : { rows: [] };
-      const logs = target.allowedDomains.logs
-        ? await query(`SELECT id, action, resource_type, resource_id, created_at FROM audit_logs WHERE company_id = $1 ORDER BY created_at DESC LIMIT $2`, [target.id, limit])
-        : { rows: [] };
-      return { integrations: integrations.rows, recentEvents: logs.rows };
+      const [logs, logsCount] = target.allowedDomains.logs
+        ? await Promise.all([
+          query(`SELECT id, action, resource_type, resource_id, created_at FROM audit_logs WHERE company_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, [target.id, limit, offset]),
+          query('SELECT COUNT(*)::int AS count FROM audit_logs WHERE company_id = $1', [target.id]),
+        ])
+        : [{ rows: [] }, { rows: [{ count: 0 }] }];
+      return { integrations: integrations.rows, recentEvents: logs.rows, eventsPagination: pagination(Number(logsCount.rows[0]?.count || 0), offset, logs.rows.length, limit) };
+    }
+    case 'get_integration_details': {
+      requireDomain(target, 'integrations', 'Acesso a integrações não está liberado.');
+      const integrationId = Number(args.integrationId);
+      if (!Number.isInteger(integrationId) || integrationId < 1) throw new Error('integrationId inválido.');
+      const integrationResult = await query(`
+        SELECT i.id, i.name, i.function_name, i.region, i.memory_mb, i.show_cost_estimate, i.metadata_version,
+               i.lifecycle_status, i.last_check_status, i.last_check_message, i.last_checked_at,
+               i.documentation_links, i.created_at, ac.name AS aws_connection_name
+          FROM integrations i
+          LEFT JOIN aws_connections ac ON ac.id = i.aws_connection_id
+         WHERE i.id = $1 AND i.company_id = $2
+      `, [integrationId, target.id]);
+      const integration = integrationResult.rows[0];
+      if (!integration) throw new Error('Integração não encontrada nesta empresa.');
+      const [processes, mappings, sourceRevision] = await Promise.all([
+        query(`
+          SELECT p.id, p.reference_code, p.title, p.status, p.health, p.progress, p.version, p.updated_at
+            FROM process_integrations pi
+            JOIN process_items p ON p.id = pi.process_id
+           WHERE pi.integration_id = $1 AND p.company_id = $2 AND p.is_client_visible = TRUE
+           ORDER BY p.updated_at DESC
+        `, [integrationId, target.id]),
+        query(`
+          SELECT id, name, source_system, target_system, version, revision, status,
+                 approval_status, approval_revision, updated_at
+            FROM integration_mapping_sets
+           WHERE integration_id = $1 AND company_id = $2
+           ORDER BY updated_at DESC
+        `, [integrationId, target.id]),
+        query(`
+          SELECT id, revision, status, summary, base_code_sha256, aws_code_sha256,
+                 review_requested_at, approved_at, published_at, created_at, updated_at
+            FROM lambda_source_revisions
+           WHERE integration_id = $1
+           ORDER BY revision DESC LIMIT 1
+        `, [integrationId]),
+      ]);
+      return {
+        integration: {
+          id: integration.id,
+          externalReference: `lambda-pulse:integration:${integration.id}`,
+          name: integration.name,
+          functionName: integration.function_name,
+          region: integration.region,
+          memoryMb: integration.memory_mb,
+          showCostEstimate: integration.show_cost_estimate,
+          lifecycleStatus: integration.lifecycle_status,
+          lastCheckStatus: integration.last_check_status,
+          lastCheckMessage: integration.last_check_message,
+          lastCheckedAt: integration.last_checked_at,
+          documentationLinks: integration.documentation_links || [],
+          metadataVersion: integration.metadata_version,
+          awsConnectionName: integration.aws_connection_name || null,
+          createdAt: integration.created_at,
+        },
+        linkedProcesses: processes.rows,
+        mappingSets: mappings.rows,
+        latestSourceRevision: sourceRevision.rows[0] || null,
+      };
     }
     case 'get_integration_observability': {
       if (!target.allowedDomains.logs || !target.allowedDomains.integrations) {
@@ -540,7 +643,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       if (!Number.isInteger(integrationId) || integrationId < 1) throw new Error('integrationId inválido.');
       const integrationResult = await query(
         `SELECT integrations.id, integrations.name, integrations.function_name, integrations.region,
-                integrations.lifecycle_status, integrations.last_check_status,
+                integrations.lifecycle_status, integrations.metadata_version, integrations.last_check_status,
                 integrations.last_check_message, integrations.last_checked_at,
                 COALESCE(integrations.access_key_encrypted, aws_connections.access_key_encrypted) AS access_key_encrypted,
                 COALESCE(integrations.secret_key_encrypted, aws_connections.secret_key_encrypted) AS secret_key_encrypted
@@ -576,6 +679,7 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
           functionName: integration.function_name,
           region: integration.region,
           lifecycleStatus: integration.lifecycle_status,
+          metadataVersion: integration.metadata_version,
           lastCheckStatus: integration.last_check_status,
           lastCheckMessage: integration.last_check_message,
           lastCheckedAt: integration.last_checked_at,
@@ -699,24 +803,33 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       const params = [target.id];
       let statusSql = '';
       if (args.status) { params.push(String(args.status)); statusSql = ` AND p.status = $${params.length}`; }
-      params.push(safeLimit(args.limit));
+      const countParams = [...params];
+      const totalResult = await query(`SELECT COUNT(*)::int AS count FROM process_items WHERE company_id = $1 AND is_client_visible = TRUE${statusSql}`, countParams);
+      const limit = safeLimit(args.limit);
+      const offset = safeOffset(args.offset);
+      params.push(limit, offset);
       const processes = await query(`
         SELECT p.id, p.reference_code, p.title, LEFT(p.description, 2000) AS description, p.category, p.status, p.priority, p.impact,
-               p.health, p.progress, p.due_date, p.target_sla_at, p.delivered_at, p.latest_update, p.created_at, p.updated_at,
+               p.health, p.progress, p.due_date, p.target_sla_at, p.delivered_at, p.latest_update, p.version, p.created_at, p.updated_at,
                (SELECT COUNT(*)::int FROM process_updates u WHERE u.process_id = p.id AND u.visibility = 'client') AS updates_count,
                (SELECT COUNT(*)::int FROM process_deliveries d WHERE d.process_id = p.id) AS deliveries_count
           FROM process_items p
          WHERE p.company_id = $1 AND p.is_client_visible = TRUE${statusSql}
-         ORDER BY p.updated_at DESC LIMIT $${params.length}
+         ORDER BY p.updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}
       `, params);
-      const deliveries = await query(`
-        SELECT d.id, d.process_id, d.title, LEFT(d.summary, 2000) AS summary, d.version, d.environment, d.status, d.artifact_links,
+      const processIds = processes.rows.map((process) => Number(process.id)).filter(Number.isInteger);
+      const deliveries = processIds.length ? await query(`
+        SELECT d.id, d.process_id, d.title, LEFT(d.summary, 2000) AS summary, d.version, d.row_version, d.environment, d.status, d.artifact_links,
                LEFT(d.release_notes, 4000) AS release_notes, d.delivered_at, d.created_at
           FROM process_deliveries d JOIN process_items p ON p.id = d.process_id
-         WHERE p.company_id = $1 AND p.is_client_visible = TRUE
-         ORDER BY d.created_at DESC LIMIT 30
-      `, [target.id]);
-      return { processes: processes.rows, deliveriesAndDocs: deliveries.rows };
+         WHERE p.company_id = $1 AND p.is_client_visible = TRUE AND d.process_id = ANY($2::int[])
+         ORDER BY d.created_at DESC
+      `, [target.id, processIds]) : { rows: [] };
+      return {
+        processes: processes.rows,
+        deliveriesAndDocs: deliveries.rows,
+        pagination: pagination(Number(totalResult.rows[0]?.count || 0), offset, processes.rows.length, limit),
+      };
     }
     case 'get_process_details': {
       requireDomain(target, 'processes', 'Acesso a processos e documentos não está liberado.');
@@ -726,14 +839,14 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
         SELECT id, reference_code, title, LEFT(description, 4000) AS description, LEFT(objective, 2000) AS objective,
                LEFT(scope, 4000) AS scope, LEFT(acceptance_criteria, 4000) AS acceptance_criteria, category, status,
                priority, impact, health, complexity, progress, estimate_business_days, planned_start, due_date,
-               target_sla_at, delivered_at, blocked_reason, next_action, tags, latest_update, created_at, updated_at
+               target_sla_at, delivered_at, blocked_reason, next_action, tags, latest_update, version, created_at, updated_at
           FROM process_items WHERE id = $1 AND company_id = $2 AND is_client_visible = TRUE
       `, [processId, target.id]);
       if (!processResult.rows[0]) throw new Error('Processo não encontrado ou não visível para esta empresa.');
       const [updates, checklist, deliveries] = await Promise.all([
         query(`SELECT id, kind, LEFT(message, 4000) AS message, created_at FROM process_updates WHERE process_id = $1 AND visibility = 'client' ORDER BY created_at DESC LIMIT 50`, [processId]),
-        query(`SELECT id, title, description, status, due_date, sort_order, completed_at FROM process_checklist_items WHERE process_id = $1 ORDER BY sort_order ASC, id ASC`, [processId]),
-        query(`SELECT id, title, LEFT(summary, 2000) AS summary, version, environment, status, artifact_links, LEFT(release_notes, 4000) AS release_notes, delivered_at FROM process_deliveries WHERE process_id = $1 ORDER BY created_at DESC LIMIT 30`, [processId]),
+        query(`SELECT id, title, description, status, due_date, sort_order, version, completed_at, updated_at FROM process_checklist_items WHERE process_id = $1 ORDER BY sort_order ASC, id ASC`, [processId]),
+        query(`SELECT id, title, LEFT(summary, 2000) AS summary, version, row_version, environment, status, artifact_links, LEFT(release_notes, 4000) AS release_notes, delivered_at, updated_at FROM process_deliveries WHERE process_id = $1 ORDER BY created_at DESC LIMIT 30`, [processId]),
       ]);
       return { process: processResult.rows[0], updates: updates.rows, checklist: checklist.rows, deliveriesAndDocs: deliveries.rows };
     }
@@ -742,7 +855,10 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
       const params = [target.id];
       let statusSql = '';
       if (args.status) { params.push(String(args.status)); statusSql = ` AND s.status = $${params.length}`; }
-      params.push(safeLimit(args.limit));
+      const totalResult = await query(`SELECT COUNT(*)::int AS count FROM integration_mapping_sets WHERE company_id = $1${statusSql}`, [...params]);
+      const limit = safeLimit(args.limit);
+      const offset = safeOffset(args.offset);
+      params.push(limit, offset);
       const sets = await query(`
         SELECT s.id, s.name, LEFT(s.description, 2000) AS description, s.source_system, s.target_system, s.version, s.revision, s.status,
                s.approval_status, s.approval_revision, s.approval_requested_at, s.approved_at,
@@ -750,14 +866,19 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
                (SELECT COUNT(*)::int FROM integration_mapping_entries e WHERE e.mapping_set_id = s.id) AS entries_count,
                (SELECT COUNT(*)::int FROM integration_mapping_attachments a WHERE a.mapping_set_id = s.id) AS attachments_count
           FROM integration_mapping_sets s WHERE s.company_id = $1${statusSql}
-         ORDER BY s.updated_at DESC LIMIT $${params.length}
+         ORDER BY s.updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}
       `, params);
-      const attachments = await query(`
+      const mappingSetIds = sets.rows.map((set) => Number(set.id)).filter(Number.isInteger);
+      const attachments = mappingSetIds.length ? await query(`
         SELECT a.id, a.mapping_set_id, a.file_name, a.mime_type, a.file_size, a.created_at
           FROM integration_mapping_attachments a JOIN integration_mapping_sets s ON s.id = a.mapping_set_id
-         WHERE s.company_id = $1 ORDER BY a.created_at DESC LIMIT 100
-      `, [target.id]);
-      return { mappingSets: sets.rows, attachments: attachments.rows };
+         WHERE s.company_id = $1 AND a.mapping_set_id = ANY($2::int[]) ORDER BY a.created_at DESC
+      `, [target.id, mappingSetIds]) : { rows: [] };
+      return {
+        mappingSets: sets.rows,
+        attachments: attachments.rows,
+        pagination: pagination(Number(totalResult.rows[0]?.count || 0), offset, sets.rows.length, limit),
+      };
     }
     case 'get_mapping_details': {
       requireDomain(target, 'mappings', 'Acesso a mapeamentos não está liberado.');
@@ -772,12 +893,21 @@ async function executeMcpTool(toolName, args, principal, resolvedTarget = null) 
           FROM integration_mapping_sets WHERE id = $1 AND company_id = $2
       `, [mappingSetId, target.id]);
       if (!setResult.rows[0]) throw new Error('Conjunto de mapeamento não encontrado para esta empresa.');
-      const [entries, attachments, history] = await Promise.all([
-        query(`SELECT id, source_path, source_type, target_path, target_type, direction, transformation, fallback_value, is_required, notes, examples, section, mapping_status, sort_order FROM integration_mapping_entries WHERE mapping_set_id = $1 ORDER BY sort_order ASC, id ASC LIMIT 250`, [mappingSetId]),
+      const entryLimit = Math.min(Math.max(Number(args.entryLimit) || 250, 1), 250);
+      const entryOffset = safeOffset(args.entryOffset);
+      const [entries, entryCount, attachments, history] = await Promise.all([
+        query(`SELECT id, source_path, source_type, target_path, target_type, direction, transformation, fallback_value, is_required, notes, examples, section, mapping_status, sort_order FROM integration_mapping_entries WHERE mapping_set_id = $1 ORDER BY sort_order ASC, id ASC LIMIT $2 OFFSET $3`, [mappingSetId, entryLimit, entryOffset]),
+        query('SELECT COUNT(*)::int AS count FROM integration_mapping_entries WHERE mapping_set_id = $1', [mappingSetId]),
         query(`SELECT id, file_name, mime_type, file_size, LEFT(extracted_text, 2000) AS extracted_text_preview, created_at FROM integration_mapping_attachments WHERE mapping_set_id = $1 ORDER BY created_at DESC LIMIT 10`, [mappingSetId]),
         query(`SELECT id, action, entity_type, summary, mapping_revision, created_at FROM integration_mapping_changes WHERE mapping_set_id = $1 AND client_visible = TRUE ORDER BY created_at DESC LIMIT 20`, [mappingSetId]),
       ]);
-      return { mappingSet: setResult.rows[0], entries: entries.rows, attachments: attachments.rows, revisionHistory: history.rows };
+      return {
+        mappingSet: setResult.rows[0],
+        entries: entries.rows,
+        entriesPagination: pagination(Number(entryCount.rows[0]?.count || 0), entryOffset, entries.rows.length, entryLimit),
+        attachments: attachments.rows,
+        revisionHistory: history.rows,
+      };
     }
     default:
       throw new Error('Ferramenta MCP desconhecida.');
@@ -823,7 +953,7 @@ async function auditMcpCall(principal, toolName, args, status, targetCompanyId, 
 
 function createMcpServer(principal, requestMeta) {
   const server = new Server(
-    { name: 'lambda-pulse', version: '2.1.0' },
+    { name: 'lambda-pulse', version: '2.2.0' },
     {
       capabilities: { tools: {} },
       instructions: 'A chave identifica uma única empresa. Comece por get_company_summary; toda resposta bem-sucedida inclui mcpAccess.authorizedClientEmails. Antes de compartilhar dados ou executar mudanças, confirme que o contato possui um email explícito com correspondência exata após trim e lowercase. Quando o chamador fornece contexto de conversa sem correspondência, o servidor bloqueia todas as outras tools.',
@@ -836,14 +966,17 @@ function createMcpServer(principal, requestMeta) {
     const args = request.params.arguments || {};
     const startedAt = Date.now();
     let targetCompanyId = principal.id;
+    let mcpAccess = null;
     try {
       const target = await resolveTargetCompany(principal, args);
       targetCompanyId = target.id;
-      const mcpAccess = await buildMcpAccessContext(target, args);
+      mcpAccess = await buildMcpAccessContext(target, args);
       if (toolName !== 'get_company_summary' && mcpAccess.contactContextProvided && mcpAccess.contactEmailMatched !== true) {
         throw new Error('O contato não possui um email explícito autorizado para consultar ou alterar dados desta empresa.');
       }
-      const data = await executeMcpTool(toolName, args, principal, target);
+      const data = toolName === 'get_company_summary' && !mcpAccess.accessGranted
+        ? { companyName: target.name, accessGranted: false }
+        : await executeMcpTool(toolName, args, principal, target);
       await auditMcpCall(principal, toolName, args, 'success', targetCompanyId, Date.now() - startedAt, requestMeta);
       const response = data && typeof data === 'object' && !Array.isArray(data)
         ? { ...data, mcpAccess }
@@ -851,7 +984,10 @@ function createMcpServer(principal, requestMeta) {
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     } catch (error) {
       await auditMcpCall(principal, toolName, args, 'error', targetCompanyId, Date.now() - startedAt, requestMeta);
-      return { isError: true, content: [{ type: 'text', text: error.message || 'Não foi possível executar a ferramenta.' }] };
+      const errorPayload = mcpAccess
+        ? { error: error.message || 'Não foi possível executar a ferramenta.', mcpAccess }
+        : { error: error.message || 'Não foi possível executar a ferramenta.' };
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify(errorPayload, null, 2) }] };
     }
   });
   return server;

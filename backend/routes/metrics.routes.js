@@ -5,9 +5,15 @@ const { authenticateToken } = require('./auth');
 const { client: redisClient, connectRedis } = require('../cache/redis');
 const { logAudit } = require('../audit/logger');
 const { getIntegrationForUser, buildAwsClientCredentials } = require('../services/integrations');
+const { sanitizeAwsConnectionError } = require('../services/awsConnections');
 const { calculateCostEstimate } = require('../services/pricing');
 
 const router = express.Router();
+
+function sendAwsError(res, error) {
+  const failure = sanitizeAwsConnectionError(error);
+  return res.status(502).json({ error: failure.message, code: failure.code });
+}
 
 // Get Lambda function details
 router.get('/functions/:integrationId', authenticateToken, async (req, res) => {
@@ -39,7 +45,7 @@ router.get('/functions/:integrationId', authenticateToken, async (req, res) => {
 
     res.json({ functions: response.Functions });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendAwsError(res, error);
   }
 });
 
@@ -197,7 +203,7 @@ router.get('/metrics/:integrationId', authenticateToken, async (req, res) => {
     });
     res.json(payload);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendAwsError(res, error);
   }
 });
 
@@ -266,7 +272,7 @@ router.post('/invoke/:integrationId', authenticateToken, async (req, res) => {
       logTail
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendAwsError(res, error);
   }
 });
 

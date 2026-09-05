@@ -136,6 +136,8 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.last_check_message AS "lastCheckMessage",
               integrations.last_checked_at AS "lastCheckedAt",
               integrations.documentation_links AS "documentationLinks",
+              integrations.metadata_version AS "metadataVersion",
+              integrations.updated_at AS "updatedAt",
               integrations.aws_connection_id AS "awsConnectionId",
               aws_connections.name AS "awsConnectionName",
               integrations.company_id AS "companyId",
@@ -163,6 +165,8 @@ router.get('/integrations', authenticateToken, async (req, res) => {
               integrations.last_check_message AS "lastCheckMessage",
               integrations.last_checked_at AS "lastCheckedAt",
               integrations.documentation_links AS "documentationLinks",
+              integrations.metadata_version AS "metadataVersion",
+              integrations.updated_at AS "updatedAt",
               integrations.aws_connection_id AS "awsConnectionId",
               aws_connections.name AS "awsConnectionName",
               integrations.company_id AS "companyId",
@@ -271,7 +275,7 @@ router.post('/integrations', authenticateToken, async (req, res) => {
       `INSERT INTO integrations
         (company_id, name, function_name, region, memory_mb, show_cost_estimate, documentation_links, aws_connection_id, access_key_encrypted, secret_key_encrypted, owner_user_id, client_user_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", show_cost_estimate AS "showCostEstimate", documentation_links AS "documentationLinks", aws_connection_id AS "awsConnectionId", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
+        RETURNING id, name, function_name AS "functionName", region, memory_mb AS "memoryMb", show_cost_estimate AS "showCostEstimate", documentation_links AS "documentationLinks", metadata_version AS "metadataVersion", updated_at AS "updatedAt", aws_connection_id AS "awsConnectionId", company_id AS "companyId", owner_user_id AS "userId", client_user_id AS "clientId"`,
       [resolvedCompanyId, name, functionName, region, resolvedMemoryMb, resolvedShowCostEstimate, JSON.stringify(resolvedDocumentationLinks), resolvedAwsConnectionId, encryptedAccessKey, encryptedSecretKey, req.user.id, resolvedClientId]
     );
     linkedProcesses = await syncIntegrationProcesses({
@@ -530,7 +534,9 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
             documentation_links = $5,
             aws_connection_id = $6,
             access_key_encrypted = CASE WHEN $6 IS DISTINCT FROM aws_connection_id THEN NULL ELSE access_key_encrypted END,
-            secret_key_encrypted = CASE WHEN $6 IS DISTINCT FROM aws_connection_id THEN NULL ELSE secret_key_encrypted END
+            secret_key_encrypted = CASE WHEN $6 IS DISTINCT FROM aws_connection_id THEN NULL ELSE secret_key_encrypted END,
+            metadata_version = metadata_version + 1,
+            updated_at = NOW()
           WHERE id = $7
       RETURNING id,
                 name,
@@ -539,6 +545,8 @@ router.patch('/integrations/:integrationId', authenticateToken, async (req, res)
                 memory_mb AS "memoryMb",
                 show_cost_estimate AS "showCostEstimate",
                 documentation_links AS "documentationLinks",
+                metadata_version AS "metadataVersion",
+                updated_at AS "updatedAt",
                 aws_connection_id AS "awsConnectionId",
                 company_id AS "companyId",
                 owner_user_id AS "userId",

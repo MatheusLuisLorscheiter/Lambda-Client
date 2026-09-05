@@ -952,6 +952,7 @@
                   </td>
                   <td class="px-4 py-4 whitespace-nowrap text-sm font-medium">
                     <div class="flex space-x-3">
+                      <button @click="openMcpContactsModal(company)" class="text-emerald-700 hover:text-emerald-900">Emails</button>
                       <button @click="openMcpPermissionsModal(company)" class="text-indigo-600 hover:text-indigo-900" :disabled="!company.isEnabled">Permissões</button>
                       <button @click="openMcpAuditModal(company)" class="text-slate-600 hover:text-slate-900" :disabled="!company.isEnabled">Logs de Uso</button>
                     </div>
@@ -1453,6 +1454,55 @@
       </div>
     </transition>
 
+    <!-- MCP Authorized Contacts Modal -->
+    <transition name="fade">
+      <div v-if="mcpContactsModal" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/50" @click="mcpContactsModal = false"></div>
+        <div class="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+          <div class="mb-4 flex items-start justify-between">
+            <div>
+              <h3 class="text-lg font-semibold text-slate-900">Emails autorizados no MCP</h3>
+              <p class="mt-1 text-sm text-slate-500">Empresa: {{ mcpContactsCompany?.companyName }}</p>
+            </div>
+            <button type="button" @click="mcpContactsModal = false" class="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+
+          <form class="mb-5 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[1fr_0.7fr_auto]" @submit.prevent="addMcpContact">
+            <label>
+              <span class="mb-1 block text-xs font-medium text-slate-600">Email</span>
+              <input v-model="mcpContactEmail" type="email" required maxlength="320" placeholder="controladoria@empresa.com.br" class="min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+            </label>
+            <label>
+              <span class="mb-1 block text-xs font-medium text-slate-600">Rótulo opcional</span>
+              <input v-model="mcpContactLabel" type="text" maxlength="120" placeholder="Controladoria" class="min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+            </label>
+            <button type="submit" :disabled="mcpContactsSaving" class="min-h-10 self-end rounded-lg bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
+              {{ mcpContactsSaving ? 'Salvando…' : 'Autorizar' }}
+            </button>
+          </form>
+
+          <div class="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200">
+            <div v-if="mcpContactsLoading" class="p-8 text-center text-sm text-slate-500">Carregando emails…</div>
+            <div v-else-if="!mcpContacts.length" class="p-8 text-center text-sm text-amber-700">Nenhum email autorizado. Cadastre um contato ou ative um usuário cliente.</div>
+            <ul v-else class="divide-y divide-slate-200">
+              <li v-for="contact in mcpContacts" :key="contact.email" class="flex items-center justify-between gap-4 p-4">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium text-slate-900">{{ contact.email }}</p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ contact.label || (contact.sources.includes('client_user') ? 'Usuário cliente ativo' : 'Autorização adicional MCP') }}
+                    · {{ contact.sources.includes('client_user') ? 'login de cliente' : 'sem login' }}
+                  </p>
+                </div>
+                <button v-if="contact.canRevoke" type="button" class="text-xs font-medium text-red-600 hover:text-red-800" @click="revokeMcpContact(contact)">Revogar adicional</button>
+                <span v-else class="text-xs text-slate-400">Gerenciado em Clientes</span>
+              </li>
+            </ul>
+          </div>
+          <p class="mt-4 text-xs leading-5 text-slate-500">A lista final devolvida pelo MCP combina usuários clientes ativos e autorizações adicionais. Revogar uma autorização adicional não desativa um usuário cliente com o mesmo email.</p>
+        </div>
+      </div>
+    </transition>
+
     <!-- MCP Audit Modal -->
     <transition name="fade">
       <div v-if="mcpAuditModal" class="fixed inset-0 z-[60] flex items-center justify-center">
@@ -1512,7 +1562,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
-import type { ClientUser, Integration, AuditLog, AwsConnection, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpWriteScope, McpCompaniesResponse, McpTokenResponse } from '@/types'
+import type { ClientUser, Integration, AuditLog, AwsConnection, Company, ProcessItem, ProcessStatus, CompanyMcpConfig, McpAllowedDomains, McpWriteScope, McpCompaniesResponse, McpTokenResponse, McpAuthorizedContact } from '@/types'
 import logoDark from '@/assets/logos/logo-dark.svg'
 import AdminProcessManager from '@/components/AdminProcessManager.vue'
 import MappingWorkspace from '@/components/MappingWorkspace.vue'
@@ -1566,8 +1616,16 @@ const mcpWriteScopeOptions: Array<{ value: McpWriteScope; label: string; descrip
   { value: 'integrations:source:read', label: 'Ler código das Lambdas', description: 'Libera leitura seletiva de arquivos-fonte para o agente.' },
   { value: 'integrations:source:write', label: 'Propor alteração de código', description: 'Permite ao agente criar rascunhos versionados, sem publicar na AWS.' },
   { value: 'integrations:source:review', label: 'Solicitar revisão de código', description: 'Permite ao agente encaminhar um rascunho para aprovação humana.' },
+  { value: 'integrations:write', label: 'Editar metadados de integração', description: 'Altera nome, estado operacional e documentação, sem tocar em credenciais AWS.' },
 ]
 const mcpMaxRequestsPerMinute = ref(60)
+const mcpContactsModal = ref(false)
+const mcpContactsCompany = ref<CompanyMcpConfig | null>(null)
+const mcpContacts = ref<McpAuthorizedContact[]>([])
+const mcpContactsLoading = ref(false)
+const mcpContactsSaving = ref(false)
+const mcpContactEmail = ref('')
+const mcpContactLabel = ref('')
 const mcpAuditModal = ref(false)
 const mcpAuditCompany = ref<CompanyMcpConfig | null>(null)
 type McpAuditLog = {
@@ -1681,6 +1739,64 @@ const saveMcpPermissions = async () => {
     await fetchMcpCompanies()
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao salvar permissões')
+  }
+}
+
+const fetchMcpContacts = async () => {
+  if (!mcpContactsCompany.value) return
+  mcpContactsLoading.value = true
+  try {
+    const res = await api.get<{ contacts: McpAuthorizedContact[] }>(`/auth/admin/mcp/company/${mcpContactsCompany.value.companyId}/contacts`)
+    mcpContacts.value = res.contacts
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao carregar emails autorizados')
+  } finally {
+    mcpContactsLoading.value = false
+  }
+}
+
+const openMcpContactsModal = async (company: CompanyMcpConfig) => {
+  mcpContactsCompany.value = company
+  mcpContacts.value = []
+  mcpContactEmail.value = ''
+  mcpContactLabel.value = ''
+  mcpContactsModal.value = true
+  await fetchMcpContacts()
+}
+
+const addMcpContact = async () => {
+  if (!mcpContactsCompany.value || !mcpContactEmail.value.trim()) return
+  mcpContactsSaving.value = true
+  try {
+    await api.post(`/auth/admin/mcp/company/${mcpContactsCompany.value.companyId}/contacts`, {
+      email: mcpContactEmail.value,
+      label: mcpContactLabel.value
+    })
+    mcpContactEmail.value = ''
+    mcpContactLabel.value = ''
+    showToast('success', 'Email autorizado no MCP')
+    await Promise.all([fetchMcpContacts(), fetchMcpCompanies()])
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao autorizar email')
+  } finally {
+    mcpContactsSaving.value = false
+  }
+}
+
+const revokeMcpContact = async (contact: McpAuthorizedContact) => {
+  if (!mcpContactsCompany.value || !contact.managedContactId) return
+  const confirmed = await requestConfirm({
+    title: 'Revogar email adicional',
+    message: `Revogar a autorização MCP adicional de ${contact.email}?`,
+    confirmLabel: 'Revogar'
+  })
+  if (!confirmed) return
+  try {
+    await api.del(`/auth/admin/mcp/company/${mcpContactsCompany.value.companyId}/contacts/${contact.managedContactId}`)
+    showToast('success', 'Autorização adicional revogada')
+    await Promise.all([fetchMcpContacts(), fetchMcpCompanies()])
+  } catch (error) {
+    showToast('error', error instanceof Error ? error.message : 'Falha ao revogar email')
   }
 }
 

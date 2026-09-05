@@ -1130,7 +1130,7 @@ router.post('/mappings/:mappingSetId/approval', authenticateToken, async (req, r
       `UPDATE integration_mapping_sets
           SET approval_status = $1,
               approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE NULL END,
-              approved_by = CASE WHEN $1 = 'approved' THEN $2 ELSE NULL END,
+              approved_by = CASE WHEN $1 = 'approved' THEN $2::INTEGER ELSE NULL END,
               approval_note = $3,
               updated_at = NOW()
         WHERE id = $4

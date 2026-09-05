@@ -27,6 +27,8 @@ const run = async () => {
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_check_message TEXT',
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ',
         "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS documentation_links JSONB NOT NULL DEFAULT '[]'",
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS metadata_version INTEGER NOT NULL DEFAULT 1',
+        'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()',
         'ALTER TABLE integrations ADD COLUMN IF NOT EXISTS aws_connection_id INTEGER REFERENCES aws_connections(id) ON DELETE RESTRICT',
         'ALTER TABLE integrations ALTER COLUMN access_key_encrypted DROP NOT NULL',
         'ALTER TABLE integrations ALTER COLUMN secret_key_encrypted DROP NOT NULL',
@@ -294,7 +296,23 @@ const run = async () => {
           UNIQUE (principal_company_id, target_company_id),
           CHECK (principal_company_id <> target_company_id)
         )`,
-        'CREATE INDEX IF NOT EXISTS idx_company_mcp_access_grants_principal ON company_mcp_access_grants(principal_company_id, is_active)'
+        'CREATE INDEX IF NOT EXISTS idx_company_mcp_access_grants_principal ON company_mcp_access_grants(principal_company_id, is_active)',
+        `CREATE TABLE IF NOT EXISTS company_mcp_contact_emails (
+          id SERIAL PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          email TEXT NOT NULL,
+          label TEXT,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          revoked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (company_id, email),
+          CHECK (email = LOWER(BTRIM(email))),
+          CHECK (CHAR_LENGTH(email) BETWEEN 3 AND 320),
+          CHECK (label IS NULL OR CHAR_LENGTH(label) <= 120)
+        )`,
+        'CREATE INDEX IF NOT EXISTS idx_company_mcp_contact_emails_active ON company_mcp_contact_emails(company_id, email) WHERE is_active = TRUE'
     ];
 
     const client = await pool.connect();

@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { authenticateToken } = require('./auth');
 const { query, pool } = require('../db');
+const mcpContacts = require('../services/mcpContactsService');
 
 const router = express.Router();
 
@@ -28,12 +29,21 @@ router.get('/companies', authenticateToken, requireAdmin, async (_req, res) => {
                cfg.last_accessed_at,
                (SELECT COUNT(*)::int FROM audit_logs a WHERE a.company_id = c.id AND a.action LIKE 'mcp.%') AS mcp_calls_count,
                COALESCE((
-                 SELECT json_agg(DISTINCT LOWER(BTRIM(u.email)) ORDER BY LOWER(BTRIM(u.email)))
-                 FROM users u
-                 WHERE u.company_id = c.id
-                   AND u.role = 'client'
-                   AND u.is_active = TRUE
-                   AND NULLIF(BTRIM(u.email), '') IS NOT NULL
+                 SELECT json_agg(contact.email ORDER BY contact.email)
+                   FROM (
+                     SELECT LOWER(BTRIM(u.email)) AS email
+                       FROM users u
+                      WHERE u.company_id = c.id
+                        AND u.role = 'client'
+                        AND u.is_active = TRUE
+                        AND NULLIF(BTRIM(u.email), '') IS NOT NULL
+                     UNION
+                     SELECT LOWER(BTRIM(mcp_email.email)) AS email
+                       FROM company_mcp_contact_emails mcp_email
+                      WHERE mcp_email.company_id = c.id
+                        AND mcp_email.is_active = TRUE
+                        AND NULLIF(BTRIM(mcp_email.email), '') IS NOT NULL
+                   ) contact
                ), '[]'::json) AS authorized_client_emails
           FROM companies c
           LEFT JOIN company_mcp_configs cfg ON cfg.company_id = c.id
@@ -69,6 +79,89 @@ router.get('/companies', authenticateToken, requireAdmin, async (_req, res) => {
   } catch (error) {
     console.error('[Admin MCP] Falha ao listar empresas:', error);
     res.status(500).json({ error: 'Erro ao carregar configurações MCP das empresas' });
+  }
+});
+
+router.get('/company/:id/contacts', authenticateToken, requireAdmin, async (req, res) => {
+  const companyId = parseCompanyId(req.params.id);
+  if (!companyId) return res.status(400).json({ error: 'ID de empresa inválido' });
+  try {
+    const company = await query('SELECT id, name FROM companies WHERE id = $1', [companyId]);
+    if (!company.rows[0]) return res.status(404).json({ error: 'Empresa não encontrada' });
+    const contacts = await mcpContacts.listAuthorizedContacts({ query }, companyId);
+    return res.json({ companyId, companyName: company.rows[0].name, contacts });
+  } catch (error) {
+    console.error('[Admin MCP] Falha ao listar emails autorizados:', error);
+    return res.status(500).json({ error: 'Erro ao carregar emails autorizados do MCP' });
+  }
+});
+
+router.post('/company/:id/contacts', authenticateToken, requireAdmin, async (req, res) => {
+  const companyId = parseCompanyId(req.params.id);
+  if (!companyId) return res.status(400).json({ error: 'ID de empresa inválido' });
+  let normalizedEmail;
+  let normalizedLabel;
+  try {
+    normalizedEmail = mcpContacts.normalizeEmail(req.body?.email);
+    normalizedLabel = mcpContacts.normalizeLabel(req.body?.label);
+  } catch (error) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const company = await client.query('SELECT id, name FROM companies WHERE id = $1', [companyId]);
+    if (!company.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Empresa não encontrada' });
+    }
+    const contact = await mcpContacts.authorizeContact(client, {
+      companyId,
+      email: normalizedEmail,
+      label: normalizedLabel,
+      actorUserId: req.user.id,
+    });
+    await client.query(`
+      INSERT INTO audit_logs (company_id, user_id, action, resource_type, resource_id, metadata)
+      VALUES ($1, $2, 'mcp.contact.authorize', 'company_mcp_contact_email', $3, $4)
+    `, [companyId, req.user.id, String(contact.id), JSON.stringify({ email: normalizedEmail, label: normalizedLabel })]);
+    await client.query('COMMIT');
+    return res.status(201).json({ success: true, contact });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[Admin MCP] Falha ao autorizar email:', error);
+    return res.status(error.status || 500).json({ error: error.status ? error.message : 'Erro ao autorizar email no MCP' });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/company/:id/contacts/:contactId', authenticateToken, requireAdmin, async (req, res) => {
+  const companyId = parseCompanyId(req.params.id);
+  const contactId = parseCompanyId(req.params.contactId);
+  if (!companyId || !contactId) return res.status(400).json({ error: 'Identificador inválido' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const contact = await mcpContacts.revokeContact(client, { companyId, contactId, actorUserId: req.user.id });
+    if (!contact) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Email gerenciado não encontrado ou já revogado' });
+    }
+    await client.query(`
+      INSERT INTO audit_logs (company_id, user_id, action, resource_type, resource_id, metadata)
+      VALUES ($1, $2, 'mcp.contact.revoke', 'company_mcp_contact_email', $3, $4)
+    `, [companyId, req.user.id, String(contact.id), JSON.stringify({ email: contact.email })]);
+    await client.query('COMMIT');
+    return res.json({ success: true, contact });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[Admin MCP] Falha ao revogar email:', error);
+    return res.status(500).json({ error: 'Erro ao revogar email do MCP' });
+  } finally {
+    client.release();
   }
 });
 
@@ -171,6 +264,7 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
       'integrations:source:read',
       'integrations:source:write',
     'integrations:source:review',
+    'integrations:write',
   ]);
   const scopes = Array.from(new Set((Array.isArray(allowedScopes) ? allowedScopes : []).map(String).filter(scope => validScopes.has(scope))));
   if (Array.isArray(allowedScopes) && scopes.length !== allowedScopes.length) return res.status(400).json({ error: 'Um ou mais escopos MCP são inválidos' });

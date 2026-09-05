@@ -49,7 +49,7 @@ const handler = router.stack
   .find(layer => layer.route?.path === '/companies' && layer.route.methods.get)
   .route.stack.at(-1).handle;
 
-test('admin MCP lista os emails ativos vinculados a cada empresa', async () => {
+test('admin MCP lista a união de clientes ativos e emails adicionais de cada empresa', async () => {
   queries.length = 0;
   let statusCode = 200;
   let body;
@@ -70,5 +70,7 @@ test('admin MCP lista os emails ativos vinculados a cada empresa', async () => {
   const companiesSql = queries.find(sql => sql.includes('FROM companies c'));
   assert.match(companiesSql, /u\.role = 'client'/);
   assert.match(companiesSql, /u\.is_active = TRUE/);
-  assert.match(companiesSql, /json_agg\(DISTINCT LOWER\(BTRIM\(u\.email\)\)/);
+  assert.match(companiesSql, /FROM company_mcp_contact_emails mcp_email/);
+  assert.match(companiesSql, /UNION/);
+  assert.match(companiesSql, /json_agg\(contact\.email ORDER BY contact\.email\)/);
 });

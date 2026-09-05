@@ -10,6 +10,8 @@ export interface Integration {
   lastCheckMessage?: string | null
   lastCheckedAt?: string | null
   documentationLinks?: string[]
+  metadataVersion?: number
+  updatedAt?: string
   companyId?: number
   companyName?: string
   awsConnectionId?: number | null
@@ -564,6 +566,7 @@ export type McpWriteScope =
   | 'integrations:source:read'
   | 'integrations:source:write'
   | 'integrations:source:review'
+  | 'integrations:write'
 
 export interface CompanyMcpConfig {
   companyId: number
@@ -579,6 +582,14 @@ export interface CompanyMcpConfig {
   maxRequestsPerMinute: number
   lastAccessedAt: string | null
   mcpCallsCount: number
+}
+
+export interface McpAuthorizedContact {
+  email: string
+  sources: Array<'client_user' | 'mcp_allowlist'>
+  managedContactId: number | null
+  label: string | null
+  canRevoke: boolean
 }
 
 export interface McpCompaniesResponse {
