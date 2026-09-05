@@ -575,9 +575,7 @@ export interface CompanyMcpConfig {
   hasToken: boolean
   allowedDomains: McpAllowedDomains
   allowedScopes: McpWriteScope[]
-  accessMode: 'company' | 'delegated'
-  requireContactTagMatch: boolean
-  grantedCompanyIds: number[]
+  authorizedClientEmails: string[]
   maxRequestsPerMinute: number
   lastAccessedAt: string | null
   mcpCallsCount: number

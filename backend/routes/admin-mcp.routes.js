@@ -24,16 +24,17 @@ router.get('/companies', authenticateToken, requireAdmin, async (_req, res) => {
                cfg.api_key_prefix,
                COALESCE(cfg.allowed_domains, '{"logs": true, "processes": true, "mappings": true, "integrations": true}'::jsonb) AS allowed_domains,
                COALESCE(cfg.allowed_scopes, ARRAY[]::TEXT[]) AS allowed_scopes,
-               COALESCE(cfg.access_mode, 'company') AS access_mode,
-               COALESCE(cfg.require_contact_tag_match, FALSE) AS require_contact_tag_match,
                COALESCE(cfg.max_requests_per_minute, 60) AS max_requests_per_minute,
                cfg.last_accessed_at,
                (SELECT COUNT(*)::int FROM audit_logs a WHERE a.company_id = c.id AND a.action LIKE 'mcp.%') AS mcp_calls_count,
                COALESCE((
-                 SELECT json_agg(g.target_company_id ORDER BY g.target_company_id)
-                 FROM company_mcp_access_grants g
-                 WHERE g.principal_company_id = c.id AND g.is_active = TRUE
-               ), '[]'::json) AS granted_company_ids
+                 SELECT json_agg(DISTINCT LOWER(BTRIM(u.email)) ORDER BY LOWER(BTRIM(u.email)))
+                 FROM users u
+                 WHERE u.company_id = c.id
+                   AND u.role = 'client'
+                   AND u.is_active = TRUE
+                   AND NULLIF(BTRIM(u.email), '') IS NOT NULL
+               ), '[]'::json) AS authorized_client_emails
           FROM companies c
           LEFT JOIN company_mcp_configs cfg ON cfg.company_id = c.id
          ORDER BY c.name ASC
@@ -55,9 +56,7 @@ router.get('/companies', authenticateToken, requireAdmin, async (_req, res) => {
         hasToken: Boolean(row.api_key_prefix),
         allowedDomains: row.allowed_domains,
         allowedScopes: row.allowed_scopes || [],
-        accessMode: row.access_mode,
-        requireContactTagMatch: row.require_contact_tag_match,
-        grantedCompanyIds: row.granted_company_ids || [],
+        authorizedClientEmails: row.authorized_client_emails || [],
         maxRequestsPerMinute: row.max_requests_per_minute,
         lastAccessedAt: row.last_accessed_at,
         mcpCallsCount: row.mcp_calls_count || 0,
@@ -124,7 +123,8 @@ router.post('/company/:id/token', authenticateToken, requireAdmin, async (req, r
       INSERT INTO company_mcp_configs (company_id, is_enabled, api_key_hash, api_key_prefix, updated_at)
       VALUES ($1, TRUE, $2, $3, NOW())
       ON CONFLICT (company_id) DO UPDATE SET is_enabled = TRUE, api_key_hash = EXCLUDED.api_key_hash,
-        api_key_prefix = EXCLUDED.api_key_prefix, updated_at = NOW()
+        api_key_prefix = EXCLUDED.api_key_prefix, access_mode = 'company',
+        require_contact_tag_match = FALSE, updated_at = NOW()
     `, [companyId, hash, prefix]);
     await client.query(`
       INSERT INTO audit_logs (company_id, user_id, action, resource_type, resource_id, metadata)
@@ -145,13 +145,10 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
   const companyId = parseCompanyId(req.params.id);
   const {
     allowedDomains,
-    accessMode = 'company',
-    requireContactTagMatch = false,
-    grantedCompanyIds = [],
     maxRequestsPerMinute = 60,
     allowedScopes = [],
   } = req.body || {};
-  if (!companyId || !allowedDomains || typeof allowedDomains !== 'object' || !['company', 'delegated'].includes(accessMode)) {
+  if (!companyId || !allowedDomains || typeof allowedDomains !== 'object') {
     return res.status(400).json({ error: 'Parâmetros inválidos' });
   }
   const domains = {
@@ -177,8 +174,6 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
   ]);
   const scopes = Array.from(new Set((Array.isArray(allowedScopes) ? allowedScopes : []).map(String).filter(scope => validScopes.has(scope))));
   if (Array.isArray(allowedScopes) && scopes.length !== allowedScopes.length) return res.status(400).json({ error: 'Um ou mais escopos MCP são inválidos' });
-  const grantIds = Array.from(new Set((Array.isArray(grantedCompanyIds) ? grantedCompanyIds : [])
-    .map(Number).filter((id) => Number.isInteger(id) && id > 0 && id !== companyId)));
   const rateLimit = Math.min(Math.max(Number(maxRequestsPerMinute) || 60, 1), 1000);
   const client = await pool.connect();
   try {
@@ -188,31 +183,17 @@ router.put('/company/:id/permissions', authenticateToken, requireAdmin, async (r
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Empresa não encontrada' });
     }
-    if (grantIds.length) {
-      const targets = await client.query('SELECT id FROM companies WHERE id = ANY($1::int[])', [grantIds]);
-      if (targets.rows.length !== grantIds.length) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Uma ou mais empresas concedidas não existem' });
-      }
-    }
     const result = await client.query(`
       INSERT INTO company_mcp_configs
         (company_id, allowed_domains, allowed_scopes, access_mode, require_contact_tag_match, max_requests_per_minute, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      VALUES ($1, $2, $3, 'company', FALSE, $4, NOW())
       ON CONFLICT (company_id) DO UPDATE SET allowed_domains = EXCLUDED.allowed_domains,
         allowed_scopes = EXCLUDED.allowed_scopes,
         access_mode = EXCLUDED.access_mode, require_contact_tag_match = EXCLUDED.require_contact_tag_match,
         max_requests_per_minute = EXCLUDED.max_requests_per_minute, updated_at = NOW()
-      RETURNING allowed_domains, allowed_scopes, access_mode, require_contact_tag_match, max_requests_per_minute
-    `, [companyId, JSON.stringify(domains), scopes, accessMode, Boolean(requireContactTagMatch), rateLimit]);
-    await client.query('DELETE FROM company_mcp_access_grants WHERE principal_company_id = $1', [companyId]);
-    if (accessMode === 'delegated' && grantIds.length) {
-      await client.query(`
-        INSERT INTO company_mcp_access_grants (principal_company_id, target_company_id, is_active)
-        SELECT $1, target_id, TRUE FROM unnest($2::int[]) AS target_id
-      `, [companyId, grantIds]);
-    }
-    const metadata = { allowedDomains: domains, allowedScopes: scopes, accessMode, requireContactTagMatch: Boolean(requireContactTagMatch), grantedCompanyIds: accessMode === 'delegated' ? grantIds : [], maxRequestsPerMinute: rateLimit };
+      RETURNING allowed_domains, allowed_scopes, max_requests_per_minute
+    `, [companyId, JSON.stringify(domains), scopes, rateLimit]);
+    const metadata = { allowedDomains: domains, allowedScopes: scopes, accessMode: 'company', maxRequestsPerMinute: rateLimit };
     await client.query(`
       INSERT INTO audit_logs (company_id, user_id, action, resource_type, resource_id, metadata)
       VALUES ($1, $2, 'mcp.update_permissions', 'company_mcp_configs', $3, $4)

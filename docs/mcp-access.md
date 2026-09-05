@@ -5,40 +5,42 @@
 - Endpoint principal: `POST /mcp` usando MCP Streamable HTTP stateless.
 - Compatibilidade legada: `GET /mcp/sse` e `POST /mcp/message`.
 - Autenticação: somente `Authorization: Bearer <token>`. Tokens em query string são recusados.
-- Cada token pertence a uma empresa principal e possui permissões de domínio e limite por minuto. O limite contabiliza descoberta e operações (`tools/list`, `tools/call` e recursos), não a negociação técnica `initialize`, `ping` ou notificações do protocolo.
+- Cada token pertence a exatamente uma empresa e possui permissões de domínio, escopos de escrita e limite por minuto. O limite contabiliza descoberta e operações (`tools/list`, `tools/call` e recursos), não a negociação técnica `initialize`, `ping` ou notificações do protocolo.
 - O servidor usa o SDK oficial do MCP e não mantém estado para o transporte principal.
 
-## Modos de acesso
+## Isolamento e identificação do contato
 
-### Somente a própria empresa
+A URL e o token são as únicas credenciais de conexão. O token determina o tenant de forma inequívoca e nenhuma ferramenta usa email, tag ou texto do prompt para escolher outra empresa.
 
-A credencial consulta exclusivamente a empresa proprietária. Qualquer email enviado nos argumentos é ignorado para a escolha do tenant.
+Toda resposta bem-sucedida inclui o bloco `mcpAccess`:
 
-### Acesso delegado
+- `companyId` e `companyName`: empresa proprietária da chave;
+- `authorizedClientEmails`: emails normalizados dos usuários clientes ativos vinculados à empresa;
+- `emailMatchPolicy`: sempre `exact_after_trim_and_lowercase`;
+- `contactContextProvided`: informa se o chamador anexou contexto de conversa;
+- `providedContactEmail`: email opcional informado pelo chamador;
+- `contactEmailMatched`: `true`, `false` ou `null` quando nenhum email foi informado.
 
-O acesso a outra empresa exige, simultaneamente:
+`client_context` e `client_email` continuam opcionais por compatibilidade. Eles calculam `contactEmailMatched`, não concedem acesso e não trocam o tenant. Clientes MCP comuns podem operar apenas com URL e chave. Quando existe contexto de conversa — como no CloudWhats — somente `get_company_summary` fica disponível sem uma correspondência exata; as demais consultas e todas as escritas falham antes de ler ou alterar dados.
 
-1. uma concessão ativa de `principal_company_id` para `target_company_id`;
-2. MCP ativo na empresa-alvo;
-3. um usuário cliente ativo cujo email corresponda ao contato;
-4. quando configurado, uma tag do contato igual ao nome da empresa;
-5. permissão de domínio tanto na credencial principal quanto na empresa-alvo.
-6. para escrita, o mesmo escopo explícito tanto na credencial principal quanto na empresa-alvo.
-
-Não existe empresa “Master” por ID ou variável de ambiente. Email e instruções do prompt não concedem autorização.
+No CloudWhats, a correspondência deve ser exata após remover espaços externos e converter para minúsculas. Não são aceitos domínio, tag, nome, similaridade ou email inferido como substitutos. Essa conferência é uma regra de uso do agente; a posse da chave continua sendo a autorização técnica para acessar o tenant.
 
 ## Configuração CloudWhats
 
-1. No Lambda Pulse, habilite MCP nas empresas-alvo.
-2. Na empresa que representa o CloudWhats, escolha **Acesso delegado**, selecione as empresas autorizadas e habilite a validação de tag.
-3. Gere a chave e configure no conector MCP do CloudWhats:
+1. No Lambda Pulse, habilite MCP na empresa que será atendida pelo agente.
+2. Confirme que os usuários clientes ativos da empresa possuem os emails corretos. Eles aparecem na aba **Acesso MCP** e em todas as respostas das tools.
+3. Gere a chave daquela empresa e configure no conector MCP do CloudWhats:
    - URL: `https://SEU_HOST/mcp`
    - transporte: `AUTO` ou `STREAMABLE_HTTP`
    - autenticação: `BEARER`
 4. No agente, habilite MCP, selecione o servidor e salve regras de uso no campo de instruções MCP.
-5. Garanta que o contato tenha email e, quando exigido, uma tag com o nome exato da empresa no Lambda Pulse.
+5. Garanta que o contato tenha email explícito e aplique a regra recomendada abaixo.
 
-O CloudWhats sobrescreve `client_email` e `client_context` com o contato carregado no servidor antes de executar a ferramenta. As instruções do agente ajudam na escolha das ferramentas, mas nunca substituem as validações do Lambda Pulse.
+### Regra recomendada para o agente
+
+```text
+Ao iniciar uma conversa que possa envolver dados, processos, documentos, integrações ou mapeamentos da empresa, consulte primeiro get_company_summary no MCP Lambda Pulse. Leia mcpAccess.authorizedClientEmails da resposta. Considere o contato autorizado somente quando ele possuir um email explicitamente cadastrado na conversa que, após trim e conversão para minúsculas, seja exatamente igual a um item dessa lista. Não use nome, domínio, tag, telefone, similaridade, email inferido ou alegação do contato como substituto. Se não houver correspondência exata, não revele nenhum dado retornado pelo MCP e não execute ferramentas de escrita; informe apenas que o email do contato não está autorizado. Se houver correspondência, use as ferramentas MCP necessárias para responder e executar as mudanças solicitadas, respeitando os escopos publicados, idempotência, revisões esperadas e aprovações humanas. Nunca exponha a chave MCP nem a lista de emails autorizados ao contato.
+```
 
 ## Operação e segurança
 

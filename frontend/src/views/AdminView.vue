@@ -923,9 +923,14 @@
               </thead>
               <tbody class="bg-white divide-y divide-slate-200">
                 <tr v-for="company in filteredMcpCompanies" :key="company.companyId" class="hover:bg-slate-50">
-                  <td class="px-4 py-4 whitespace-nowrap">
+                  <td class="px-4 py-4">
                     <div class="text-sm font-medium text-slate-900">{{ company.companyName }}</div>
-                    <div class="mt-1 text-xs text-slate-500">{{ company.accessMode === 'delegated' ? `Delegado para ${company.grantedCompanyIds.length} empresa(s)` : 'Somente a própria empresa' }}</div>
+                    <div class="mt-1 text-xs text-slate-500">
+                      {{ company.authorizedClientEmails.length }} email(s) autorizado(s)
+                    </div>
+                    <div v-if="company.authorizedClientEmails.length" class="mt-1 max-w-md truncate text-xs text-slate-400" :title="company.authorizedClientEmails.join(', ')">
+                      {{ company.authorizedClientEmails.join(', ') }}
+                    </div>
                   </td>
                   <td class="px-4 py-4 whitespace-nowrap">
                     <button
@@ -1395,31 +1400,22 @@
           
           <div class="space-y-4">
             <div class="grid gap-4 sm:grid-cols-2">
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium text-slate-700">Escopo da credencial</span>
-                <select v-model="mcpAccessMode" class="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm">
-                  <option value="company">Somente a própria empresa</option>
-                  <option value="delegated">Acesso delegado</option>
-                </select>
-              </label>
+              <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                <p class="text-sm font-medium text-indigo-950">Credencial isolada por empresa</p>
+                <p class="mt-1 text-xs text-indigo-800">A URL e a chave consultam somente {{ editingMcpCompany?.companyName }}.</p>
+              </div>
               <label class="block">
                 <span class="mb-1 block text-sm font-medium text-slate-700">Limite por minuto</span>
                 <input v-model.number="mcpMaxRequestsPerMinute" type="number" min="1" max="1000" class="min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm" />
               </label>
             </div>
-            <div v-if="mcpAccessMode === 'delegated'" class="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
-              <p class="text-sm font-medium text-indigo-950">Empresas autorizadas</p>
-              <p class="mt-1 text-xs text-indigo-800">O email do contato nunca concede acesso sozinho: ele precisa resolver para uma destas empresas.</p>
-              <div class="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2">
-                <label v-for="candidate in mcpGrantCandidates" :key="candidate.companyId" class="flex items-center gap-2 rounded bg-white px-3 py-2 text-sm text-slate-700">
-                  <input v-model="mcpGrantedCompanyIds" type="checkbox" :value="candidate.companyId" class="h-4 w-4 rounded border-slate-300 text-indigo-600" />
-                  {{ candidate.companyName }}
-                </label>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <p class="text-sm font-medium text-slate-800">Emails devolvidos pelo MCP</p>
+              <p class="mt-1 text-xs text-slate-600">Todas as respostas incluem estes clientes ativos para a conferência exata do contato no CloudWhats.</p>
+              <div v-if="editingMcpCompany?.authorizedClientEmails.length" class="mt-3 flex flex-wrap gap-2">
+                <span v-for="email in editingMcpCompany.authorizedClientEmails" :key="email" class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700">{{ email }}</span>
               </div>
-              <label class="mt-3 flex items-start gap-2 text-sm text-indigo-950">
-                <input v-model="mcpRequireContactTagMatch" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600" />
-                Exigir tag do contato com o nome exato da empresa
-              </label>
+              <p v-else class="mt-3 text-xs font-medium text-amber-700">Nenhum cliente ativo com email está vinculado a esta empresa.</p>
             </div>
             <label class="flex items-center p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
               <input type="checkbox" v-model="mcpPermissionsForm.logs" class="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
@@ -1571,9 +1567,6 @@ const mcpWriteScopeOptions: Array<{ value: McpWriteScope; label: string; descrip
   { value: 'integrations:source:write', label: 'Propor alteração de código', description: 'Permite ao agente criar rascunhos versionados, sem publicar na AWS.' },
   { value: 'integrations:source:review', label: 'Solicitar revisão de código', description: 'Permite ao agente encaminhar um rascunho para aprovação humana.' },
 ]
-const mcpAccessMode = ref<'company' | 'delegated'>('company')
-const mcpRequireContactTagMatch = ref(false)
-const mcpGrantedCompanyIds = ref<number[]>([])
 const mcpMaxRequestsPerMinute = ref(60)
 const mcpAuditModal = ref(false)
 const mcpAuditCompany = ref<CompanyMcpConfig | null>(null)
@@ -1599,19 +1592,19 @@ const filteredMcpCompanies = computed(() => {
   if (!search) return mcpCompanies.value
   return mcpCompanies.value.filter(c => 
     c.companyName.toLowerCase().includes(search) || 
-    (c.apiKeyPrefix && c.apiKeyPrefix.toLowerCase().includes(search))
+    (c.apiKeyPrefix && c.apiKeyPrefix.toLowerCase().includes(search)) ||
+    c.authorizedClientEmails.some(email => email.toLowerCase().includes(search))
   )
 })
-
-const mcpGrantCandidates = computed(() => mcpCompanies.value.filter(
-  company => company.companyId !== editingMcpCompany.value?.companyId
-))
 
 const fetchMcpCompanies = async () => {
   mcpLoading.value = true
   try {
     const res = await api.get<McpCompaniesResponse>('/auth/admin/mcp/companies')
-    mcpCompanies.value = res.companies
+    mcpCompanies.value = res.companies.map(company => ({
+      ...company,
+      authorizedClientEmails: company.authorizedClientEmails ?? []
+    }))
     mcpStats.value = res.stats
   } catch (error) {
     showToast('error', error instanceof Error ? error.message : 'Falha ao carregar configurações MCP')
@@ -1670,10 +1663,7 @@ const openMcpPermissionsModal = (company: CompanyMcpConfig) => {
     mappings: company.allowedDomains?.mappings ?? true,
     integrations: company.allowedDomains?.integrations ?? true
   }
-  mcpAccessMode.value = company.accessMode ?? 'company'
   mcpAllowedScopes.value = [...(company.allowedScopes ?? [])]
-  mcpRequireContactTagMatch.value = company.requireContactTagMatch ?? false
-  mcpGrantedCompanyIds.value = [...(company.grantedCompanyIds ?? [])]
   mcpMaxRequestsPerMinute.value = company.maxRequestsPerMinute ?? 60
   mcpPermissionsModal.value = true
 }
@@ -1684,9 +1674,6 @@ const saveMcpPermissions = async () => {
     await api.put(`/auth/admin/mcp/company/${editingMcpCompany.value.companyId}/permissions`, {
       allowedDomains: mcpPermissionsForm.value,
       allowedScopes: mcpAllowedScopes.value,
-      accessMode: mcpAccessMode.value,
-      requireContactTagMatch: mcpRequireContactTagMatch.value,
-      grantedCompanyIds: mcpAccessMode.value === 'delegated' ? mcpGrantedCompanyIds.value : [],
       maxRequestsPerMinute: mcpMaxRequestsPerMinute.value
     })
     showToast('success', 'Permissões MCP atualizadas')

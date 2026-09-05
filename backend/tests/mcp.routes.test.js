@@ -22,10 +22,9 @@ const query = async (sql, params = []) => {
     }
     return { rows: [] };
   }
-  if (sql.includes('JOIN company_mcp_access_grants')) {
-    if (String(params[1]).toLowerCase() === 'cliente@example.com') {
-      return { rows: [{ id: 7, name: 'Cliente Alfa', allowed_domains: { logs: false, processes: true, mappings: true, integrations: true } }] };
-    }
+  if (sql.includes('FROM users') && sql.includes("role = 'client'")) {
+    if (Number(params[0]) === 1) return { rows: [{ email: 'cliente@example.com' }, { email: 'financeiro@example.com' }] };
+    if (Number(params[0]) === 99) return { rows: [{ email: 'operacao@cloudwhats.example' }] };
     return { rows: [] };
   }
   if (sql.includes('COUNT(*)::int AS count FROM integrations')) return { rows: [{ count: 3 }] };
@@ -81,6 +80,9 @@ test('cliente MCP oficial inicializa, lista tools e executa chamada stateless', 
     assert.equal(data.companyName, 'Empresa Teste');
     assert.equal(data.totalIntegrations, 3);
     assert.equal(data.totalVisibleProcesses, 5);
+    assert.deepEqual(data.mcpAccess.authorizedClientEmails, ['cliente@example.com', 'financeiro@example.com']);
+    assert.equal(data.mcpAccess.companyId, 1);
+    assert.equal(data.mcpAccess.contactEmailMatched, null);
   });
 });
 
@@ -148,18 +150,7 @@ test('histórico de revisões informa cobertura mesmo quando o período está va
   });
 });
 
-test('acesso delegado falha fechado quando não há tag exata', async () => {
-  await withClient('mcp_live_delegated', async (client) => {
-    const result = await client.callTool({
-      name: 'get_company_summary',
-      arguments: { client_context: { email: 'cliente@example.com', labels: ['Outra Empresa'] } },
-    });
-    assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /tag do contato/i);
-  });
-});
-
-test('concessão explícita e tag exata resolvem a empresa, aplicando as permissões do alvo', async () => {
+test('configuração delegada antiga não troca o tenant identificado pela chave', async () => {
   await withClient('mcp_live_delegated', async (client) => {
     const result = await client.callTool({
       name: 'get_company_summary',
@@ -167,10 +158,75 @@ test('concessão explícita e tag exata resolvem a empresa, aplicando as permiss
     });
     assert.equal(result.isError, undefined);
     const data = JSON.parse(result.content[0].text);
-    assert.equal(data.companyName, 'Cliente Alfa');
-    assert.equal(data.totalIntegrations, 3);
-    assert.equal(data.totalVisibleProcesses, 5);
-    assert.equal(data.allowedDomains.logs, false);
+    assert.equal(data.companyName, 'CloudWhats');
+    assert.equal(data.mcpAccess.companyId, 99);
+    assert.deepEqual(data.mcpAccess.authorizedClientEmails, ['operacao@cloudwhats.example']);
+    assert.equal(data.mcpAccess.contactEmailMatched, false);
+  });
+});
+
+test('contexto opcional informa correspondência exata normalizada sem ser necessário para consultar', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const result = await client.callTool({
+      name: 'get_company_summary',
+      arguments: { client_context: { email: '  CLIENTE@EXAMPLE.COM  ' } },
+    });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.companyName, 'Empresa Teste');
+    assert.equal(data.mcpAccess.providedContactEmail, 'cliente@example.com');
+    assert.equal(data.mcpAccess.contactEmailMatched, true);
+    assert.equal(data.mcpAccess.emailMatchPolicy, 'exact_after_trim_and_lowercase');
+  });
+});
+
+test('outras consultas também recebem o mesmo contexto de emails autorizados', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const result = await client.callTool({ name: 'list_processes_and_docs', arguments: {} });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse(result.content[0].text);
+    assert.deepEqual(data.mcpAccess.authorizedClientEmails, ['cliente@example.com', 'financeiro@example.com']);
+    assert.deepEqual(data.processes, []);
+  });
+});
+
+test('uma consulta detalhada com email explícito divergente falha antes de ler dados', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const result = await client.callTool({
+      name: 'list_processes_and_docs',
+      arguments: { client_context: { email: 'nao-autorizado@example.com' } },
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /não possui um email explícito autorizado/i);
+  });
+});
+
+test('uma consulta detalhada com email explícito autorizado continua normalmente', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const result = await client.callTool({
+      name: 'list_processes_and_docs',
+      arguments: { client_context: { email: 'FINANCEIRO@EXAMPLE.COM' } },
+    });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.mcpAccess.contactContextProvided, true);
+    assert.equal(data.mcpAccess.contactEmailMatched, true);
+  });
+});
+
+test('uma escrita com email explícito divergente falha antes de qualquer alteração', async () => {
+  await withClient('mcp_live_company', async (client) => {
+    const result = await client.callTool({
+      name: 'create_process_request',
+      arguments: {
+        idempotencyKey: 'mismatch-write-001',
+        title: 'Não deve criar',
+        description: 'Contato sem autorização',
+        client_context: { email: 'nao-autorizado@example.com' },
+      },
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /não possui um email explícito autorizado/i);
   });
 });
 

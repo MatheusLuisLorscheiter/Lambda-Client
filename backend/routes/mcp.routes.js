@@ -17,7 +17,6 @@ const router = express.Router();
 const legacySseSessions = new Map();
 const localRateWindows = new Map();
 const DOMAIN_NAMES = ['logs', 'processes', 'mappings', 'integrations'];
-const DEFAULT_DOMAINS = Object.freeze({ logs: true, processes: true, mappings: true, integrations: true });
 
 function rpcError(res, status, code, message, id = null) {
   return res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id });
@@ -29,26 +28,6 @@ function parseDomains(value) {
     result[domain] = parsed?.[domain] !== false;
     return result;
   }, {});
-}
-
-function effectiveDomains(principalDomains, targetDomains = DEFAULT_DOMAINS) {
-  return DOMAIN_NAMES.reduce((result, domain) => {
-    result[domain] = principalDomains[domain] !== false && targetDomains[domain] !== false;
-    return result;
-  }, {});
-}
-
-function effectiveScopes(principalScopes, targetScopes = []) {
-  const target = new Set(Array.isArray(targetScopes) ? targetScopes : []);
-  return new Set([...principalScopes].filter(scope => target.has(scope)));
-}
-
-function normalizeIdentity(value) {
-  return String(value || '')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLocaleLowerCase('pt-BR');
 }
 
 function readBearerToken(req) {
@@ -130,8 +109,8 @@ async function mcpAuthMiddleware(req, res, next) {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   try {
     const result = await query(`
-      SELECT cfg.company_id, cfg.is_enabled, cfg.allowed_domains, cfg.allowed_scopes, cfg.access_mode,
-             cfg.require_contact_tag_match, cfg.max_requests_per_minute, c.name AS company_name
+      SELECT cfg.company_id, cfg.is_enabled, cfg.allowed_domains, cfg.allowed_scopes,
+             cfg.max_requests_per_minute, c.name AS company_name
         FROM company_mcp_configs cfg
         JOIN companies c ON c.id = cfg.company_id
        WHERE cfg.api_key_hash = $1
@@ -154,8 +133,6 @@ async function mcpAuthMiddleware(req, res, next) {
       id: Number(config.company_id),
       name: config.company_name,
       tokenHash,
-      accessMode: config.access_mode === 'delegated' ? 'delegated' : 'company',
-      requireContactTagMatch: config.require_contact_tag_match === true,
       allowedDomains: parseDomains(config.allowed_domains),
       allowedScopes: new Set(Array.isArray(config.allowed_scopes) ? config.allowed_scopes : []),
     };
@@ -170,7 +147,7 @@ async function mcpAuthMiddleware(req, res, next) {
 function contextSchema() {
   return {
     type: 'object',
-    description: 'Contexto do contato preenchido pelo sistema chamador. O servidor nunca confia nele sem validar as concessões de acesso.',
+    description: 'Contexto opcional do contato. O email é usado somente para informar se existe correspondência exata; nunca escolhe a empresa nem concede acesso.',
     properties: {
       source: { type: 'string', maxLength: 80 },
       contact_id: { type: 'string', maxLength: 160 },
@@ -187,7 +164,7 @@ function withContext(properties, required = []) {
     properties: {
       ...properties,
       client_context: contextSchema(),
-      client_email: { type: 'string', format: 'email', maxLength: 320, description: 'Compatibilidade legada. Prefira client_context; o acesso delegado continua limitado por concessões explícitas.' },
+      client_email: { type: 'string', format: 'email', maxLength: 320, description: 'Compatibilidade opcional. Usado somente para calcular a correspondência exata exibida em mcpAccess.' },
     },
     required,
     additionalProperties: false,
@@ -198,19 +175,19 @@ const MCP_TOOL_DEFINITIONS = [
   {
     name: 'get_company_summary',
     domain: null,
-    description: 'Retorna um resumo da empresa autorizada para o contato atual.',
+    description: 'Retorna um resumo da empresa proprietária da chave e os emails de clientes autorizados.',
     inputSchema: withContext({}),
   },
   {
     name: 'list_integration_logs',
     domain: 'integrations',
-    description: 'Lista integrações e eventos recentes visíveis da empresa autorizada.',
+    description: 'Lista integrações e eventos recentes visíveis da empresa proprietária da chave.',
     inputSchema: withContext({ limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }),
   },
   {
     name: 'get_integration_observability',
     domain: 'integrations',
-    description: 'Retorna saúde, métricas AWS e logs sanitizados de uma integração da empresa autorizada. Não executa nem altera a Lambda.',
+    description: 'Retorna saúde, métricas AWS e logs sanitizados de uma integração da empresa proprietária da chave. Não executa nem altera a Lambda.',
     inputSchema: withContext({
       integrationId: { type: 'integer', minimum: 1 },
       hours: { type: 'integer', minimum: 1, maximum: 168, default: 24 },
@@ -260,7 +237,7 @@ const MCP_TOOL_DEFINITIONS = [
   {
     name: 'list_mappings_and_entries',
     domain: 'mappings',
-    description: 'Lista conjuntos de mapeamento da empresa autorizada e metadados dos anexos.',
+    description: 'Lista conjuntos de mapeamento da empresa proprietária da chave e metadados dos anexos.',
     inputSchema: withContext({
       status: { type: 'string', enum: ['draft', 'published', 'archived'] },
       limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
@@ -269,7 +246,7 @@ const MCP_TOOL_DEFINITIONS = [
   {
     name: 'get_mapping_details',
     domain: 'mappings',
-    description: 'Retorna o detalhamento de um conjunto de mapeamento autorizado.',
+    description: 'Retorna o detalhamento de um conjunto de mapeamento da empresa proprietária da chave.',
     inputSchema: withContext({ mappingSetId: { type: 'integer', minimum: 1 } }, ['mappingSetId']),
   },
 ].map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
@@ -447,49 +424,45 @@ function readClientContext(args) {
   return { email, labels };
 }
 
-async function resolveTargetCompany(principal, args) {
-  if (principal.accessMode !== 'delegated') {
-    return { id: principal.id, name: principal.name, allowedDomains: principal.allowedDomains, allowedScopes: principal.allowedScopes };
-  }
-
-  const context = readClientContext(args);
-  if (!context.email) throw new Error('O contato não possui email válido para resolver o acesso delegado.');
-
-  const result = await query(`
-    SELECT DISTINCT c.id, c.name, cfg.allowed_domains, cfg.allowed_scopes
-      FROM users u
-      JOIN companies c ON c.id = u.company_id
-      JOIN company_mcp_access_grants grant_cfg
-        ON grant_cfg.principal_company_id = $1
-       AND grant_cfg.target_company_id = c.id
-       AND grant_cfg.is_active = TRUE
-      JOIN company_mcp_configs cfg ON cfg.company_id = c.id AND cfg.is_enabled = TRUE
-     WHERE LOWER(BTRIM(u.email)) = LOWER(BTRIM($2))
-       AND u.role = 'client'
-       AND u.is_active = TRUE
-     ORDER BY c.name ASC
-  `, [principal.id, context.email]);
-
-  if (result.rows.length === 0) throw new Error('Nenhuma empresa autorizada foi encontrada para o contato informado.');
-  const normalizedLabels = new Set(context.labels.map(normalizeIdentity));
-  const labelMatches = result.rows.filter((row) => normalizedLabels.has(normalizeIdentity(row.name)));
-  let target;
-  if (principal.requireContactTagMatch) {
-    if (labelMatches.length !== 1) throw new Error('A tag do contato não corresponde de forma única a uma empresa autorizada.');
-    target = labelMatches[0];
-  } else if (result.rows.length === 1) {
-    target = result.rows[0];
-  } else if (labelMatches.length === 1) {
-    target = labelMatches[0];
-  } else {
-    throw new Error('O email está associado a mais de uma empresa. Adicione ao contato uma tag com o nome exato da empresa.');
-  }
-
+async function resolveTargetCompany(principal, _args) {
   return {
-    id: Number(target.id),
-    name: target.name,
-    allowedDomains: effectiveDomains(principal.allowedDomains, parseDomains(target.allowed_domains)),
-    allowedScopes: effectiveScopes(principal.allowedScopes, target.allowed_scopes),
+    id: principal.id,
+    name: principal.name,
+    allowedDomains: principal.allowedDomains,
+    allowedScopes: principal.allowedScopes,
+  };
+}
+
+async function getAuthorizedClientEmails(companyId) {
+  const result = await query(`
+    SELECT LOWER(BTRIM(email)) AS email
+      FROM users
+     WHERE company_id = $1
+       AND role = 'client'
+       AND is_active = TRUE
+       AND NULLIF(BTRIM(email), '') IS NOT NULL
+     GROUP BY LOWER(BTRIM(email))
+     ORDER BY LOWER(BTRIM(email)) ASC
+  `, [companyId]);
+  return result.rows.map(row => String(row.email)).filter(Boolean);
+}
+
+async function buildMcpAccessContext(target, args) {
+  const authorizedClientEmails = await getAuthorizedClientEmails(target.id);
+  const contact = readClientContext(args);
+  const contactContextProvided = Boolean(args && (
+    Object.prototype.hasOwnProperty.call(args, 'client_context')
+    || Object.prototype.hasOwnProperty.call(args, 'client_email')
+  ));
+  return {
+    companyId: target.id,
+    companyName: target.name,
+    authorizedClientEmails,
+    emailMatchPolicy: 'exact_after_trim_and_lowercase',
+    contactContextProvided,
+    providedContactEmail: contact.email || null,
+    contactEmailMatched: contact.email ? authorizedClientEmails.includes(contact.email) : null,
+    guidance: 'Compartilhe dados ou execute mudanças somente quando o contato possuir um email explícito que corresponda exatamente a authorizedClientEmails.',
   };
 }
 
@@ -850,12 +823,10 @@ async function auditMcpCall(principal, toolName, args, status, targetCompanyId, 
 
 function createMcpServer(principal, requestMeta) {
   const server = new Server(
-    { name: 'lambda-pulse', version: '2.0.0' },
+    { name: 'lambda-pulse', version: '2.1.0' },
     {
       capabilities: { tools: {} },
-      instructions: principal.accessMode === 'delegated'
-        ? 'Use somente o contexto de contato fornecido pelo sistema. O servidor aplica concessões explícitas e falha de forma fechada.'
-        : 'Todas as consultas são isoladas na empresa proprietária desta credencial.',
+      instructions: 'A chave identifica uma única empresa. Comece por get_company_summary; toda resposta bem-sucedida inclui mcpAccess.authorizedClientEmails. Antes de compartilhar dados ou executar mudanças, confirme que o contato possui um email explícito com correspondência exata após trim e lowercase. Quando o chamador fornece contexto de conversa sem correspondência, o servidor bloqueia todas as outras tools.',
     },
   );
 
@@ -868,9 +839,16 @@ function createMcpServer(principal, requestMeta) {
     try {
       const target = await resolveTargetCompany(principal, args);
       targetCompanyId = target.id;
+      const mcpAccess = await buildMcpAccessContext(target, args);
+      if (toolName !== 'get_company_summary' && mcpAccess.contactContextProvided && mcpAccess.contactEmailMatched !== true) {
+        throw new Error('O contato não possui um email explícito autorizado para consultar ou alterar dados desta empresa.');
+      }
       const data = await executeMcpTool(toolName, args, principal, target);
       await auditMcpCall(principal, toolName, args, 'success', targetCompanyId, Date.now() - startedAt, requestMeta);
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      const response = data && typeof data === 'object' && !Array.isArray(data)
+        ? { ...data, mcpAccess }
+        : { result: data, mcpAccess };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     } catch (error) {
       await auditMcpCall(principal, toolName, args, 'error', targetCompanyId, Date.now() - startedAt, requestMeta);
       return { isError: true, content: [{ type: 'text', text: error.message || 'Não foi possível executar a ferramenta.' }] };
@@ -939,6 +917,6 @@ router.post('/message', mcpAuthMiddleware, async (req, res) => {
   }
 });
 
-router._mcpInternals = { executeMcpTool, resolveTargetCompany, publicToolsFor, normalizeIdentity, isMeteredMcpRequest, legacySseSessions };
+router._mcpInternals = { executeMcpTool, resolveTargetCompany, getAuthorizedClientEmails, buildMcpAccessContext, publicToolsFor, isMeteredMcpRequest, legacySseSessions };
 
 module.exports = router;
