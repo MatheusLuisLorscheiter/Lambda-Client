@@ -314,6 +314,38 @@ const run = async () => {
         )`,
         'CREATE INDEX IF NOT EXISTS idx_company_mcp_contact_emails_active ON company_mcp_contact_emails(company_id, email) WHERE is_active = TRUE'
     ];
+    const dataMigrations = [
+        {
+            key: '20260905_pincbar_controladoria_mcp_contact',
+            statement: `
+              DO $$
+              DECLARE
+                target_company_id INTEGER;
+              BEGIN
+                SELECT id
+                  INTO target_company_id
+                  FROM companies
+                 WHERE LOWER(BTRIM(name)) = 'pincbar'
+                 ORDER BY id
+                 LIMIT 1;
+
+                IF target_company_id IS NULL THEN
+                  RAISE EXCEPTION 'Empresa PincBar não encontrada para a migração de contato MCP';
+                END IF;
+
+                INSERT INTO company_mcp_contact_emails
+                  (company_id, email, label, is_active, created_by, revoked_by, updated_at)
+                VALUES
+                  (target_company_id, 'controladoria@pincbar.com.br', 'Luana — Controladoria', TRUE, NULL, NULL, NOW())
+                ON CONFLICT (company_id, email) DO UPDATE
+                  SET label = EXCLUDED.label,
+                      is_active = TRUE,
+                      revoked_by = NULL,
+                      updated_at = NOW();
+              END $$;
+            `
+        }
+    ];
 
     const client = await pool.connect();
 
@@ -327,6 +359,20 @@ const run = async () => {
 
         for (const statement of migrations) {
             await client.query(statement);
+        }
+
+        for (const migration of dataMigrations) {
+            const alreadyApplied = await client.query(
+                'SELECT 1 FROM app_data_migrations WHERE migration_key = $1',
+                [migration.key]
+            );
+            if (alreadyApplied.rowCount > 0) continue;
+
+            await client.query(migration.statement);
+            await client.query(
+                'INSERT INTO app_data_migrations (migration_key) VALUES ($1)',
+                [migration.key]
+            );
         }
 
         await client.query('COMMIT');

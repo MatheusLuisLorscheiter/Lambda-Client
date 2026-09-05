@@ -478,6 +478,11 @@ CREATE TABLE IF NOT EXISTS company_mcp_contact_emails (
 CREATE INDEX IF NOT EXISTS idx_company_mcp_contact_emails_active
   ON company_mcp_contact_emails(company_id, email) WHERE is_active = TRUE;
 
+CREATE TABLE IF NOT EXISTS app_data_migrations (
+  migration_key TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS company_mcp_access_grants (
   id SERIAL PRIMARY KEY,
   principal_company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
